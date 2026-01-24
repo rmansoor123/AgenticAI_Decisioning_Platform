@@ -92,6 +92,7 @@ import rulesRouter from '../services/decision-engine/rules/index.js';
 import executionRouter from '../services/decision-engine/execution/index.js';
 import abTestingRouter from '../services/experimentation/ab-testing/index.js';
 import simulationRouter from '../services/experimentation/simulation/index.js';
+import agentsRouter from '../services/agents/index.js';
 
 const app = express();
 const server = createServer(app);
@@ -201,6 +202,9 @@ app.use('/api/decisions', executionRouter);
 // Experimentation
 app.use('/api/experiments', abTestingRouter);
 app.use('/api/simulation', simulationRouter);
+
+// Agentic AI
+app.use('/api/agents', agentsRouter);
 
 // ============================================================================
 // METRICS & DASHBOARD ENDPOINTS

@@ -8,6 +8,7 @@ import DecisionEngine from './pages/DecisionEngine'
 import Experimentation from './pages/Experimentation'
 import TransactionFlow from './pages/TransactionFlow'
 import Services from './pages/Services'
+import AgenticAI from './pages/AgenticAI'
 
 const API_BASE = 'http://localhost:3001/api'
 const WS_URL = 'ws://localhost:3001/ws'
@@ -142,6 +143,7 @@ function App() {
           <Route path="/experiments/simulation" element={<Experimentation />} />
           <Route path="/flow" element={<TransactionFlow />} />
           <Route path="/services" element={<Services />} />
+          <Route path="/agents" element={<AgenticAI />} />
         </Routes>
       </Layout>
     </BrowserRouter>

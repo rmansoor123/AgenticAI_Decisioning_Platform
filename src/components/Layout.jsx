@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   Shield, Activity, Database, Brain, Cog, FlaskConical,
-  Home, RefreshCw, Menu, X, ChevronDown, Server
+  Home, RefreshCw, Menu, X, ChevronDown, Server, Bot
 } from 'lucide-react'
+import Chatbot from './Chatbot'
 
 const API_BASE = 'http://localhost:3001/api'
 
@@ -65,6 +66,7 @@ export default function Layout({ children, wsConnected }) {
       ]
     },
     { name: 'Transaction Flow', href: '/flow', icon: Activity, color: 'text-indigo-400' },
+    { name: 'Agentic AI', href: '/agents', icon: Bot, color: 'text-violet-400' },
     { name: 'Services', href: '/services', icon: Server, color: 'text-gray-400' }
   ]
 
@@ -181,6 +183,9 @@ export default function Layout({ children, wsConnected }) {
           {children}
         </main>
       </div>
+
+      {/* Chatbot */}
+      <Chatbot />
     </div>
   )
 }
