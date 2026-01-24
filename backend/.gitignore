@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Database files
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# TensorFlow model files (generated on first run)
+services/ml-platform/models/pretrained/*.json
+services/ml-platform/models/pretrained/*.bin
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+dist/
+build/

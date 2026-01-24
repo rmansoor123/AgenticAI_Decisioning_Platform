@@ -7,9 +7,11 @@
  * - Coordinates multi-agent collaboration
  * - Maintains global state and context
  * - Handles human-in-the-loop escalations
+ * - Routes inter-agent help requests
  */
 
 import { v4 as uuidv4 } from 'uuid';
+import { getAgentMessenger, MESSAGE_TYPES } from './agent-messenger.js';
 
 class AgentOrchestrator {
   constructor() {
@@ -19,13 +21,139 @@ class AgentOrchestrator {
     this.activeWorkflows = new Map();
     this.eventLog = [];
     this.humanEscalations = [];
+    this.messenger = getAgentMessenger();
+
+    // Start help request routing
+    this._startHelpRequestRouting();
+  }
+
+  /**
+   * Start processing help requests from agents
+   */
+  _startHelpRequestRouting() {
+    // Check for pending help requests periodically
+    setInterval(() => {
+      this._processHelpRequests();
+    }, 100);
+  }
+
+  /**
+   * Process pending help requests
+   */
+  async _processHelpRequests() {
+    const pendingRequests = this.messenger.getPendingHelpRequests();
+
+    for (const request of pendingRequests) {
+      // Mark as processing to prevent duplicate handling
+      this.messenger.markHelpRequestProcessing(request.id);
+
+      // Find an agent with the requested capability
+      const capability = request.content.capability;
+      const targetAgent = this._findAgentByCapability(capability);
+
+      if (targetAgent) {
+        // Route the request to the agent
+        this.log('HELP_REQUEST_ROUTED', {
+          requestId: request.id,
+          from: request.from,
+          to: targetAgent.agentId,
+          capability
+        });
+
+        // Deliver the message to the target agent
+        try {
+          await this.messenger.send({
+            from: 'ORCHESTRATOR',
+            to: targetAgent.agentId,
+            type: MESSAGE_TYPES.HELP_REQUEST,
+            content: request.content,
+            correlationId: request.correlationId
+          });
+        } catch (error) {
+          // Respond with error
+          await this.messenger.respondToHelp({
+            correlationId: request.correlationId,
+            from: 'ORCHESTRATOR',
+            result: null,
+            success: false,
+            error: `Failed to route request: ${error.message}`
+          });
+        }
+      } else {
+        // No agent found with capability
+        this.log('HELP_REQUEST_UNROUTABLE', {
+          requestId: request.id,
+          capability,
+          availableCapabilities: this._getAllCapabilities()
+        });
+
+        await this.messenger.respondToHelp({
+          correlationId: request.correlationId,
+          from: 'ORCHESTRATOR',
+          result: null,
+          success: false,
+          error: `No agent found with capability: ${capability}`
+        });
+      }
+    }
+  }
+
+  /**
+   * Find an agent by capability
+   */
+  _findAgentByCapability(capability) {
+    for (const agent of this.agents.values()) {
+      if (agent.capabilities && agent.capabilities.includes(capability)) {
+        // Check if agent is available (not busy)
+        if (agent.status === 'IDLE' || agent.status === undefined) {
+          return agent;
+        }
+      }
+    }
+
+    // If no idle agent, return any agent with the capability
+    for (const agent of this.agents.values()) {
+      if (agent.capabilities && agent.capabilities.includes(capability)) {
+        return agent;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Get all available capabilities
+   */
+  _getAllCapabilities() {
+    const capabilities = new Set();
+    for (const agent of this.agents.values()) {
+      if (agent.capabilities) {
+        agent.capabilities.forEach(cap => capabilities.add(cap));
+      }
+    }
+    return Array.from(capabilities);
   }
 
   // Register an agent with the orchestrator
   registerAgent(agent) {
     this.agents.set(agent.agentId, agent);
-    this.log('AGENT_REGISTERED', { agentId: agent.agentId, name: agent.name, role: agent.role });
+    this.log('AGENT_REGISTERED', {
+      agentId: agent.agentId,
+      name: agent.name,
+      role: agent.role,
+      capabilities: agent.capabilities
+    });
     return agent.agentId;
+  }
+
+  // Unregister an agent
+  unregisterAgent(agentId) {
+    if (this.agents.has(agentId)) {
+      this.agents.delete(agentId);
+      this.log('AGENT_UNREGISTERED', { agentId });
+      return true;
+    }
+    return false;
   }
 
   // Get agent by ID or role
@@ -40,6 +168,11 @@ class AgentOrchestrator {
       }
     }
     return null;
+  }
+
+  // Get all agents
+  getAllAgents() {
+    return Array.from(this.agents.values());
   }
 
   // Define a workflow (sequence of agent tasks)
@@ -224,11 +357,21 @@ class AgentOrchestrator {
     execution.humanDecision = humanDecision;
     execution.status = 'RUNNING';
 
-    // Resume workflow from where it left off
-    // ... implementation continues based on workflow design
+    // Mark escalation as resolved
+    const escalation = this.humanEscalations.find(e => e.executionId === executionId && !e.resolved);
+    if (escalation) {
+      escalation.resolved = true;
+      escalation.resolvedAt = new Date().toISOString();
+      escalation.decision = humanDecision;
+    }
 
     this.log('ESCALATION_RESOLVED', { executionId, decision: humanDecision });
     return execution;
+  }
+
+  // Get pending escalations
+  getPendingEscalations() {
+    return this.humanEscalations.filter(e => !e.resolved);
   }
 
   // Logging
@@ -238,6 +381,16 @@ class AgentOrchestrator {
       event,
       data
     });
+
+    // Keep log size manageable
+    if (this.eventLog.length > 1000) {
+      this.eventLog = this.eventLog.slice(-500);
+    }
+  }
+
+  // Get recent logs
+  getRecentLogs(limit = 50) {
+    return this.eventLog.slice(-limit);
   }
 
   // Get orchestrator state
@@ -247,7 +400,28 @@ class AgentOrchestrator {
       workflows: Array.from(this.workflows.values()),
       activeWorkflows: Array.from(this.activeWorkflows.values()),
       pendingEscalations: this.humanEscalations.filter(e => !e.resolved),
-      eventLogSize: this.eventLog.length
+      eventLogSize: this.eventLog.length,
+      availableCapabilities: this._getAllCapabilities(),
+      messengerStats: this.messenger.getStats()
+    };
+  }
+
+  // Get statistics
+  getStats() {
+    const completedWorkflows = Array.from(this.activeWorkflows.values())
+      .filter(w => w.status === 'COMPLETED');
+
+    const failedWorkflows = Array.from(this.activeWorkflows.values())
+      .filter(w => w.status === 'FAILED');
+
+    return {
+      registeredAgents: this.agents.size,
+      definedWorkflows: this.workflows.size,
+      totalExecutions: this.activeWorkflows.size,
+      completedExecutions: completedWorkflows.length,
+      failedExecutions: failedWorkflows.length,
+      pendingEscalations: this.humanEscalations.filter(e => !e.resolved).length,
+      availableCapabilities: this._getAllCapabilities()
     };
   }
 }

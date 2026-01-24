@@ -2,12 +2,25 @@ import express from 'express';
 import cors from 'cors';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
-import { initializeDatabase, db_ops } from '../shared/common/database.js';
+import { initializeDatabase, isSeeded, db_ops } from '../shared/common/database.js';
+import { initializeMLModels } from '../services/ml-platform/models/model-loader.js';
 import generators from '../shared/synthetic-data/generators.js';
 const { generateTransaction, generateMetricsSnapshot, generateSeller, generateListing, generatePayout, generateATOEvent, generateShipment, generateMLModel, generateRule, generateExperiment, generateDataset } = generators;
 
-// Seed database with initial data
+// Seed database with initial data (only if not already seeded)
 function seedDatabase() {
+  // Check if database already has data
+  if (isSeeded()) {
+    console.log('Database already contains data, skipping seed...');
+    console.log(`  Sellers: ${db_ops.count('sellers')}`);
+    console.log(`  Transactions: ${db_ops.count('transactions')}`);
+    console.log(`  Listings: ${db_ops.count('listings')}`);
+    console.log(`  ML Models: ${db_ops.count('ml_models')}`);
+    console.log(`  Rules: ${db_ops.count('rules')}`);
+    console.log(`  Experiments: ${db_ops.count('experiments')}`);
+    return;
+  }
+
   console.log('Seeding database with synthetic data...');
 
   // Seed sellers
@@ -119,6 +132,12 @@ app.use((req, res, next) => {
 // Initialize database and seed with data
 initializeDatabase();
 seedDatabase();
+
+// Initialize ML models (async, but don't block startup)
+initializeMLModels().catch(err => {
+  console.error('Warning: ML model initialization failed:', err.message);
+  console.log('ML inference will initialize models on first request');
+});
 
 // ============================================================================
 // API ROUTES
@@ -297,63 +316,76 @@ app.get('/api/architecture', (req, res) => {
 });
 
 // ============================================================================
-// WEBSOCKET FOR REAL-TIME UPDATES
+// WEBSOCKET FOR REAL-TIME UPDATES (Enhanced with Event System)
 // ============================================================================
 
-const wsClients = new Set();
+import { getWebSocketManager } from './websocket/ws-manager.js';
+import { getEventBus, EVENT_TYPES } from './websocket/event-bus.js';
+import { getTransactionPipeline } from './websocket/transaction-pipeline.js';
+import { handleMessage } from './websocket/message-handlers.js';
 
-wss.on('connection', (ws) => {
-  console.log('WebSocket client connected');
-  wsClients.add(ws);
+const wsManager = getWebSocketManager();
+const eventBus = getEventBus();
+const transactionPipeline = getTransactionPipeline();
+
+wss.on('connection', (ws, req) => {
+  // Register client with WebSocket manager
+  const client = wsManager.addClient(ws, req);
+
+  // Handle incoming messages
+  ws.on('message', async (data) => {
+    try {
+      await handleMessage(ws, data.toString(), client.id);
+    } catch (error) {
+      console.error('Message handling error:', error);
+      ws.send(JSON.stringify({
+        type: 'error',
+        error: error.message,
+        timestamp: new Date().toISOString()
+      }));
+    }
+  });
 
   ws.on('close', () => {
-    wsClients.delete(ws);
-    console.log('WebSocket client disconnected');
+    wsManager.removeClient(client.id);
   });
 
   ws.on('error', (error) => {
     console.error('WebSocket error:', error);
-    wsClients.delete(ws);
+    wsManager.removeClient(client.id);
   });
-
-  // Send initial data
-  ws.send(JSON.stringify({
-    type: 'connected',
-    message: 'Connected to Fraud Detection Platform',
-    timestamp: new Date().toISOString()
-  }));
 });
 
-// Broadcast to all connected clients
+// Start the transaction pipeline for real-time events
+transactionPipeline.start();
+
+// Broadcast function for backward compatibility
 function broadcast(data) {
-  const message = JSON.stringify(data);
-  wsClients.forEach(client => {
-    if (client.readyState === 1) { // WebSocket.OPEN
-      client.send(message);
-    }
-  });
+  wsManager.broadcast(data);
 }
 
-// Generate and broadcast real-time transactions
+// Legacy endpoints - keep for backward compatibility
+// These are now handled by the transaction pipeline, but we emit legacy events too
 setInterval(() => {
-  if (wsClients.size > 0) {
+  if (wsManager.getConnectedClients().length > 0) {
+    // The transaction pipeline handles this now
+    // But emit a legacy 'transaction' event for older clients
     const transaction = generateTransaction();
-
-    // Simulate decision
     const decisions = ['APPROVED', 'APPROVED', 'APPROVED', 'APPROVED', 'BLOCKED', 'REVIEW'];
     transaction.decision = decisions[Math.floor(Math.random() * decisions.length)];
 
+    // This goes to all clients regardless of subscription (legacy behavior)
     broadcast({
       type: 'transaction',
       data: transaction,
       timestamp: new Date().toISOString()
     });
   }
-}, 1500);
+}, 3000); // Reduced frequency since pipeline also sends transactions
 
-// Broadcast metrics updates
+// Legacy metrics broadcast
 setInterval(() => {
-  if (wsClients.size > 0) {
+  if (wsManager.getConnectedClients().length > 0) {
     const metrics = generateMetricsSnapshot();
     broadcast({
       type: 'metrics',

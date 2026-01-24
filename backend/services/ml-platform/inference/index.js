@@ -1,85 +1,135 @@
+/**
+ * ML Inference Service
+ * Real-time prediction using TensorFlow.js neural networks
+ */
+
 import express from 'express';
 import { db_ops } from '../../../shared/common/database.js';
 import { v4 as uuidv4 } from 'uuid';
+import { getModelLoader } from '../models/model-loader.js';
+import { extractFeatures, calculateFeatureContributions, getFeatureImportance } from '../models/feature-extractor.js';
 
 const router = express.Router();
 
 // Prediction cache
 const predictionCache = new Map();
 
-// Real-time prediction
-router.post('/predict', (req, res) => {
+// Get the model loader
+const modelLoader = getModelLoader();
+
+/**
+ * Real-time prediction endpoint
+ */
+router.post('/predict', async (req, res) => {
   try {
     const { modelId, features, context } = req.body;
     const startTime = Date.now();
 
-    // Get model info
-    let model = null;
+    // Get model info from database (for metadata)
+    let modelRecord = null;
     if (modelId) {
-      const modelRecord = db_ops.getById('ml_models', 'model_id', modelId);
-      model = modelRecord?.data;
+      modelRecord = db_ops.getById('ml_models', 'model_id', modelId);
     } else {
       // Use default production model
       const models = db_ops.getAll('ml_models', 100, 0).map(m => m.data);
-      model = models.find(m => m.status === 'PRODUCTION') || models[0];
+      modelRecord = { data: models.find(m => m.status === 'PRODUCTION') || models[0] };
     }
 
-    if (!model) {
-      return res.status(404).json({ success: false, error: 'Model not found' });
-    }
+    const modelMeta = modelRecord?.data || {
+      modelId: 'fraud-detector-v3',
+      name: 'Fraud Detection Model',
+      type: 'FRAUD_DETECTION',
+      version: '3.0.0',
+      status: 'PRODUCTION'
+    };
 
-    // Generate prediction (simulated)
-    const prediction = generatePrediction(model, features, context);
-    const latencyMs = Date.now() - startTime;
+    // Load the TensorFlow model
+    const model = await modelLoader.ensureLoaded(modelMeta.modelId || 'fraud-detector-v3');
+
+    // Extract features from input
+    const extractedFeatures = extractFeatures(features || {});
+
+    // Make prediction with real ML model
+    const mlResult = await model.predict(extractedFeatures.vector);
+
+    // Generate decision based on score
+    const prediction = generateDecision(mlResult.score, modelMeta.type || 'FRAUD_DETECTION');
+
+    const totalLatencyMs = Date.now() - startTime;
 
     // Cache prediction
     const predictionId = `PRED-${uuidv4().substring(0, 10).toUpperCase()}`;
-    predictionCache.set(predictionId, {
+    const predictionData = {
       predictionId,
-      modelId: model.modelId,
-      modelVersion: model.version,
-      features,
+      modelId: modelMeta.modelId,
+      modelVersion: modelMeta.version || mlResult.modelVersion,
+      features: extractedFeatures.raw,
+      normalizedFeatures: extractedFeatures.normalized,
       prediction,
-      latencyMs,
+      mlLatencyMs: mlResult.latencyMs,
+      totalLatencyMs,
       timestamp: new Date().toISOString()
-    });
+    };
+
+    predictionCache.set(predictionId, predictionData);
 
     res.json({
       success: true,
       data: {
         predictionId,
-        modelId: model.modelId,
-        modelVersion: model.version,
+        modelId: modelMeta.modelId,
+        modelVersion: modelMeta.version || mlResult.modelVersion,
         prediction,
-        latencyMs
+        featureCount: extractedFeatures.featureCount,
+        latencyMs: totalLatencyMs,
+        mlLatencyMs: mlResult.latencyMs
       }
     });
   } catch (error) {
+    console.error('Prediction error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Batch prediction
-router.post('/batch-predict', (req, res) => {
+/**
+ * Batch prediction endpoint
+ */
+router.post('/batch-predict', async (req, res) => {
   try {
     const { modelId, records } = req.body;
     const startTime = Date.now();
 
-    // Get model
-    const models = db_ops.getAll('ml_models', 100, 0).map(m => m.data);
-    const model = modelId
-      ? models.find(m => m.modelId === modelId)
-      : models.find(m => m.status === 'PRODUCTION');
+    if (!records || !Array.isArray(records) || records.length === 0) {
+      return res.status(400).json({ success: false, error: 'Records array is required' });
+    }
 
-    if (!model) {
+    // Get model metadata
+    const models = db_ops.getAll('ml_models', 100, 0).map(m => m.data);
+    const modelMeta = modelId
+      ? models.find(m => m.modelId === modelId)
+      : models.find(m => m.status === 'PRODUCTION') || models[0];
+
+    if (!modelMeta) {
       return res.status(404).json({ success: false, error: 'Model not found' });
     }
 
-    // Generate predictions for all records
-    const predictions = records.map((record, index) => ({
+    // Load the TensorFlow model
+    const model = await modelLoader.ensureLoaded(modelMeta.modelId || 'fraud-detector-v3');
+
+    // Extract features for all records
+    const featureVectors = records.map(record => {
+      const extracted = extractFeatures(record.features || record);
+      return extracted.vector;
+    });
+
+    // Make batch predictions
+    const mlResult = await model.predictBatch(featureVectors);
+
+    // Generate predictions with decisions
+    const predictions = mlResult.scores.map((score, index) => ({
       index,
-      entityId: record.entityId,
-      prediction: generatePrediction(model, record.features, record.context)
+      entityId: records[index].entityId || `entity-${index}`,
+      prediction: generateDecision(score, modelMeta.type || 'FRAUD_DETECTION')
     }));
 
     const totalLatencyMs = Date.now() - startTime;
@@ -87,22 +137,26 @@ router.post('/batch-predict', (req, res) => {
     res.json({
       success: true,
       data: {
-        modelId: model.modelId,
-        modelVersion: model.version,
+        modelId: modelMeta.modelId,
+        modelVersion: modelMeta.version || mlResult.modelVersion,
         predictions,
         summary: {
           totalRecords: records.length,
           totalLatencyMs,
-          avgLatencyMs: totalLatencyMs / records.length
+          avgLatencyMs: mlResult.avgLatencyMs,
+          mlLatencyMs: mlResult.totalLatencyMs
         }
       }
     });
   } catch (error) {
+    console.error('Batch prediction error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Get prediction by ID
+/**
+ * Get prediction by ID
+ */
 router.get('/predictions/:predictionId', (req, res) => {
   try {
     const prediction = predictionCache.get(req.params.predictionId);
@@ -115,7 +169,9 @@ router.get('/predictions/:predictionId', (req, res) => {
   }
 });
 
-// Get model endpoints
+/**
+ * Get model endpoints
+ */
 router.get('/models', (req, res) => {
   try {
     const models = db_ops.getAll('ml_models', 100, 0).map(m => m.data);
@@ -129,32 +185,44 @@ router.get('/models', (req, res) => {
         version: m.version,
         status: m.status,
         metrics: {
-          latencyP50: m.metrics.latencyP50,
-          latencyP99: m.metrics.latencyP99
+          latencyP50: m.metrics?.latencyP50 || 10,
+          latencyP99: m.metrics?.latencyP99 || 50
         },
         endpoint: `/api/ml/inference/predict?modelId=${m.modelId}`
       }));
 
-    res.json({ success: true, data: endpoints });
+    // Add loaded model info
+    const loaderStats = modelLoader.getStats();
+
+    res.json({
+      success: true,
+      data: endpoints,
+      loadedModels: loaderStats.models
+    });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Health check for model serving
+/**
+ * Health check for model serving
+ */
 router.get('/health', (req, res) => {
   try {
     const models = db_ops.getAll('ml_models', 100, 0).map(m => m.data);
     const productionModels = models.filter(m => m.status === 'PRODUCTION');
+    const loaderStats = modelLoader.getStats();
 
     res.json({
       success: true,
       data: {
-        status: productionModels.length > 0 ? 'HEALTHY' : 'DEGRADED',
-        modelsLoaded: productionModels.length,
+        status: loaderStats.loadedModels > 0 ? 'HEALTHY' : 'DEGRADED',
+        modelsLoaded: loaderStats.loadedModels,
         totalModels: models.length,
+        productionModels: productionModels.length,
         cacheSize: predictionCache.size,
-        uptime: process.uptime()
+        uptime: process.uptime(),
+        modelDetails: loaderStats.models
       }
     });
   } catch (error) {
@@ -162,44 +230,71 @@ router.get('/health', (req, res) => {
   }
 });
 
-// Explain prediction
-router.post('/explain', (req, res) => {
+/**
+ * Explain prediction with feature importance
+ */
+router.post('/explain', async (req, res) => {
   try {
     const { predictionId, features } = req.body;
 
     let predictionData;
+    let extractedFeatures;
+    let score;
+
     if (predictionId) {
       predictionData = predictionCache.get(predictionId);
+      if (predictionData) {
+        extractedFeatures = {
+          raw: predictionData.features,
+          normalized: predictionData.normalizedFeatures
+        };
+        score = predictionData.prediction.score;
+      }
     }
 
-    // Generate feature importance (SHAP-like explanation)
+    // If no cached prediction, compute features from input
+    if (!extractedFeatures && features) {
+      extractedFeatures = extractFeatures(features);
+      const model = await modelLoader.ensureLoaded('fraud-detector-v3');
+      const result = await model.predict(extractedFeatures.vector);
+      score = result.score;
+    }
+
+    if (!extractedFeatures) {
+      return res.status(400).json({
+        success: false,
+        error: 'Either predictionId or features must be provided'
+      });
+    }
+
+    // Calculate feature contributions
+    const contributions = calculateFeatureContributions(extractedFeatures, score);
+
     const explanation = {
       predictionId: predictionId || 'inline',
       baseValue: 0.5,
-      outputValue: predictionData?.prediction?.score || 0.7,
-      featureImportance: [
-        { feature: 'transaction_amount', importance: 0.25, direction: 'positive' },
-        { feature: 'seller_risk_score', importance: 0.20, direction: 'positive' },
-        { feature: 'device_is_new', importance: 0.15, direction: 'positive' },
-        { feature: 'velocity_1h', importance: 0.12, direction: 'positive' },
-        { feature: 'geo_distance', importance: 0.10, direction: 'negative' },
-        { feature: 'account_age_days', importance: -0.08, direction: 'negative' },
-        { feature: 'historical_fraud_rate', importance: 0.18, direction: 'positive' }
-      ],
-      topContributors: [
-        { feature: 'transaction_amount', contribution: '+0.25', reason: 'Amount $2,500 is 3x average' },
-        { feature: 'seller_risk_score', contribution: '+0.20', reason: 'Seller risk tier is HIGH' },
-        { feature: 'device_is_new', contribution: '+0.15', reason: 'First time seeing this device' }
-      ]
+      outputValue: score,
+      featureImportance: contributions.slice(0, 10),
+      topContributors: contributions
+        .filter(c => Math.abs(c.contribution) > 0.01)
+        .slice(0, 5)
+        .map(c => ({
+          feature: c.feature,
+          contribution: c.contribution > 0 ? `+${c.contribution.toFixed(3)}` : c.contribution.toFixed(3),
+          reason: `${c.description}: ${c.value?.toFixed?.(2) || c.value} (${c.direction} impact)`
+        }))
     };
 
     res.json({ success: true, data: explanation });
   } catch (error) {
+    console.error('Explain error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Inference statistics
+/**
+ * Inference statistics
+ */
 router.get('/stats', (req, res) => {
   try {
     const predictions = Array.from(predictionCache.values());
@@ -227,10 +322,11 @@ router.get('/stats', (req, res) => {
     predictions.forEach(p => {
       stats.byModel[p.modelId] = (stats.byModel[p.modelId] || 0) + 1;
 
-      totalLatency += p.latencyMs;
-      latencies.push(p.latencyMs);
-      stats.latencyStats.min = Math.min(stats.latencyStats.min, p.latencyMs);
-      stats.latencyStats.max = Math.max(stats.latencyStats.max, p.latencyMs);
+      const latency = p.totalLatencyMs || p.mlLatencyMs || 0;
+      totalLatency += latency;
+      latencies.push(latency);
+      stats.latencyStats.min = Math.min(stats.latencyStats.min, latency);
+      stats.latencyStats.max = Math.max(stats.latencyStats.max, latency);
 
       const score = p.prediction?.score || 0;
       if (score < 0.3) stats.scoreDistribution.low++;
@@ -243,7 +339,13 @@ router.get('/stats', (req, res) => {
       latencies.sort((a, b) => a - b);
       stats.latencyStats.p50 = latencies[Math.floor(latencies.length * 0.5)] || 0;
       stats.latencyStats.p99 = latencies[Math.floor(latencies.length * 0.99)] || 0;
+      stats.latencyStats.min = stats.latencyStats.min === Infinity ? 0 : stats.latencyStats.min;
+    } else {
+      stats.latencyStats.min = 0;
     }
+
+    // Add model loader stats
+    stats.modelLoader = modelLoader.getStats();
 
     res.json({ success: true, data: stats });
   } catch (error) {
@@ -251,30 +353,28 @@ router.get('/stats', (req, res) => {
   }
 });
 
-// Helper function to generate prediction
-function generatePrediction(model, features, context) {
-  // Simulate ML prediction based on model type
-  const baseScore = Math.random();
-
-  // Adjust based on features
-  let score = baseScore;
-
-  if (features) {
-    if (features.amount > 1000) score += 0.1;
-    if (features.isNewDevice) score += 0.15;
-    if (features.riskScore > 50) score += 0.1;
-    if (features.velocitySpike) score += 0.2;
+/**
+ * Feature importance endpoint
+ */
+router.get('/feature-importance', (req, res) => {
+  try {
+    const importance = getFeatureImportance();
+    res.json({ success: true, data: importance });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
+});
 
-  score = Math.min(1, Math.max(0, score));
-
-  // Generate decision based on model type
+/**
+ * Generate decision based on ML score and model type
+ */
+function generateDecision(score, modelType) {
   let decision, label;
 
-  if (model.type === 'FRAUD_DETECTION') {
+  if (modelType === 'FRAUD_DETECTION') {
     label = score > 0.7 ? 'FRAUD' : score > 0.4 ? 'SUSPICIOUS' : 'LEGITIMATE';
     decision = score > 0.7 ? 'BLOCK' : score > 0.4 ? 'REVIEW' : 'APPROVE';
-  } else if (model.type === 'ATO_PREVENTION') {
+  } else if (modelType === 'ATO_PREVENTION') {
     label = score > 0.6 ? 'ATO_RISK' : 'NORMAL';
     decision = score > 0.6 ? 'CHALLENGE' : 'ALLOW';
   } else {
@@ -282,12 +382,17 @@ function generatePrediction(model, features, context) {
     decision = score > 0.5 ? 'FLAG' : 'PASS';
   }
 
+  // Calculate confidence based on how far from decision boundary
+  const boundary = modelType === 'FRAUD_DETECTION' ? 0.5 : 0.5;
+  const distanceFromBoundary = Math.abs(score - boundary);
+  const confidence = Math.min(0.99, 0.5 + distanceFromBoundary);
+
   return {
-    score: parseFloat(score.toFixed(4)),
+    score: parseFloat(score.toFixed(6)),
     label,
     decision,
-    confidence: parseFloat((0.7 + Math.random() * 0.25).toFixed(4)),
-    modelType: model.type,
+    confidence: parseFloat(confidence.toFixed(4)),
+    modelType,
     timestamp: new Date().toISOString()
   };
 }

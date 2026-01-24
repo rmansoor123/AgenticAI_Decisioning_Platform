@@ -7,9 +7,23 @@
  * - Use tools to accomplish goals
  * - Maintain memory across interactions
  * - Collaborate with other agents
+ * - Learn from successful investigations
+ * - Emit events during execution
  */
 
 import { v4 as uuidv4 } from 'uuid';
+import { getAgentMessenger, MESSAGE_TYPES, PRIORITY } from './agent-messenger.js';
+import { getPatternMemory, PATTERN_TYPES, CONFIDENCE_LEVELS } from './pattern-memory.js';
+import { createChainOfThought, STEP_TYPES, CONFIDENCE } from './chain-of-thought.js';
+
+// Import event bus (only if running in context with WebSocket)
+let eventBus = null;
+try {
+  const module = await import('../../gateway/websocket/event-bus.js');
+  eventBus = module.getEventBus();
+} catch (e) {
+  // Event bus not available, that's okay
+}
 
 export class BaseAgent {
   constructor(config) {
@@ -27,6 +41,16 @@ export class BaseAgent {
     this.currentTask = null;
     this.thoughtLog = [];
     this.maxMemorySize = config.maxMemorySize || 100;
+
+    // Inter-agent communication
+    this.messenger = getAgentMessenger();
+    this.patternMemory = getPatternMemory();
+
+    // Register with messenger
+    this.messenger.register(this.agentId, (message) => this.handleMessage(message));
+
+    // Chain of thought for current reasoning
+    this.currentChain = null;
   }
 
   // Register a tool the agent can use
@@ -36,41 +60,116 @@ export class BaseAgent {
 
   // Core reasoning loop - "Think, Act, Observe"
   async reason(input, context = {}) {
+    // Create chain of thought for this reasoning session
+    this.currentChain = createChainOfThought({
+      agentId: this.agentId,
+      agentName: this.name,
+      input,
+      context
+    });
+
     const thought = {
       timestamp: new Date().toISOString(),
       input,
       context,
       reasoning: [],
       actions: [],
-      result: null
+      result: null,
+      chainOfThought: null
     };
 
     try {
+      // Emit agent start event
+      this.emitEvent('agent:action:start', {
+        agentId: this.agentId,
+        agentName: this.name,
+        input: this.sanitizeInput(input)
+      });
+
       // Step 1: THINK - Analyze the situation
+      this.currentChain.observe('Received input for analysis', input);
       thought.reasoning.push(await this.think(input, context));
 
-      // Step 2: PLAN - Determine actions needed
-      const plan = await this.plan(thought.reasoning[0], context);
-      thought.reasoning.push({ plan });
-
-      // Step 3: ACT - Execute the plan
-      for (const action of plan.actions) {
-        const actionResult = await this.act(action);
-        thought.actions.push({ action, result: actionResult });
+      // Step 2: Check pattern memory for similar cases
+      const patternMatches = this.checkPatterns(input);
+      if (patternMatches.matches.length > 0) {
+        this.currentChain.recordEvidence(
+          `Found ${patternMatches.matches.length} similar patterns in memory`,
+          [],
+          [],
+          0.8
+        );
+        thought.patternMatches = patternMatches;
       }
 
-      // Step 4: OBSERVE - Evaluate results
+      // Step 3: PLAN - Determine actions needed
+      const plan = await this.plan(thought.reasoning[0], context);
+      this.currentChain.analyze(`Created plan with ${plan.actions.length} actions`);
+      thought.reasoning.push({ plan });
+
+      // Step 4: ACT - Execute the plan
+      for (const action of plan.actions) {
+        // Emit action start
+        this.emitEvent('agent:action:start', {
+          agentId: this.agentId,
+          action: action.type,
+          params: this.sanitizeInput(action.params)
+        });
+
+        const actionResult = await this.act(action);
+        thought.actions.push({ action, result: actionResult });
+
+        // Emit action complete
+        this.emitEvent('agent:action:complete', {
+          agentId: this.agentId,
+          action: action.type,
+          success: actionResult?.success !== false
+        });
+
+        // Record as evidence in chain of thought
+        if (actionResult?.data) {
+          this.currentChain.recordEvidence(
+            `Action ${action.type} result`,
+            [],
+            [],
+            1.0
+          );
+        }
+      }
+
+      // Step 5: OBSERVE - Evaluate results
       thought.result = await this.observe(thought.actions, context);
 
-      // Step 5: LEARN - Update memory
+      // Step 6: Form conclusion
+      this.currentChain.conclude(
+        thought.result?.summary || 'Analysis complete',
+        CONFIDENCE.LIKELY
+      );
+
+      // Step 7: LEARN - Update memory and patterns
       this.updateMemory(thought);
+      this.learnFromResult(input, thought.result);
+
+      // Emit thought event
+      this.emitEvent('agent:thought', {
+        agentId: this.agentId,
+        agentName: this.name,
+        summary: thought.result?.summary,
+        actionCount: thought.actions.length
+      });
+
+      // Attach chain of thought to result
+      thought.chainOfThought = this.currentChain.generateTrace();
 
     } catch (error) {
       thought.error = error.message;
       thought.result = { success: false, error: error.message };
+      this.currentChain.conclude(`Error: ${error.message}`, CONFIDENCE.CERTAIN);
+      thought.chainOfThought = this.currentChain.generateTrace();
     }
 
     this.thoughtLog.push(thought);
+    this.currentChain = null;
     return thought;
   }
 
@@ -149,7 +248,282 @@ export class BaseAgent {
     this.memory.longTerm.set(key, memory);
   }
 
-  // Agent state
+  // ============================================================================
+  // PATTERN LEARNING
+  // ============================================================================
+
+  /**
+   * Check pattern memory for similar cases
+   */
+  checkPatterns(input) {
+    const features = this.extractFeaturesForPatternMatching(input);
+    return this.patternMemory.matchPatterns(features);
+  }
+
+  /**
+   * Extract features for pattern matching
+   */
+  extractFeaturesForPatternMatching(input) {
+    // Override in specialized agents for better feature extraction
+    return {
+      inputType: typeof input,
+      hasAmount: 'amount' in (input || {}),
+      hasTransaction: 'transactionId' in (input || {}),
+      alertType: input?.alertType || 'unknown'
+    };
+  }
+
+  /**
+   * Learn from successful results
+   */
+  learnFromResult(input, result) {
+    if (!result?.success) return;
+
+    const features = this.extractFeaturesForPatternMatching(input);
+    const outcome = this.determineOutcome(result);
+
+    if (outcome) {
+      this.patternMemory.learnPattern({
+        type: PATTERN_TYPES.FRAUD_INDICATOR,
+        features,
+        outcome,
+        confidence: result.confidence || CONFIDENCE_LEVELS.MEDIUM,
+        source: this.agentId
+      });
+    }
+  }
+
+  /**
+   * Determine outcome for pattern learning
+   */
+  determineOutcome(result) {
+    if (result?.recommendation?.action === 'BLOCK') return 'FRAUD_CONFIRMED';
+    if (result?.recommendation?.action === 'APPROVE') return 'LEGITIMATE_CONFIRMED';
+    if (result?.recommendation?.action === 'REVIEW') return 'SUSPICIOUS';
+    return null;
+  }
+
+  // ============================================================================
+  // INTER-AGENT COMMUNICATION
+  // ============================================================================
+
+  /**
+   * Request help from another agent
+   * @param {string} capability - The capability needed
+   * @param {Object} task - The task to perform
+   * @param {Object} context - Additional context
+   */
+  async requestHelp(capability, task, context = {}) {
+    this.emitEvent('agent:action:start', {
+      agentId: this.agentId,
+      action: 'request_help',
+      capability
+    });
+
+    try {
+      const response = await this.messenger.requestHelp({
+        from: this.agentId,
+        capability,
+        task,
+        context,
+        priority: PRIORITY.HIGH
+      });
+
+      this.emitEvent('agent:action:complete', {
+        agentId: this.agentId,
+        action: 'request_help',
+        success: response?.content?.success
+      });
+
+      return response?.content?.result;
+    } catch (error) {
+      this.emitEvent('agent:action:complete', {
+        agentId: this.agentId,
+        action: 'request_help',
+        success: false,
+        error: error.message
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Handle incoming messages from other agents
+   */
+  async handleMessage(message) {
+    if (message.type === MESSAGE_TYPES.HELP_REQUEST) {
+      return this.handleHelpRequest(message);
+    }
+
+    if (message.type === MESSAGE_TYPES.TASK_DELEGATION) {
+      return this.handleTaskDelegation(message);
+    }
+
+    if (message.type === MESSAGE_TYPES.INFORMATION_SHARE) {
+      return this.handleInformationShare(message);
+    }
+
+    // Default: process as regular input
+    return this.reason(message.content);
+  }
+
+  /**
+   * Handle help request from another agent
+   */
+  async handleHelpRequest(message) {
+    const { capability, task, context } = message.content;
+
+    // Check if we have the capability
+    if (!this.capabilities.includes(capability)) {
+      await this.messenger.respondToHelp({
+        correlationId: message.correlationId,
+        from: this.agentId,
+        result: null,
+        success: false,
+        error: `Agent does not have capability: ${capability}`
+      });
+      return;
+    }
+
+    // Execute the task
+    try {
+      const result = await this.reason(task, { ...context, fromAgent: message.from });
+
+      await this.messenger.respondToHelp({
+        correlationId: message.correlationId,
+        from: this.agentId,
+        result: result.result,
+        success: true
+      });
+    } catch (error) {
+      await this.messenger.respondToHelp({
+        correlationId: message.correlationId,
+        from: this.agentId,
+        result: null,
+        success: false,
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Handle task delegation
+   */
+  async handleTaskDelegation(message) {
+    const { task, input, context } = message.content;
+    return this.reason(input, { ...context, delegatedTask: task, fromAgent: message.from });
+  }
+
+  /**
+   * Handle information sharing
+   */
+  handleInformationShare(message) {
+    const { topic, data } = message.content;
+
+    // Store in working memory
+    this.memory.working[topic] = {
+      data,
+      from: message.from,
+      receivedAt: new Date().toISOString()
+    };
+
+    return { received: true };
+  }
+
+  /**
+   * Share information with other agents
+   */
+  async shareInformation(topic, data, targetAgentId = null) {
+    if (targetAgentId) {
+      return this.messenger.send({
+        from: this.agentId,
+        to: targetAgentId,
+        type: MESSAGE_TYPES.INFORMATION_SHARE,
+        content: { topic, data }
+      });
+    }
+
+    // Broadcast to all
+    return this.messenger.broadcast({
+      from: this.agentId,
+      content: { topic, data }
+    });
+  }
+
+  // ============================================================================
+  // CHAIN OF THOUGHT HELPERS
+  // ============================================================================
+
+  /**
+   * Add observation to current chain of thought
+   */
+  addObservation(observation, data = {}) {
+    if (this.currentChain) {
+      this.currentChain.observe(observation, data);
+    }
+  }
+
+  /**
+   * Add hypothesis to current chain of thought
+   */
+  addHypothesis(hypothesis, confidence = CONFIDENCE.POSSIBLE) {
+    if (this.currentChain) {
+      return this.currentChain.hypothesize(hypothesis, confidence);
+    }
+    return null;
+  }
+
+  /**
+   * Add evidence to current chain of thought
+   */
+  addEvidence(evidence, supports = [], contradicts = []) {
+    if (this.currentChain) {
+      return this.currentChain.recordEvidence(evidence, supports, contradicts);
+    }
+    return null;
+  }
+
+  // ============================================================================
+  // EVENT EMISSION
+  // ============================================================================
+
+  /**
+   * Emit an event to the event bus
+   */
+  emitEvent(eventType, data) {
+    if (eventBus) {
+      eventBus.publish(eventType, {
+        ...data,
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+
+  /**
+   * Sanitize input for event emission (remove sensitive data)
+   */
+  sanitizeInput(input) {
+    if (!input) return input;
+
+    const sanitized = { ...input };
+    const sensitiveFields = ['password', 'ssn', 'cardNumber', 'cvv', 'pin'];
+
+    for (const field of sensitiveFields) {
+      if (field in sanitized) {
+        sanitized[field] = '***REDACTED***';
+      }
+    }
+
+    return sanitized;
+  }
+
+  // ============================================================================
+  // AGENT STATE
+  // ============================================================================
+
+  /**
+   * Get agent state
+   */
   getState() {
     return {
       agentId: this.agentId,
@@ -163,11 +537,15 @@ export class BaseAgent {
         longTerm: this.memory.longTerm.size
       },
       currentTask: this.currentTask,
-      thoughtLogSize: this.thoughtLog.length
+      thoughtLogSize: this.thoughtLog.length,
+      patternStats: this.patternMemory.getStats()
     };
   }
 
-  // Collaboration interface
+  // ============================================================================
+  // COLLABORATION INTERFACE (Legacy)
+  // ============================================================================
+
   async receiveMessage(fromAgent, message) {
     return await this.reason({
       type: 'agent_message',
