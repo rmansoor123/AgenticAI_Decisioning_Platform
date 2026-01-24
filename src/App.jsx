@@ -9,6 +9,10 @@ import Experimentation from './pages/Experimentation'
 import TransactionFlow from './pages/TransactionFlow'
 import Services from './pages/Services'
 import AgenticAI from './pages/AgenticAI'
+import Onboarding from './pages/Onboarding'
+import SellerOnboardingForm from './pages/SellerOnboardingForm'
+import SellerRiskLifecycle from './pages/SellerRiskLifecycle'
+import SellerNetworkAnalysis from './pages/SellerNetworkAnalysis'
 
 const API_BASE = 'http://localhost:3001/api'
 const WS_URL = 'ws://localhost:3001/ws'
@@ -144,6 +148,10 @@ function App() {
           <Route path="/flow" element={<TransactionFlow />} />
           <Route path="/services" element={<Services />} />
           <Route path="/agents" element={<AgenticAI />} />
+          <Route path="/onboarding" element={<Onboarding />} />
+          <Route path="/onboarding/form" element={<SellerOnboardingForm />} />
+          <Route path="/seller-risk" element={<SellerRiskLifecycle />} />
+          <Route path="/seller-network" element={<SellerNetworkAnalysis />} />
         </Routes>
       </Layout>
     </BrowserRouter>

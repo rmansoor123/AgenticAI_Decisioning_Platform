@@ -244,6 +244,38 @@ export async function getGeoLocation(ipAddress) {
   };
 }
 
+/**
+ * Check Business Registration
+ * Simulates integration with business registration databases
+ */
+export async function checkBusinessRegistration(params) {
+  await delay(100 + Math.random() * 200);
+
+  const { businessName, registrationNumber, country } = params;
+  const businessHash = hashString(businessName + registrationNumber + country);
+
+  // Simulate business registration check
+  const isRegistered = businessHash % 10 !== 0; // 90% registered
+  const registrationDate = new Date(Date.now() - (businessHash % 3650) * 24 * 60 * 60 * 1000);
+  const businessAge = Math.floor((Date.now() - registrationDate.getTime()) / (1000 * 60 * 60 * 24));
+
+  return {
+    success: true,
+    data: {
+      businessName,
+      registrationNumber,
+      country,
+      isRegistered,
+      registrationDate: registrationDate.toISOString(),
+      businessAge,
+      status: isRegistered ? (businessHash % 20 === 0 ? 'SUSPENDED' : 'ACTIVE') : 'NOT_FOUND',
+      legalEntityType: ['LLC', 'INC', 'CORP', 'PARTNERSHIP', 'SOLE_PROPRIETORSHIP'][businessHash % 5],
+      jurisdiction: country,
+      verifiedAt: new Date().toISOString()
+    }
+  };
+}
+
 // Helper functions
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -277,5 +309,6 @@ export default {
   checkIpReputation,
   verifyEmail,
   checkDeviceReputation,
-  getGeoLocation
+  getGeoLocation,
+  checkBusinessRegistration
 };

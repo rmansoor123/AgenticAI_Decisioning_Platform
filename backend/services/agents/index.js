@@ -9,7 +9,8 @@ import {
   orchestrator,
   fraudInvestigator,
   ruleOptimizer,
-  alertTriage
+  alertTriage,
+  sellerOnboarding
 } from '../../agents/index.js';
 
 const router = express.Router();
@@ -212,6 +213,68 @@ router.get('/triages', (req, res) => {
     }));
 
   res.json({ success: true, data: triages });
+});
+
+// ============================================================================
+// SELLER ONBOARDING AGENT ENDPOINTS
+// ============================================================================
+
+// Evaluate a seller for onboarding
+router.post('/onboarding/evaluate', async (req, res) => {
+  try {
+    const { sellerId, sellerData } = req.body;
+
+    if (!sellerData && !sellerId) {
+      return res.status(400).json({ success: false, error: 'sellerData or sellerId is required' });
+    }
+
+    // If only sellerId provided, fetch from database
+    let seller = sellerData;
+    if (sellerId && !sellerData) {
+      const sellerRecord = db_ops.getById('sellers', 'seller_id', sellerId);
+      if (!sellerRecord) {
+        return res.status(404).json({ success: false, error: 'Seller not found' });
+      }
+      seller = sellerRecord.data;
+    }
+
+    const result = await sellerOnboarding.evaluateSeller(sellerId || seller.sellerId, seller);
+
+    res.json({
+      success: true,
+      data: {
+        agentId: sellerOnboarding.agentId,
+        agentName: sellerOnboarding.name,
+        evaluation: result.result,
+        decision: result.result?.decision,
+        reasoning: result.result?.reasoning,
+        thoughtProcess: {
+          understanding: result.reasoning?.[0]?.understanding,
+          actionsExecuted: result.actions?.length,
+          evidenceGathered: result.result?.evidence?.length
+        },
+        chainOfThought: result.chainOfThought
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get onboarding evaluation history
+router.get('/onboarding/evaluations', (req, res) => {
+  const evaluations = sellerOnboarding.thoughtLog
+    .filter(t => t.result?.onboardingId)
+    .map(t => ({
+      onboardingId: t.result.onboardingId,
+      sellerId: t.input?.sellerId,
+      decision: t.result?.decision?.action,
+      confidence: t.result?.decision?.confidence,
+      riskScore: t.result?.overallRisk?.score,
+      timestamp: t.timestamp
+    }));
+
+  res.json({ success: true, data: evaluations });
 });
 
 // ============================================================================

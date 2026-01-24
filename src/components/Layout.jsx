@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   Shield, Activity, Database, Brain, Cog, FlaskConical,
-  Home, RefreshCw, Menu, X, ChevronDown, Server, Bot
+  Home, RefreshCw, Menu, X, ChevronDown, Server, Bot, Users
 } from 'lucide-react'
 import Chatbot from './Chatbot'
 
@@ -67,6 +67,18 @@ export default function Layout({ children, wsConnected }) {
     },
     { name: 'Transaction Flow', href: '/flow', icon: Activity, color: 'text-indigo-400' },
     { name: 'Agentic AI', href: '/agents', icon: Bot, color: 'text-violet-400' },
+    { 
+      name: 'Seller Onboarding', 
+      href: '/onboarding', 
+      icon: Users, 
+      color: 'text-blue-400',
+      children: [
+        { name: 'Onboarding Dashboard', href: '/onboarding' },
+        { name: 'Onboard New Seller', href: '/onboarding/form' },
+        { name: 'Risk Lifecycle', href: '/seller-risk' },
+        { name: 'Network Analysis', href: '/seller-network' }
+      ]
+    },
     { name: 'Services', href: '/services', icon: Server, color: 'text-gray-400' }
   ]
 

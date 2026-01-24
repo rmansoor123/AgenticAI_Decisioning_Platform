@@ -8,16 +8,19 @@ import { orchestrator } from './core/agent-orchestrator.js';
 import FraudInvestigationAgent from './specialized/fraud-investigation-agent.js';
 import RuleOptimizationAgent from './specialized/rule-optimization-agent.js';
 import AlertTriageAgent from './specialized/alert-triage-agent.js';
+import SellerOnboardingAgent from './specialized/seller-onboarding-agent.js';
 
 // Initialize agents
 const fraudInvestigator = new FraudInvestigationAgent();
 const ruleOptimizer = new RuleOptimizationAgent();
 const alertTriage = new AlertTriageAgent();
+const sellerOnboarding = new SellerOnboardingAgent();
 
 // Register agents with orchestrator
 orchestrator.registerAgent(fraudInvestigator);
 orchestrator.registerAgent(ruleOptimizer);
 orchestrator.registerAgent(alertTriage);
+orchestrator.registerAgent(sellerOnboarding);
 
 // Define standard workflows
 orchestrator.defineWorkflow('fraud_investigation', {
@@ -104,7 +107,8 @@ export {
   orchestrator,
   fraudInvestigator,
   ruleOptimizer,
-  alertTriage
+  alertTriage,
+  sellerOnboarding
 };
 
 export default {
@@ -112,6 +116,7 @@ export default {
   agents: {
     fraudInvestigator,
     ruleOptimizer,
-    alertTriage
+    alertTriage,
+    sellerOnboarding
   }
 };
