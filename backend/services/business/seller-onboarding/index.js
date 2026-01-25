@@ -3,6 +3,7 @@ import { db_ops } from '../../../shared/common/database.js';
 import { generateSeller } from '../../../shared/synthetic-data/generators.js';
 import { sellerOnboarding } from '../../../agents/index.js';
 import { createTestSellersWithConnections } from './test-connections.js';
+import { verifyIdWorkflow } from './id-verification.js';
 
 const router = express.Router();
 
@@ -59,6 +60,23 @@ router.post('/sellers', async (req, res) => {
     const sellerId = sellerData.sellerId || `SLR-${Date.now().toString(36).toUpperCase()}`;
     sellerData.sellerId = sellerId;
 
+    // Include ID verification results if available
+    if (req.body.idVerification) {
+      sellerData.idVerification = req.body.idVerification;
+      // Auto-fill from extracted data if not already provided
+      if (req.body.idVerification.extractedData) {
+        const extracted = req.body.idVerification.extractedData;
+        sellerData.documentType = sellerData.documentType || extracted.documentType;
+        sellerData.documentNumber = sellerData.documentNumber || extracted.documentNumber;
+        sellerData.address = sellerData.address || extracted.address;
+        sellerData.country = sellerData.country || extracted.country;
+        // Mark as KYC verified if ID verification passed
+        if (req.body.idVerification.isValid) {
+          sellerData.kycVerified = true;
+        }
+      }
+    }
+
     // Use Agentic AI for comprehensive onboarding evaluation
     console.log(`[Onboarding Agent] Evaluating seller: ${sellerId}`);
     const agentResult = await sellerOnboarding.evaluateSeller(sellerId, sellerData);
@@ -96,6 +114,29 @@ router.post('/sellers', async (req, res) => {
 
     // Store seller
     db_ops.insert('sellers', 'seller_id', sellerId, sellerData);
+
+    // Update image seller_id references if images were saved with temp ID
+    if (sellerData.idVerification?.savedImageIds) {
+      const { selfie, idDocument } = sellerData.idVerification.savedImageIds;
+      
+      // Update selfie image
+      if (selfie) {
+        const selfieImg = db_ops.getById('seller_images', 'image_id', selfie);
+        if (selfieImg && selfieImg.data.sellerId?.startsWith('TEMP-')) {
+          const updatedSelfie = { ...selfieImg.data, sellerId };
+          db_ops.update('seller_images', 'image_id', selfie, updatedSelfie);
+        }
+      }
+      
+      // Update ID document image
+      if (idDocument) {
+        const idImg = db_ops.getById('seller_images', 'image_id', idDocument);
+        if (idImg && idImg.data.sellerId?.startsWith('TEMP-')) {
+          const updatedId = { ...idImg.data, sellerId };
+          db_ops.update('seller_images', 'image_id', idDocument, updatedId);
+        }
+      }
+    }
 
     res.status(201).json({
       success: true,
@@ -340,6 +381,136 @@ router.post('/test/connections', async (req, res) => {
         phone: s.phone,
         ipAddress: s.ipAddress
       }))
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ID Verification Workflow
+router.post('/id-verification', async (req, res) => {
+  try {
+    const { selfieImage, idImage, sellerId } = req.body;
+
+    if (!selfieImage || !idImage) {
+      return res.status(400).json({
+        success: false,
+        error: 'Both selfie and ID images are required'
+      });
+    }
+
+    // Verify ID workflow
+    const result = await verifyIdWorkflow(selfieImage, idImage);
+
+    // Save images to database if sellerId is provided
+    if (sellerId && result.success) {
+      const { v4: uuidv4 } = await import('uuid');
+      
+      // Save selfie image
+      const selfieImageId = `IMG-${uuidv4().slice(0, 8).toUpperCase()}`;
+      db_ops.insert('seller_images', 'image_id', selfieImageId, {
+        sellerId,
+        imageType: 'SELFIE',
+        imageData: selfieImage,
+        metadata: {
+          workflowId: result.workflowId,
+          capturedAt: new Date().toISOString(),
+          verificationResult: result.assessment
+        }
+      });
+
+      // Save ID image
+      const idImageId = `IMG-${uuidv4().slice(0, 8).toUpperCase()}`;
+      db_ops.insert('seller_images', 'image_id', idImageId, {
+        sellerId,
+        imageType: 'ID_DOCUMENT',
+        imageData: idImage,
+        metadata: {
+          workflowId: result.workflowId,
+          capturedAt: new Date().toISOString(),
+          verificationResult: result.assessment,
+          extractedData: result.assessment?.extractedData
+        }
+      });
+
+      result.savedImageIds = {
+        selfie: selfieImageId,
+        idDocument: idImageId
+      };
+    }
+
+    res.json({
+      success: result.success,
+      data: result.assessment || null,
+      workflowId: result.workflowId,
+      steps: result.steps,
+      savedImageIds: result.savedImageIds || null,
+      error: result.error || null
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get seller images
+router.get('/sellers/:sellerId/images', (req, res) => {
+  try {
+    const { sellerId } = req.params;
+    const { type } = req.query;
+
+    // Get all images and filter
+    const allImages = db_ops.getAll('seller_images', 10000, 0);
+    let images = allImages
+      .map(img => img.data)
+      .filter(img => {
+        const imgSellerId = img.sellerId || img.seller_id;
+        if (imgSellerId !== sellerId) return false;
+        if (type) {
+          const imgType = img.imageType || img.image_type;
+          if (imgType !== type) return false;
+        }
+        return true;
+      });
+
+    res.json({
+      success: true,
+      data: images.map(img => ({
+        imageId: img.image_id || img.imageId,
+        imageType: img.imageType || img.image_type,
+        metadata: img.metadata,
+        createdAt: img.created_at || img.createdAt
+        // Note: imageData is not included for security/performance
+        // Use /images/:imageId endpoint to get actual image
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get specific image
+router.get('/images/:imageId', (req, res) => {
+  try {
+    const { imageId } = req.params;
+    const image = db_ops.getById('seller_images', 'image_id', imageId);
+
+    if (!image) {
+      return res.status(404).json({ success: false, error: 'Image not found' });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        imageId: image.data.imageId || image.data.image_id,
+        sellerId: image.data.sellerId,
+        imageType: image.data.imageType || image.data.image_type,
+        imageData: image.data.imageData || image.data.image_data,
+        metadata: image.data.metadata,
+        createdAt: image.created_at
+      }
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });

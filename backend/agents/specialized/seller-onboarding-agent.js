@@ -418,8 +418,8 @@ export class SellerOnboardingAgent extends BaseAgent {
       timestamp: new Date().toISOString()
     }));
 
-    // Analyze evidence
-    const riskFactors = this.analyzeOnboardingEvidence(evidence);
+    // Analyze evidence (pass sellerData to include ID verification results)
+    const riskFactors = this.analyzeOnboardingEvidence(evidence, context.input?.sellerData);
     const overallRisk = this.calculateOnboardingRisk(riskFactors);
     const decision = this.generateOnboardingDecision(overallRisk, riskFactors);
 
@@ -466,12 +466,81 @@ export class SellerOnboardingAgent extends BaseAgent {
     if (emailDomain && ['tempmail.com', 'guerrillamail.com'].includes(emailDomain)) {
       indicators.push('DISPOSABLE_EMAIL');
     }
+
+    // Check ID verification results if available
+    if (sellerData?.idVerification) {
+      const idVerif = sellerData.idVerification;
+      
+      if (!idVerif.isValid) {
+        indicators.push('ID_VERIFICATION_FAILED');
+      }
+      
+      if (idVerif.faceMatch && !idVerif.faceMatch.matchResult.isMatch) {
+        indicators.push('FACE_MISMATCH');
+      }
+      
+      if (idVerif.validation?.isExpired) {
+        indicators.push('ID_EXPIRED');
+      }
+      
+      if (idVerif.validation?.issues && idVerif.validation.issues.length > 0) {
+        indicators.push('ID_VALIDATION_ISSUES');
+      }
+      
+      if (idVerif.confidence < 0.70) {
+        indicators.push('LOW_ID_VERIFICATION_CONFIDENCE');
+      }
+    } else {
+      // No ID verification provided
+      indicators.push('NO_ID_VERIFICATION');
+    }
     
     return indicators;
   }
 
-  analyzeOnboardingEvidence(evidence) {
+  analyzeOnboardingEvidence(evidence, sellerData = null) {
     const factors = [];
+
+    // Check ID verification results from seller data (if available)
+    if (sellerData?.idVerification) {
+      const idVerif = sellerData.idVerification;
+      
+      if (!idVerif.isValid) {
+        factors.push({ factor: 'ID_VERIFICATION_FAILED', severity: 'CRITICAL', score: 50 });
+      } else {
+        // Positive factor for valid ID verification
+        factors.push({ factor: 'ID_VERIFICATION_PASSED', severity: 'POSITIVE', score: -20 });
+      }
+      
+      if (idVerif.faceMatch) {
+        if (!idVerif.faceMatch.matchResult.isMatch) {
+          factors.push({ factor: 'FACE_MISMATCH', severity: 'CRITICAL', score: 45 });
+        } else {
+          factors.push({ factor: 'FACE_MATCH_CONFIRMED', severity: 'POSITIVE', score: -15 });
+        }
+      }
+      
+      if (idVerif.validation) {
+        if (idVerif.validation.isExpired) {
+          factors.push({ factor: 'ID_EXPIRED', severity: 'HIGH', score: 35 });
+        }
+        if (idVerif.validation.issues && idVerif.validation.issues.length > 0) {
+          factors.push({ 
+            factor: 'ID_VALIDATION_ISSUES', 
+            severity: 'HIGH', 
+            score: 25,
+            details: idVerif.validation.issues 
+          });
+        }
+        if (idVerif.validation.validationScore < 70) {
+          factors.push({ factor: 'LOW_ID_VALIDATION_SCORE', severity: 'MEDIUM', score: 20 });
+        }
+      }
+      
+      if (idVerif.confidence < 0.70) {
+        factors.push({ factor: 'LOW_ID_VERIFICATION_CONFIDENCE', severity: 'MEDIUM', score: 20 });
+      }
+    }
 
     evidence.forEach(e => {
       if (!e.success || !e.data) return;
@@ -556,15 +625,18 @@ export class SellerOnboardingAgent extends BaseAgent {
   }
 
   calculateOnboardingRisk(factors) {
-    const totalScore = factors.reduce((sum, f) => sum + f.score, 0);
-    const normalizedScore = Math.min(100, totalScore);
+    // Handle positive factors (negative scores) properly
+    const totalScore = factors.reduce((sum, f) => sum + (f.score || 0), 0);
+    // Normalize to 0-100 range (negative scores become 0)
+    const normalizedScore = Math.max(0, Math.min(100, totalScore));
 
     return {
       score: normalizedScore,
       level: normalizedScore > 60 ? 'HIGH' : normalizedScore > 30 ? 'MEDIUM' : 'LOW',
       factorCount: factors.length,
       criticalFactors: factors.filter(f => f.severity === 'CRITICAL').length,
-      highFactors: factors.filter(f => f.severity === 'HIGH').length
+      highFactors: factors.filter(f => f.severity === 'HIGH').length,
+      positiveFactors: factors.filter(f => f.severity === 'POSITIVE').length
     };
   }
 
