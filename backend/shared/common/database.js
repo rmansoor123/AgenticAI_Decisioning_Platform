@@ -34,7 +34,9 @@ const memoryStore = {
   seller_images: new Map(),
   seller_risk_profiles: new Map(),
   risk_events: new Map(),
-  knowledge_entries: new Map()
+  knowledge_entries: new Map(),
+  agent_short_term_memory: new Map(),
+  agent_long_term_memory: new Map()
 };
 
 /**
@@ -159,7 +161,9 @@ function getIdField(table) {
     seller_images: 'image_id',
     seller_risk_profiles: 'seller_id',
     risk_events: 'event_id',
-    knowledge_entries: 'knowledge_id'
+    knowledge_entries: 'knowledge_id',
+    agent_short_term_memory: 'memory_id',
+    agent_long_term_memory: 'memory_id'
   };
   return idFields[table] || 'id';
 }
@@ -484,7 +488,9 @@ export const db_ops = {
       'seller_images',
       'seller_risk_profiles',
       'risk_events',
-      'knowledge_entries'
+      'knowledge_entries',
+      'agent_short_term_memory',
+      'agent_long_term_memory'
     ];
 
     const stats = { usingSqlite };

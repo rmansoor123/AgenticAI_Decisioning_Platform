@@ -15,6 +15,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getAgentMessenger, MESSAGE_TYPES, PRIORITY } from './agent-messenger.js';
 import { getPatternMemory, PATTERN_TYPES, CONFIDENCE_LEVELS } from './pattern-memory.js';
 import { createChainOfThought, STEP_TYPES, CONFIDENCE } from './chain-of-thought.js';
+import { getMemoryStore } from './memory-store.js';
 
 // Import event bus (only if running in context with WebSocket)
 let eventBus = null;
@@ -45,6 +46,8 @@ export class BaseAgent {
     // Inter-agent communication
     this.messenger = getAgentMessenger();
     this.patternMemory = getPatternMemory();
+    this.memoryStore = getMemoryStore();
+    this.sessionId = `SESSION-${Date.now().toString(36)}`;
 
     // Register with messenger
     this.messenger.register(this.agentId, (message) => this.handleMessage(message));
@@ -224,14 +227,26 @@ export class BaseAgent {
       // Optionally consolidate into long-term memory
       this.consolidateToLongTerm(removed);
     }
+
+    // Persist to memory store
+    this.memoryStore.saveShortTerm(this.agentId, this.sessionId, {
+      timestamp: thought.timestamp,
+      type: thought.actions?.[0]?.action?.type || 'reasoning',
+      summary: thought.result?.summary || 'Action completed',
+      key_facts: this.extractKeyFacts(thought),
+      success: thought.result?.success
+    });
   }
 
   retrieveRelevantMemory(input) {
-    // Simple keyword matching for now
     const inputStr = JSON.stringify(input).toLowerCase();
-    return this.memory.shortTerm
+    // Check in-memory first (fast)
+    const inMemory = this.memory.shortTerm
       .filter(m => JSON.stringify(m).toLowerCase().includes(inputStr.slice(0, 50)))
       .slice(-5);
+    // Also check persistent long-term memory
+    const longTerm = this.memoryStore.queryLongTerm(this.agentId, inputStr.slice(0, 100), 3);
+    return { recent: inMemory, learned: longTerm };
   }
 
   extractKeyFacts(thought) {
@@ -246,6 +261,12 @@ export class BaseAgent {
     // Store important patterns in long-term memory
     const key = `memory_${Date.now()}`;
     this.memory.longTerm.set(key, memory);
+
+    // Also persist to long-term memory store
+    this.memoryStore.saveLongTerm(this.agentId, 'insight', {
+      ...memory,
+      consolidatedAt: new Date().toISOString()
+    }, 0.5);
   }
 
   // ============================================================================
