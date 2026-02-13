@@ -1,5 +1,6 @@
 import express from 'express';
 import { db_ops } from '../../shared/common/database.js';
+import { getKnowledgeBase } from '../../agents/core/knowledge-base.js';
 
 const router = express.Router();
 
@@ -263,6 +264,20 @@ router.post('/event', (req, res) => {
     };
 
     db_ops.insert('risk_events', 'event_id', eventId, event);
+
+    // Store in knowledge base for agentic AI layers
+    const kb = getKnowledgeBase();
+    kb.addKnowledge('risk-events', [{
+      _id: eventId,
+      text: `Risk event: ${eventType} for seller ${sellerId} in domain ${domain}. Score: ${riskScore}. ${JSON.stringify(metadata || {})}`,
+      category: 'risk-event',
+      sellerId,
+      domain,
+      outcome: riskScore > 60 ? 'fraud' : riskScore > 30 ? 'pending' : 'legitimate',
+      riskScore,
+      timestamp: now,
+      source: 'risk-profile-service'
+    }]);
 
     const updatedProfile = recalculateProfile(sellerId);
 
