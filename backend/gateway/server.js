@@ -8,7 +8,7 @@ import generators from '../shared/synthetic-data/generators.js';
 const { generateTransaction, generateMetricsSnapshot, generateSeller, generateListing, generatePayout, generateATOEvent, generateShipment, generateMLModel, generateRule, generateExperiment, generateDataset } = generators;
 
 // Seed database with initial data (only if not already seeded)
-function seedDatabase() {
+async function seedDatabase() {
   // Check if database already has data
   if (isSeeded()) {
     console.log('Database already contains data, skipping seed...');
@@ -87,6 +87,41 @@ function seedDatabase() {
   console.log(`  ML Models: ${db_ops.count('ml_models')}`);
   console.log(`  Rules: ${db_ops.count('rules')}`);
   console.log(`  Experiments: ${db_ops.count('experiments')}`);
+
+  // Seed risk profiles for existing sellers
+  const { emitRiskEvent } = await import('../services/risk-profile/emit-event.js');
+  const allSellersForRisk = db_ops.getAll('sellers', 100, 0).map(s => s.data);
+
+  allSellersForRisk.forEach(seller => {
+    // Emit onboarding event based on existing risk score
+    emitRiskEvent({
+      sellerId: seller.sellerId,
+      domain: 'onboarding',
+      eventType: 'ONBOARDING_RISK_ASSESSMENT',
+      riskScore: seller.riskScore || Math.floor(Math.random() * 60),
+      metadata: { seeded: true }
+    });
+
+    // Randomly add historical events for variety
+    if (Math.random() > 0.7) {
+      emitRiskEvent({ sellerId: seller.sellerId, domain: 'ato', eventType: 'ATO_EVENT', riskScore: Math.floor(Math.random() * 50) + 10, metadata: { seeded: true } });
+    }
+    if (Math.random() > 0.8) {
+      emitRiskEvent({ sellerId: seller.sellerId, domain: 'payout', eventType: 'PAYOUT_HELD', riskScore: Math.floor(Math.random() * 40) + 20, metadata: { seeded: true } });
+    }
+    if (Math.random() > 0.6) {
+      emitRiskEvent({ sellerId: seller.sellerId, domain: 'listing', eventType: 'LISTING_APPROVED', riskScore: -5, metadata: { seeded: true } });
+    }
+    if (Math.random() > 0.85) {
+      emitRiskEvent({ sellerId: seller.sellerId, domain: 'shipping', eventType: 'SHIPPING_FLAGGED', riskScore: Math.floor(Math.random() * 40) + 30, metadata: { seeded: true } });
+    }
+    if (Math.random() > 0.5) {
+      emitRiskEvent({ sellerId: seller.sellerId, domain: 'transaction', eventType: 'TRANSACTION_APPROVED', riskScore: -2, metadata: { seeded: true } });
+    }
+  });
+
+  console.log(`  Risk Profiles: ${db_ops.count('seller_risk_profiles')}`);
+  console.log(`  Risk Events: ${db_ops.count('risk_events')}`);
 }
 
 // Import service routers
@@ -132,7 +167,7 @@ app.use((req, res, next) => {
 
 // Initialize database and seed with data
 initializeDatabase();
-seedDatabase();
+await seedDatabase();
 
 // Initialize ML models (async, but don't block startup)
 initializeMLModels().catch(err => {
