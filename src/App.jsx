@@ -13,9 +13,10 @@ import Onboarding from './pages/Onboarding'
 import SellerOnboardingForm from './pages/SellerOnboardingForm'
 import SellerRiskLifecycle from './pages/SellerRiskLifecycle'
 import SellerNetworkAnalysis from './pages/SellerNetworkAnalysis'
+import SellerRiskProfile from './pages/SellerRiskProfile'
 
-const API_BASE = 'http://localhost:3001/api'
-const WS_URL = 'ws://localhost:3001/ws'
+const API_BASE = 'http://localhost:3005/api'
+const WS_URL = 'ws://localhost:3005/ws'
 
 function App() {
   const [transactions, setTransactions] = useState([])
@@ -152,6 +153,7 @@ function App() {
           <Route path="/onboarding/form" element={<SellerOnboardingForm />} />
           <Route path="/seller-risk" element={<SellerRiskLifecycle />} />
           <Route path="/seller-network" element={<SellerNetworkAnalysis />} />
+          <Route path="/risk-profiles" element={<SellerRiskProfile />} />
         </Routes>
       </Layout>
     </BrowserRouter>

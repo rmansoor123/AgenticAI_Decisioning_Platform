@@ -2,11 +2,11 @@ import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   Shield, Activity, Database, Brain, Cog, FlaskConical,
-  Home, RefreshCw, Menu, X, ChevronDown, Server, Bot, Users
+  Home, RefreshCw, Menu, X, ChevronDown, Server, Bot, Users, ShieldAlert
 } from 'lucide-react'
 import Chatbot from './Chatbot'
 
-const API_BASE = 'http://localhost:3001/api'
+const API_BASE = 'http://localhost:3005/api'
 
 export default function Layout({ children, wsConnected }) {
   const location = useLocation()
@@ -79,6 +79,7 @@ export default function Layout({ children, wsConnected }) {
         { name: 'Network Analysis', href: '/seller-network' }
       ]
     },
+    { name: 'Risk Profiles', href: '/risk-profiles', icon: ShieldAlert, color: 'text-red-400' },
     { name: 'Services', href: '/services', icon: Server, color: 'text-gray-400' }
   ]
 
