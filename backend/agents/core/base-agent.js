@@ -16,6 +16,7 @@ import { getAgentMessenger, MESSAGE_TYPES, PRIORITY } from './agent-messenger.js
 import { getPatternMemory, PATTERN_TYPES, CONFIDENCE_LEVELS } from './pattern-memory.js';
 import { createChainOfThought, STEP_TYPES, CONFIDENCE } from './chain-of-thought.js';
 import { getMemoryStore } from './memory-store.js';
+import { getContextEngine } from './context-engine.js';
 
 // Import event bus (only if running in context with WebSocket)
 let eventBus = null;
@@ -48,6 +49,7 @@ export class BaseAgent {
     this.patternMemory = getPatternMemory();
     this.memoryStore = getMemoryStore();
     this.sessionId = `SESSION-${Date.now().toString(36)}`;
+    this.contextEngine = getContextEngine();
 
     // Register with messenger
     this.messenger.register(this.agentId, (message) => this.handleMessage(message));
@@ -88,6 +90,16 @@ export class BaseAgent {
         agentName: this.name,
         input: this.sanitizeInput(input)
       });
+
+      // Assemble context from all sources
+      const assembledContext = this.contextEngine.assembleContext(this.agentId, input, {
+        sessionId: this.sessionId,
+        systemPrompt: `You are ${this.name}, a ${this.role} agent.`,
+        domain: input?.domain || context?.domain || null,
+        sellerId: input?.sellerId || context?.sellerId || null,
+        agentRole: this.role
+      });
+      context._assembledContext = assembledContext;
 
       // Step 1: THINK - Analyze the situation
       this.currentChain.observe('Received input for analysis', input);
