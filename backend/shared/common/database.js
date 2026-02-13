@@ -31,7 +31,9 @@ const memoryStore = {
   pipeline_runs: new Map(),
   alerts: new Map(),
   investigations: new Map(),
-  seller_images: new Map()
+  seller_images: new Map(),
+  seller_risk_profiles: new Map(),
+  risk_events: new Map()
 };
 
 /**
@@ -153,7 +155,9 @@ function getIdField(table) {
     alerts: 'alert_id',
     investigations: 'investigation_id',
     pipeline_runs: 'run_id',
-    seller_images: 'image_id'
+    seller_images: 'image_id',
+    seller_risk_profiles: 'seller_id',
+    risk_events: 'event_id'
   };
   return idFields[table] || 'id';
 }
@@ -475,7 +479,9 @@ export const db_ops = {
       'sellers', 'transactions', 'listings', 'payouts', 'ato_events',
       'shipments', 'ml_models', 'rules', 'experiments', 'datasets',
       'metrics_history', 'pipeline_runs', 'alerts', 'investigations',
-      'seller_images'
+      'seller_images',
+      'seller_risk_profiles',
+      'risk_events'
     ];
 
     const stats = { usingSqlite };
