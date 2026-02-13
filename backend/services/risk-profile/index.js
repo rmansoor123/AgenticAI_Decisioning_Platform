@@ -203,7 +203,7 @@ router.get('/stats', (req, res) => {
     let totalComposite = 0;
 
     allProfiles.forEach(p => {
-      tierCounts[p.tier] = (tierCounts[p.tier] || 0) + 1;
+      tierCounts[p.riskTier] = (tierCounts[p.riskTier] || 0) + 1;
       totalComposite += p.compositeScore;
     });
 
@@ -217,11 +217,9 @@ router.get('/stats', (req, res) => {
     // Recent escalations: tier changes to HIGH or CRITICAL in last 24h
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const recentEscalations = allProfiles.filter(p =>
-      (p.tier === 'HIGH' || p.tier === 'CRITICAL') &&
-      p.lastTierChange &&
-      p.lastTierChange > oneDayAgo &&
-      p.previousTier &&
-      tierLevel(p.tier) > tierLevel(p.previousTier)
+      (p.riskTier === 'HIGH' || p.riskTier === 'CRITICAL') &&
+      p.tierChangedAt &&
+      p.tierChangedAt > oneDayAgo
     ).length;
 
     res.json({
