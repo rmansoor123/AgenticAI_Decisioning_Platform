@@ -106,6 +106,7 @@ import executionRouter from '../services/decision-engine/execution/index.js';
 import abTestingRouter from '../services/experimentation/ab-testing/index.js';
 import simulationRouter from '../services/experimentation/simulation/index.js';
 import agentsRouter from '../services/agents/index.js';
+import riskProfileRouter from '../services/risk-profile/index.js';
 
 const app = express();
 const server = createServer(app);
@@ -143,6 +144,19 @@ initializeMLModels().catch(err => {
 // API ROUTES
 // ============================================================================
 
+// Root - helpful response so GET / doesn't 404
+app.get('/', (req, res) => {
+  res.json({
+    name: 'Fraud Detection Platform API',
+    message: 'Use the API at /api or open the dashboard in your browser.',
+    links: {
+      api: '/api',
+      health: '/api/health',
+      dashboard: 'Open the frontend (e.g. http://localhost:5176) for the UI'
+    }
+  });
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({
@@ -157,7 +171,8 @@ app.get('/api/health', (req, res) => {
       'data-platform': 'running',
       'ml-platform': 'running',
       'decision-engine': 'running',
-      'experimentation': 'running'
+      'experimentation': 'running',
+      'risk-profile': 'running'
     }
   });
 });
@@ -189,6 +204,8 @@ app.get('/api', (req, res) => {
       // Experimentation
       '/api/experiments': 'A/B Testing & Experiments',
       '/api/simulation': 'Rule Simulation Engine',
+      // Risk Profile
+      '/api/risk-profile': 'Seller Risk Profile Service',
       // Real-time
       '/api/metrics': 'Platform Metrics',
       '/api/stream': 'Transaction Stream',
@@ -224,6 +241,9 @@ app.use('/api/simulation', simulationRouter);
 
 // Agentic AI
 app.use('/api/agents', agentsRouter);
+
+// Risk Profile
+app.use('/api/risk-profile', riskProfileRouter);
 
 // ============================================================================
 // METRICS & DASHBOARD ENDPOINTS
@@ -446,6 +466,7 @@ server.listen(PORT, () => {
 ║   • Decision Engine      /api/decisions                       ║
 ║   • Experiments          /api/experiments                     ║
 ║   • Simulation           /api/simulation                      ║
+║   • Risk Profile       /api/risk-profile                    ║
 ║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
   `);
