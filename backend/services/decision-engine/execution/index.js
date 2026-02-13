@@ -1,6 +1,7 @@
 import express from 'express';
 import { db_ops } from '../../../shared/common/database.js';
 import { v4 as uuidv4 } from 'uuid';
+import { emitRiskEvent } from '../../risk-profile/emit-event.js';
 
 const router = express.Router();
 
@@ -77,6 +78,18 @@ router.post('/evaluate', (req, res) => {
     if (!dryRun) {
       decisionHistory.unshift(decision);
       if (decisionHistory.length > 10000) decisionHistory.pop();
+    }
+
+    // Emit risk events for transaction decisions
+    const txSellerId = transaction?.sellerId;
+    if (txSellerId && !dryRun) {
+      if (finalDecision === 'BLOCKED') {
+        emitRiskEvent({ sellerId: txSellerId, domain: 'transaction', eventType: 'TRANSACTION_BLOCKED', riskScore: 70, metadata: {} });
+      } else if (finalDecision === 'REVIEW') {
+        emitRiskEvent({ sellerId: txSellerId, domain: 'transaction', eventType: 'TRANSACTION_REVIEW', riskScore: 40, metadata: {} });
+      } else if (finalDecision === 'APPROVED') {
+        emitRiskEvent({ sellerId: txSellerId, domain: 'transaction', eventType: 'TRANSACTION_APPROVED', riskScore: -2, metadata: {} });
+      }
     }
 
     res.json({ success: true, data: decision });

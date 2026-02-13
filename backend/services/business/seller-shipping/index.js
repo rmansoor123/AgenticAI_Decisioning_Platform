@@ -1,6 +1,7 @@
 import express from 'express';
 import { db_ops } from '../../../shared/common/database.js';
 import { generateShipment } from '../../../shared/synthetic-data/generators.js';
+import { emitRiskEvent } from '../../risk-profile/emit-event.js';
 
 const router = express.Router();
 
@@ -55,6 +56,14 @@ router.post('/shipments', (req, res) => {
 
     db_ops.insert('shipments', 'shipment_id', shipmentData.shipmentId, shipmentData);
 
+    // Emit risk events for shipping
+    if (riskAssessment.riskLevel === 'HIGH' || riskAssessment?.riskScore >= 50) {
+      emitRiskEvent({
+        sellerId: shipmentData.sellerId, domain: 'shipping', eventType: 'SHIPPING_FLAGGED',
+        riskScore: riskAssessment?.riskScore || 50, metadata: { shipmentId: shipmentData.shipmentId }
+      });
+    }
+
     res.status(201).json({
       success: true,
       data: shipmentData,
@@ -93,6 +102,13 @@ router.patch('/shipments/:shipmentId/status', (req, res) => {
     }
 
     db_ops.update('shipments', 'shipment_id', req.params.shipmentId, updated);
+
+    if (req.body.status === 'DELIVERED') {
+      emitRiskEvent({
+        sellerId: existing.data.sellerId, domain: 'shipping', eventType: 'SHIPPING_DELIVERED',
+        riskScore: -3, metadata: {}
+      });
+    }
 
     res.json({ success: true, data: updated });
   } catch (error) {

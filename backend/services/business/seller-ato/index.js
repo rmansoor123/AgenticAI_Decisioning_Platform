@@ -1,6 +1,7 @@
 import express from 'express';
 import { db_ops } from '../../../shared/common/database.js';
 import { generateATOEvent } from '../../../shared/synthetic-data/generators.js';
+import { emitRiskEvent } from '../../risk-profile/emit-event.js';
 
 const router = express.Router();
 
@@ -80,6 +81,22 @@ router.post('/evaluate', (req, res) => {
     };
 
     db_ops.insert('ato_events', 'event_id', event.eventId, event);
+
+    // Emit risk events for ATO
+    emitRiskEvent({
+      sellerId, domain: 'ato', eventType: 'ATO_EVENT',
+      riskScore: evaluation.riskScore,
+      metadata: { signals: evaluation.signals, decision: evaluation.decision }
+    });
+    if (evaluation.decision === 'BLOCKED') {
+      emitRiskEvent({ sellerId, domain: 'ato', eventType: 'ATO_BLOCKED', riskScore: 75, metadata: {} });
+    }
+    if (evaluation.signals.impossibleTravel) {
+      emitRiskEvent({ sellerId, domain: 'ato', eventType: 'ATO_IMPOSSIBLE_TRAVEL', riskScore: 70, metadata: {} });
+    }
+    if (evaluation.signals.bruteForce) {
+      emitRiskEvent({ sellerId, domain: 'ato', eventType: 'ATO_BRUTE_FORCE', riskScore: 60, metadata: {} });
+    }
 
     res.json({
       success: true,

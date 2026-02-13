@@ -1,6 +1,7 @@
 import express from 'express';
 import { db_ops } from '../../../shared/common/database.js';
 import { generateListing } from '../../../shared/synthetic-data/generators.js';
+import { emitRiskEvent } from '../../risk-profile/emit-event.js';
 
 const router = express.Router();
 
@@ -61,6 +62,20 @@ router.post('/listings', (req, res) => {
     }
 
     db_ops.insert('listings', 'listing_id', listingData.listingId, listingData);
+
+    // Emit risk events for listing
+    if (listingData.status === 'REMOVED' || riskAssessment?.decision === 'REJECT') {
+      emitRiskEvent({
+        sellerId: listingData.sellerId, domain: 'listing', eventType: 'LISTING_REJECTED',
+        riskScore: riskAssessment?.riskScore || 50, metadata: { listingId: listingData.listingId }
+      });
+    }
+    if (listingData.status === 'ACTIVE') {
+      emitRiskEvent({
+        sellerId: listingData.sellerId, domain: 'listing', eventType: 'LISTING_APPROVED',
+        riskScore: -5, metadata: {}
+      });
+    }
 
     res.status(201).json({
       success: true,

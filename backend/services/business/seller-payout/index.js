@@ -1,6 +1,7 @@
 import express from 'express';
 import { db_ops } from '../../../shared/common/database.js';
 import { generatePayout } from '../../../shared/synthetic-data/generators.js';
+import { emitRiskEvent } from '../../risk-profile/emit-event.js';
 
 const router = express.Router();
 
@@ -87,6 +88,15 @@ router.post('/payouts', (req, res) => {
 
     db_ops.insert('payouts', 'payout_id', payout.payoutId, payout);
 
+    // Emit risk events for payout
+    if (payout.status === 'ON_HOLD' || riskAssessment?.decision === 'HOLD') {
+      emitRiskEvent({
+        sellerId: payout.sellerId, domain: 'payout', eventType: 'PAYOUT_HELD',
+        riskScore: riskAssessment?.riskScore || 45,
+        metadata: { amount: payout.amount }
+      });
+    }
+
     res.status(201).json({
       success: true,
       data: payout,
@@ -154,6 +164,12 @@ router.post('/payouts/:payoutId/release', (req, res) => {
     };
 
     db_ops.update('payouts', 'payout_id', req.params.payoutId, updated);
+
+    // Emit positive risk event for payout release
+    emitRiskEvent({
+      sellerId: existing.data.sellerId, domain: 'payout', eventType: 'PAYOUT_RELEASED',
+      riskScore: -20, metadata: { approvedBy: req.body.approvedBy }
+    });
 
     res.json({ success: true, data: updated });
   } catch (error) {

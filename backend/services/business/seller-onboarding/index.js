@@ -4,6 +4,7 @@ import { generateSeller } from '../../../shared/synthetic-data/generators.js';
 import { sellerOnboarding } from '../../../agents/index.js';
 import { createTestSellersWithConnections } from './test-connections.js';
 import { verifyIdWorkflow } from './id-verification.js';
+import { emitRiskEvent } from '../../risk-profile/emit-event.js';
 
 const router = express.Router();
 
@@ -114,6 +115,22 @@ router.post('/sellers', async (req, res) => {
 
     // Store seller
     db_ops.insert('sellers', 'seller_id', sellerId, sellerData);
+
+    // Emit risk events for onboarding
+    emitRiskEvent({
+      sellerId, domain: 'onboarding', eventType: 'ONBOARDING_RISK_ASSESSMENT',
+      riskScore: riskAssessment.riskScore || 0,
+      metadata: { decision: decision.action, confidence: decision.confidence }
+    });
+    if (!sellerData.kycVerified) {
+      emitRiskEvent({ sellerId, domain: 'onboarding', eventType: 'KYC_FAILED', riskScore: 40, metadata: {} });
+    }
+    if (!sellerData.bankVerified) {
+      emitRiskEvent({ sellerId, domain: 'onboarding', eventType: 'BANK_VERIFICATION_FAILED', riskScore: 30, metadata: {} });
+    }
+    if (decision.action === 'REJECT') {
+      emitRiskEvent({ sellerId, domain: 'onboarding', eventType: 'SELLER_BLOCKED', riskScore: 80, metadata: { reason: decision.reason } });
+    }
 
     // Update image seller_id references if images were saved with temp ID
     if (sellerData.idVerification?.savedImageIds) {
