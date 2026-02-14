@@ -10,6 +10,7 @@ import knowledgeBase from './004-knowledge-base.js';
 import agentMemory from './005-agent-memory.js';
 import orchestration from './006-orchestration.js';
 import observability from './007-observability.js';
+import caseQueue from './008-case-queue.js';
 
 const migrations = [
   { version: '001', name: 'initial-schema', migration: initialSchema },
@@ -18,7 +19,8 @@ const migrations = [
   { version: '004', name: 'knowledge-base', migration: knowledgeBase },
   { version: '005', name: 'agent-memory', migration: agentMemory },
   { version: '006', name: 'orchestration', migration: orchestration },
-  { version: '007', name: 'observability', migration: observability }
+  { version: '007', name: 'observability', migration: observability },
+  { version: '008', name: 'case-queue', migration: caseQueue }
 ];
 
 /**

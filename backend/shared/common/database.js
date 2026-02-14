@@ -40,7 +40,8 @@ const memoryStore = {
   workflow_checkpoints: new Map(),
   agent_metrics: new Map(),
   agent_traces: new Map(),
-  agent_decisions: new Map()
+  agent_decisions: new Map(),
+  cases: new Map()
 };
 
 /**
@@ -171,7 +172,8 @@ function getIdField(table) {
     workflow_checkpoints: 'checkpoint_id',
     agent_metrics: 'metric_id',
     agent_traces: 'trace_id',
-    agent_decisions: 'decision_id'
+    agent_decisions: 'decision_id',
+    cases: 'case_id'
   };
   return idFields[table] || 'id';
 }
@@ -502,7 +504,8 @@ export const db_ops = {
       'workflow_checkpoints',
       'agent_metrics',
       'agent_traces',
-      'agent_decisions'
+      'agent_decisions',
+      'cases'
     ];
 
     const stats = { usingSqlite };
