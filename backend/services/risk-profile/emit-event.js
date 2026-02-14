@@ -4,10 +4,17 @@ const HALF_LIFE_DAYS = 30;
 const DE_ESCALATION_COOLDOWN_MS = 48 * 60 * 60 * 1000;
 
 const DOMAIN_WEIGHTS = {
-  onboarding: 0.12, ato: 0.15, payout: 0.12,
-  listing: 0.07, shipping: 0.05, transaction: 0.07,
-  account_setup: 0.08, item_setup: 0.06, pricing: 0.08,
-  profile_updates: 0.08, shipments: 0.06, returns: 0.06
+  onboarding: 0.12,
+  ato: 0.14,
+  payout: 0.12,
+  listing: 0.07,
+  shipping: 0.10,
+  transaction: 0.08,
+  account_setup: 0.08,
+  item_setup: 0.07,
+  pricing: 0.08,
+  profile_updates: 0.07,
+  returns: 0.07
 };
 
 function calculateDecayedScore(originalScore, createdAt) {
