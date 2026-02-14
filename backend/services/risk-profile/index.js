@@ -17,12 +17,18 @@ const TIER_THRESHOLDS = {
 };
 
 const DOMAIN_WEIGHTS = {
-  onboarding:  0.20,
-  ato:         0.25,
-  payout:      0.20,
-  listing:     0.15,
-  shipping:    0.10,
-  transaction: 0.10
+  onboarding:  0.12,
+  ato:         0.15,
+  payout:      0.12,
+  listing:     0.07,
+  shipping:    0.05,
+  transaction: 0.07,
+  account_setup: 0.08,
+  item_setup:    0.06,
+  pricing:       0.08,
+  profile_updates: 0.08,
+  shipments:     0.06,
+  returns:       0.06
 };
 
 // ── Core Functions ───────────────────────────────────────────────────────────
@@ -175,12 +181,14 @@ router.get('/high-risk', (req, res) => {
       .sort((a, b) => b.compositeScore - a.compositeScore)
       .slice(0, parseInt(limit));
 
-    // Enrich with seller info
+    // Enrich with seller info (flatten for frontend compatibility)
     const enriched = allProfiles.map(profile => {
       const sellerRecord = db_ops.getById('sellers', 'seller_id', profile.sellerId);
       const sellerData = sellerRecord ? sellerRecord.data : {};
       return {
         ...profile,
+        tier: profile.riskTier,
+        businessName: sellerData.businessName || null,
         seller: {
           businessName: sellerData.businessName || null,
           email: sellerData.email || null,
@@ -228,6 +236,7 @@ router.get('/stats', (req, res) => {
       data: {
         totalProfiles,
         tierCounts,
+        byTier: tierCounts,
         avgCompositeScore,
         totalEvents,
         recentEscalations
@@ -300,7 +309,9 @@ router.get('/:sellerId', (req, res) => {
     if (!record) {
       return res.status(404).json({ success: false, error: 'Risk profile not found' });
     }
-    res.json({ success: true, data: record.data });
+    const sellerRecord = db_ops.getById('sellers', 'seller_id', req.params.sellerId);
+    const sellerData = sellerRecord ? sellerRecord.data : {};
+    res.json({ success: true, data: { ...record.data, tier: record.data.riskTier, businessName: sellerData.businessName || null } });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
