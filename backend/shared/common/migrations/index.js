@@ -8,13 +8,15 @@ import sellerImages from './002-seller-images.js';
 import riskProfiles from './003-risk-profiles.js';
 import knowledgeBase from './004-knowledge-base.js';
 import agentMemory from './005-agent-memory.js';
+import orchestration from './006-orchestration.js';
 
 const migrations = [
   { version: '001', name: 'initial-schema', migration: initialSchema },
   { version: '002', name: 'seller-images', migration: sellerImages },
   { version: '003', name: 'risk-profiles', migration: riskProfiles },
   { version: '004', name: 'knowledge-base', migration: knowledgeBase },
-  { version: '005', name: 'agent-memory', migration: agentMemory }
+  { version: '005', name: 'agent-memory', migration: agentMemory },
+  { version: '006', name: 'orchestration', migration: orchestration }
 ];
 
 /**

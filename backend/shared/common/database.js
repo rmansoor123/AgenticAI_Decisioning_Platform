@@ -36,7 +36,8 @@ const memoryStore = {
   risk_events: new Map(),
   knowledge_entries: new Map(),
   agent_short_term_memory: new Map(),
-  agent_long_term_memory: new Map()
+  agent_long_term_memory: new Map(),
+  workflow_checkpoints: new Map()
 };
 
 /**
@@ -163,7 +164,8 @@ function getIdField(table) {
     risk_events: 'event_id',
     knowledge_entries: 'knowledge_id',
     agent_short_term_memory: 'memory_id',
-    agent_long_term_memory: 'memory_id'
+    agent_long_term_memory: 'memory_id',
+    workflow_checkpoints: 'checkpoint_id'
   };
   return idFields[table] || 'id';
 }
@@ -490,7 +492,8 @@ export const db_ops = {
       'risk_events',
       'knowledge_entries',
       'agent_short_term_memory',
-      'agent_long_term_memory'
+      'agent_long_term_memory',
+      'workflow_checkpoints'
     ];
 
     const stats = { usingSqlite };

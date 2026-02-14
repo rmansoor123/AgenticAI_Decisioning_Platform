@@ -12,6 +12,9 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { getAgentMessenger, MESSAGE_TYPES } from './agent-messenger.js';
+import { getCircuitBreaker } from './circuit-breaker.js';
+import { getAgentRouter } from './agent-router.js';
+import { db_ops } from '../../shared/common/database.js';
 
 class AgentOrchestrator {
   constructor() {
@@ -22,6 +25,7 @@ class AgentOrchestrator {
     this.eventLog = [];
     this.humanEscalations = [];
     this.messenger = getAgentMessenger();
+    this.router = getAgentRouter();
 
     // Start help request routing
     this._startHelpRequestRouting();
@@ -137,6 +141,7 @@ class AgentOrchestrator {
   // Register an agent with the orchestrator
   registerAgent(agent) {
     this.agents.set(agent.agentId, agent);
+    this.router.registerAgent(agent.agentId, agent.capabilities || []);
     this.log('AGENT_REGISTERED', {
       agentId: agent.agentId,
       name: agent.name,
@@ -218,7 +223,18 @@ class AgentOrchestrator {
         const step = workflow.steps[i];
         execution.currentStep = i;
 
-        const stepResult = await this.executeStep(step, context, execution);
+        let stepResult;
+        if (step.type === 'conditional') {
+          stepResult = await this.executeConditionalStep(step, context, execution);
+        } else {
+          stepResult = await this.executeStepWithRetry(step, context, execution);
+        }
+
+        // Save checkpoint after each successful step
+        if (stepResult.status === 'COMPLETED') {
+          this.saveCheckpoint(execution.executionId, i, context);
+        }
+
         execution.steps.push(stepResult);
 
         if (stepResult.status === 'FAILED' && !step.continueOnError) {
@@ -303,6 +319,113 @@ class AgentOrchestrator {
     stepResult.completedAt = new Date().toISOString();
     stepResult.duration = Date.now() - startTime;
     return stepResult;
+  }
+
+  // Execute a step with retry logic and circuit breaker integration
+  async executeStepWithRetry(step, context, execution) {
+    const maxRetries = step.maxRetries || 3;
+    const backoffMs = step.backoffMs || 1000;
+    const backoffMultiplier = step.backoffMultiplier || 2;
+
+    const agentId = step.agent;
+    const breaker = getCircuitBreaker(agentId);
+
+    if (!breaker.canExecute()) {
+      return {
+        stepName: step.name,
+        status: 'CIRCUIT_OPEN',
+        error: `Circuit breaker open for agent ${agentId}`,
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        duration: 0
+      };
+    }
+
+    let lastError = null;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        this.router.taskStarted(agentId);
+        const startTime = Date.now();
+        const result = await this.executeStep(step, context, execution);
+        const duration = Date.now() - startTime;
+        this.router.taskCompleted(agentId, result.status === 'COMPLETED', duration);
+
+        if (result.status === 'COMPLETED' || result.status === 'ESCALATED') {
+          breaker.recordSuccess();
+          return result;
+        }
+
+        lastError = result.error;
+        breaker.recordFailure();
+      } catch (error) {
+        lastError = error.message;
+        breaker.recordFailure();
+        this.router.taskCompleted(agentId, false, 0);
+      }
+
+      if (attempt < maxRetries) {
+        const delay = backoffMs * Math.pow(backoffMultiplier, attempt);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        this.log('STEP_RETRY', { step: step.name, attempt: attempt + 1, delay });
+      }
+    }
+
+    return {
+      stepName: step.name,
+      status: 'FAILED',
+      error: `Failed after ${maxRetries + 1} attempts: ${lastError}`,
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      duration: 0
+    };
+  }
+
+  // Execute a conditional branching step
+  async executeConditionalStep(step, context, execution) {
+    const branchKey = step.evaluate(context);
+    const branchSteps = step.branches[branchKey];
+
+    if (!branchSteps) {
+      return { stepName: step.name, status: 'FAILED', error: `No branch for key: ${branchKey}` };
+    }
+
+    this.log('CONDITIONAL_BRANCH', { step: step.name, branch: branchKey });
+
+    const results = [];
+    for (const subStep of branchSteps) {
+      const result = await this.executeStepWithRetry(subStep, context, execution);
+      results.push(result);
+      if (result.status === 'FAILED' && !subStep.continueOnError) break;
+      context[subStep.outputKey || `sub_${results.length}`] = result.output;
+    }
+
+    return {
+      stepName: step.name,
+      status: results.every(r => r.status !== 'FAILED') ? 'COMPLETED' : 'FAILED',
+      branch: branchKey,
+      subResults: results
+    };
+  }
+
+  // Save workflow checkpoint for resumability
+  saveCheckpoint(executionId, stepIndex, state) {
+    const checkpointId = `${executionId}-step-${stepIndex}`;
+    db_ops.insert('workflow_checkpoints', 'checkpoint_id', checkpointId, {
+      executionId,
+      stepIndex,
+      state,
+      status: 'saved',
+      savedAt: new Date().toISOString()
+    });
+  }
+
+  // Load the latest checkpoint for an execution
+  loadCheckpoint(executionId) {
+    const all = db_ops.getAll('workflow_checkpoints', 100, 0)
+      .map(r => r.data)
+      .filter(c => c.executionId === executionId)
+      .sort((a, b) => b.stepIndex - a.stepIndex);
+    return all[0] || null;
   }
 
   // Direct task assignment to an agent
