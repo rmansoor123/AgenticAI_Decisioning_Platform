@@ -100,7 +100,7 @@ async function seedDatabase() {
         db_ops.insert('profile_updates', 'update_id', update.updateId, update);
       }
       const shipment = generateOutboundShipment(sid);
-      db_ops.insert('outbound_shipments', 'shipment_id', shipment.shipmentId, shipment);
+      db_ops.insert('shipments', 'shipment_id', shipment.shipmentId, shipment);
       const ret = generateReturn(sid);
       db_ops.insert('returns', 'return_id', ret.returnId, ret);
     });
@@ -147,7 +147,7 @@ async function seedDatabase() {
   console.log(`  Item Setups: ${db_ops.count('item_setups')}`);
   console.log(`  Pricing Records: ${db_ops.count('pricing_records')}`);
   console.log(`  Profile Updates: ${db_ops.count('profile_updates')}`);
-  console.log(`  Outbound Shipments: ${db_ops.count('outbound_shipments')}`);
+  console.log(`  Shipments (combined): ${db_ops.count('shipments')}`);
   console.log(`  Returns: ${db_ops.count('returns')}`);
 
   // Seed risk profiles for existing sellers
@@ -277,7 +277,7 @@ async function seedDatabase() {
       else if (riskScore > 60) priority = 'HIGH';
       else if (riskScore > 40) priority = 'MEDIUM';
 
-      const checkpoints = ['onboarding', 'ato', 'payout', 'listing', 'shipping', 'transaction', 'account_setup', 'item_setup', 'pricing', 'profile_updates', 'shipments', 'returns'];
+      const checkpoints = ['onboarding', 'ato', 'payout', 'listing', 'shipping', 'transaction', 'account_setup', 'item_setup', 'pricing', 'profile_updates', 'returns'];
       const statuses = ['OPEN', 'OPEN', 'OPEN', 'IN_REVIEW', 'IN_REVIEW', 'RESOLVED'];
       const status = statuses[Math.floor(Math.random() * statuses.length)];
       const analysts = ['alice@fraud-team.com', 'bob@fraud-team.com', 'carol@fraud-team.com', null, null];
@@ -342,7 +342,6 @@ import accountSetupRouter from '../services/business/account-setup/index.js';
 import itemSetupRouter from '../services/business/item-setup/index.js';
 import pricingRouter from '../services/business/pricing/index.js';
 import profileUpdatesRouter from '../services/business/profile-updates/index.js';
-import shipmentsRouter from '../services/business/shipments/index.js';
 import returnsRouter from '../services/business/returns/index.js';
 
 const app = express();
@@ -416,7 +415,6 @@ app.get('/api/health', (req, res) => {
       'item-setup': 'running',
       'pricing': 'running',
       'profile-updates': 'running',
-      'shipments-outbound': 'running',
       'returns': 'running'
     }
   });
@@ -460,7 +458,6 @@ app.get('/api', (req, res) => {
       '/api/item-setup': 'Item Setup Service',
       '/api/pricing': 'Pricing Service',
       '/api/profile-updates': 'Profile Updates Service',
-      '/api/shipments': 'Shipments Service',
       '/api/returns': 'Returns Service',
       // Real-time
       '/api/metrics': 'Platform Metrics',
@@ -482,7 +479,6 @@ app.use('/api/account-setup', accountSetupRouter);
 app.use('/api/item-setup', itemSetupRouter);
 app.use('/api/pricing', pricingRouter);
 app.use('/api/profile-updates', profileUpdatesRouter);
-app.use('/api/shipments', shipmentsRouter);
 app.use('/api/returns', returnsRouter);
 
 // Data Platform
@@ -743,7 +739,6 @@ server.listen(PORT, () => {
 ║   • Item Setup         /api/item-setup                   ║
 ║   • Pricing            /api/pricing                      ║
 ║   • Profile Updates    /api/profile-updates              ║
-║   • Shipments          /api/shipments                    ║
 ║   • Returns            /api/returns                      ║
 ║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
