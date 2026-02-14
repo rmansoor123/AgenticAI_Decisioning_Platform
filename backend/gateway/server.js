@@ -18,6 +18,36 @@ async function seedDatabase() {
     console.log(`  ML Models: ${db_ops.count('ml_models')}`);
     console.log(`  Rules: ${db_ops.count('rules')}`);
     console.log(`  Experiments: ${db_ops.count('experiments')}`);
+
+    // Ensure knowledge base is populated even on restart
+    const { getKnowledgeBase } = await import('../agents/core/knowledge-base.js');
+    const kb = getKnowledgeBase();
+    if (kb.getStats().totalEntries === 0) {
+      const allTx = db_ops.getAll('transactions', 100, 0).map(t => t.data);
+      kb.addKnowledge('transactions', allTx.slice(0, 50).map(tx => ({
+        _id: tx.transactionId,
+        text: `Transaction ${tx.transactionId}: amount $${tx.amount}, merchant ${tx.merchant || 'Unknown'}, risk score ${tx.riskScore || 0}. Decision: ${tx.decision || 'APPROVED'}`,
+        category: 'transaction',
+        sellerId: tx.sellerId,
+        domain: 'transaction',
+        outcome: tx.decision === 'BLOCKED' ? 'fraud' : 'legitimate',
+        riskScore: tx.riskScore || 0,
+        source: 'seed-data'
+      })));
+      const allOnboarding = db_ops.getAll('sellers', 100, 0).map(s => s.data);
+      kb.addKnowledge('onboarding', allOnboarding.slice(0, 50).map(s => ({
+        _id: s.sellerId,
+        text: `Seller ${s.businessName}: category ${s.businessCategory || 'Unknown'}, country ${s.country || 'US'}, status ${s.status || 'ACTIVE'}, risk ${s.riskTier || 'LOW'}`,
+        category: 'onboarding',
+        sellerId: s.sellerId,
+        domain: 'onboarding',
+        outcome: s.status === 'BLOCKED' ? 'fraud' : 'legitimate',
+        riskScore: s.riskScore || 0,
+        source: 'seed-data'
+      })));
+      console.log(`  Knowledge Base: ${kb.getStats().totalEntries} entries (re-seeded)`);
+    }
+
     return;
   }
 
@@ -122,6 +152,38 @@ async function seedDatabase() {
 
   console.log(`  Risk Profiles: ${db_ops.count('seller_risk_profiles')}`);
   console.log(`  Risk Events: ${db_ops.count('risk_events')}`);
+
+  // Seed knowledge base with historical data
+  const { getKnowledgeBase } = await import('../agents/core/knowledge-base.js');
+  const kb = getKnowledgeBase();
+
+  // Seed transaction knowledge
+  const allTx = db_ops.getAll('transactions', 100, 0).map(t => t.data);
+  kb.addKnowledge('transactions', allTx.slice(0, 50).map(tx => ({
+    _id: tx.transactionId,
+    text: `Transaction ${tx.transactionId}: amount $${tx.amount}, merchant ${tx.merchant || 'Unknown'}, risk score ${tx.riskScore || 0}. Decision: ${tx.decision || 'APPROVED'}`,
+    category: 'transaction',
+    sellerId: tx.sellerId,
+    domain: 'transaction',
+    outcome: tx.decision === 'BLOCKED' ? 'fraud' : 'legitimate',
+    riskScore: tx.riskScore || 0,
+    source: 'seed-data'
+  })));
+
+  // Seed onboarding knowledge
+  const allOnboarding = db_ops.getAll('sellers', 100, 0).map(s => s.data);
+  kb.addKnowledge('onboarding', allOnboarding.slice(0, 50).map(s => ({
+    _id: s.sellerId,
+    text: `Seller ${s.businessName}: category ${s.businessCategory || 'Unknown'}, country ${s.country || 'US'}, status ${s.status || 'ACTIVE'}, risk ${s.riskTier || 'LOW'}`,
+    category: 'onboarding',
+    sellerId: s.sellerId,
+    domain: 'onboarding',
+    outcome: s.status === 'BLOCKED' ? 'fraud' : 'legitimate',
+    riskScore: s.riskScore || 0,
+    source: 'seed-data'
+  })));
+
+  console.log(`  Knowledge Base: ${kb.getStats().totalEntries} entries`);
 }
 
 // Import service routers

@@ -12,6 +12,7 @@ import {
   alertTriage,
   sellerOnboarding
 } from '../../agents/index.js';
+import { getAgentCoordinator } from '../../agents/core/agent-coordinator.js';
 
 const router = express.Router();
 
@@ -444,6 +445,34 @@ router.post('/demo', async (req, res) => {
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
+});
+
+// ============================================================================
+// COORDINATION ENDPOINTS
+// ============================================================================
+
+// Consensus-based investigation
+router.post('/consensus/investigate', async (req, res) => {
+  try {
+    const { transactionId, strategy = 'majority' } = req.body;
+    if (!transactionId) {
+      return res.status(400).json({ success: false, error: 'transactionId is required' });
+    }
+
+    const coordinator = getAgentCoordinator();
+    const agentIds = Array.from(orchestrator.agents.keys());
+    const result = await coordinator.runConsensus(agentIds, { transactionId, type: 'fraud_investigation' }, strategy);
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get coordination stats
+router.get('/coordination/stats', (req, res) => {
+  const coordinator = getAgentCoordinator();
+  res.json({ success: true, data: coordinator ? coordinator.getStats() : {} });
 });
 
 export default router;
