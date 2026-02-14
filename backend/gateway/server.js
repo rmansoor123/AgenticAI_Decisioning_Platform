@@ -5,7 +5,7 @@ import { createServer } from 'http';
 import { initializeDatabase, isSeeded, db_ops } from '../shared/common/database.js';
 import { initializeMLModels } from '../services/ml-platform/models/model-loader.js';
 import generators from '../shared/synthetic-data/generators.js';
-const { generateTransaction, generateMetricsSnapshot, generateSeller, generateListing, generatePayout, generateATOEvent, generateShipment, generateMLModel, generateRule, generateExperiment, generateDataset } = generators;
+const { generateTransaction, generateMetricsSnapshot, generateSeller, generateListing, generatePayout, generateATOEvent, generateShipment, generateMLModel, generateRule, generateExperiment, generateDataset, generateCheckpointRules } = generators;
 
 // Seed database with initial data (only if not already seeded)
 async function seedDatabase() {
@@ -98,6 +98,13 @@ async function seedDatabase() {
     db_ops.insert('rules', 'rule_id', rule.ruleId, rule);
   }
 
+  // Seed checkpoint-specific rules
+  const checkpointRules = generateCheckpointRules();
+  checkpointRules.forEach(rule => {
+    db_ops.insert('rules', 'rule_id', rule.ruleId, rule);
+  });
+  console.log(`  Checkpoint Rules: ${checkpointRules.length}`);
+
   // Seed experiments
   for (let i = 0; i < 12; i++) {
     const exp = generateExperiment();
@@ -184,6 +191,48 @@ async function seedDatabase() {
   })));
 
   console.log(`  Knowledge Base: ${kb.getStats().totalEntries} entries`);
+
+  // Seed investigation cases from recent transactions
+  const txForCases = db_ops.getAll('transactions', 100, 0).map(t => t.data);
+  let caseCount = 0;
+  txForCases.slice(0, 30).forEach(tx => {
+    if (tx.riskScore > 50 || Math.random() > 0.7) {
+      const riskScore = tx.riskScore || Math.floor(Math.random() * 60) + 30;
+      let priority = 'LOW';
+      if (riskScore > 80) priority = 'CRITICAL';
+      else if (riskScore > 60) priority = 'HIGH';
+      else if (riskScore > 40) priority = 'MEDIUM';
+
+      const checkpoints = ['onboarding', 'ato', 'payout', 'listing', 'shipping', 'transaction'];
+      const statuses = ['OPEN', 'OPEN', 'OPEN', 'IN_REVIEW', 'IN_REVIEW', 'RESOLVED'];
+      const status = statuses[Math.floor(Math.random() * statuses.length)];
+      const analysts = ['alice@fraud-team.com', 'bob@fraud-team.com', 'carol@fraud-team.com', null, null];
+
+      const caseId = `CASE-SEED-${String(caseCount + 1).padStart(3, '0')}`;
+      const caseData = {
+        caseId,
+        status,
+        priority,
+        sourceType: 'transaction',
+        sourceId: tx.transactionId,
+        checkpoint: checkpoints[Math.floor(Math.random() * checkpoints.length)],
+        sellerId: tx.sellerId || null,
+        riskScore,
+        triggeredRules: [],
+        decision: riskScore > 70 ? 'BLOCK' : 'REVIEW',
+        assignee: status !== 'OPEN' ? analysts[Math.floor(Math.random() * 3)] : null,
+        notes: status === 'RESOLVED' ? [{ author: 'system', text: 'Auto-resolved during seeding', timestamp: new Date().toISOString() }] : [],
+        resolution: status === 'RESOLVED' ? (Math.random() > 0.5 ? 'CONFIRMED_FRAUD' : 'FALSE_POSITIVE') : null,
+        resolvedAt: status === 'RESOLVED' ? new Date().toISOString() : null,
+        createdAt: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      db_ops.insert('cases', 'case_id', caseId, caseData);
+      caseCount++;
+    }
+  });
+  console.log(`  Cases: ${caseCount}`);
 }
 
 // Import service routers
@@ -205,6 +254,7 @@ import simulationRouter from '../services/experimentation/simulation/index.js';
 import agentsRouter from '../services/agents/index.js';
 import riskProfileRouter from '../services/risk-profile/index.js';
 import observabilityRouter from '../services/observability/index.js';
+import caseQueueRouter from '../services/case-queue/index.js';
 
 const app = express();
 const server = createServer(app);
@@ -271,7 +321,8 @@ app.get('/api/health', (req, res) => {
       'decision-engine': 'running',
       'experimentation': 'running',
       'risk-profile': 'running',
-      'observability': 'running'
+      'observability': 'running',
+      'case-queue': 'running'
     }
   });
 });
@@ -307,6 +358,8 @@ app.get('/api', (req, res) => {
       '/api/risk-profile': 'Seller Risk Profile Service',
       // Observability
       '/api/observability': 'Agent Observability & Monitoring',
+      // Case Queue
+      '/api/cases': 'Case Investigation Queue',
       // Real-time
       '/api/metrics': 'Platform Metrics',
       '/api/stream': 'Transaction Stream',
@@ -348,6 +401,9 @@ app.use('/api/risk-profile', riskProfileRouter);
 
 // Observability
 app.use('/api/observability', observabilityRouter);
+
+// Case Queue
+app.use('/api/cases', caseQueueRouter);
 
 // ============================================================================
 // METRICS & DASHBOARD ENDPOINTS
@@ -572,6 +628,7 @@ server.listen(PORT, () => {
 ║   • Simulation           /api/simulation                      ║
 ║   • Risk Profile       /api/risk-profile                    ║
 ║   • Observability       /api/observability                   ║
+║   • Case Queue          /api/cases                           ║
 ║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
   `);
