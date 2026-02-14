@@ -5,7 +5,7 @@ import { createServer } from 'http';
 import { initializeDatabase, isSeeded, db_ops } from '../shared/common/database.js';
 import { initializeMLModels } from '../services/ml-platform/models/model-loader.js';
 import generators from '../shared/synthetic-data/generators.js';
-const { generateTransaction, generateMetricsSnapshot, generateSeller, generateListing, generatePayout, generateATOEvent, generateShipment, generateMLModel, generateRule, generateExperiment, generateDataset, generateCheckpointRules } = generators;
+const { generateTransaction, generateMetricsSnapshot, generateSeller, generateListing, generatePayout, generateATOEvent, generateShipment, generateMLModel, generateRule, generateExperiment, generateDataset, generateCheckpointRules, generateAccountSetup, generateItemSetup, generatePricingRecord, generateProfileUpdate, generateOutboundShipment, generateReturn } = generators;
 
 // Seed database with initial data (only if not already seeded)
 async function seedDatabase() {
@@ -86,6 +86,25 @@ async function seedDatabase() {
     }
   });
 
+    // Seed new business services
+    sellers.slice(0, 50).forEach(s => {
+      const sid = s.data.sellerId;
+      const setup = generateAccountSetup(sid);
+      db_ops.insert('account_setups', 'setup_id', setup.setupId, setup);
+      const item = generateItemSetup(sid);
+      db_ops.insert('item_setups', 'item_id', item.itemId, item);
+      const pricing = generatePricingRecord(sid);
+      db_ops.insert('pricing_records', 'pricing_id', pricing.pricingId, pricing);
+      for (let i = 0; i < 2; i++) {
+        const update = generateProfileUpdate(sid);
+        db_ops.insert('profile_updates', 'update_id', update.updateId, update);
+      }
+      const shipment = generateOutboundShipment(sid);
+      db_ops.insert('outbound_shipments', 'shipment_id', shipment.shipmentId, shipment);
+      const ret = generateReturn(sid);
+      db_ops.insert('returns', 'return_id', ret.returnId, ret);
+    });
+
   // Seed ML models
   for (let i = 0; i < 15; i++) {
     const model = generateMLModel();
@@ -124,36 +143,91 @@ async function seedDatabase() {
   console.log(`  ML Models: ${db_ops.count('ml_models')}`);
   console.log(`  Rules: ${db_ops.count('rules')}`);
   console.log(`  Experiments: ${db_ops.count('experiments')}`);
+  console.log(`  Account Setups: ${db_ops.count('account_setups')}`);
+  console.log(`  Item Setups: ${db_ops.count('item_setups')}`);
+  console.log(`  Pricing Records: ${db_ops.count('pricing_records')}`);
+  console.log(`  Profile Updates: ${db_ops.count('profile_updates')}`);
+  console.log(`  Outbound Shipments: ${db_ops.count('outbound_shipments')}`);
+  console.log(`  Returns: ${db_ops.count('returns')}`);
 
   // Seed risk profiles for existing sellers
   const { emitRiskEvent } = await import('../services/risk-profile/emit-event.js');
   const allSellersForRisk = db_ops.getAll('sellers', 100, 0).map(s => s.data);
 
   allSellersForRisk.forEach(seller => {
-    // Emit onboarding event based on existing risk score
+    const baseScore = seller.riskScore || Math.floor(Math.random() * 100);
+    const isHighRisk = seller.riskTier === 'HIGH' || seller.riskTier === 'CRITICAL';
+    const isMedRisk = seller.riskTier === 'MEDIUM';
+
+    // Emit onboarding event using actual seller risk score (not capped)
     emitRiskEvent({
       sellerId: seller.sellerId,
       domain: 'onboarding',
       eventType: 'ONBOARDING_RISK_ASSESSMENT',
-      riskScore: seller.riskScore || Math.floor(Math.random() * 60),
+      riskScore: baseScore,
       metadata: { seeded: true }
     });
 
-    // Randomly add historical events for variety
-    if (Math.random() > 0.7) {
-      emitRiskEvent({ sellerId: seller.sellerId, domain: 'ato', eventType: 'ATO_EVENT', riskScore: Math.floor(Math.random() * 50) + 10, metadata: { seeded: true } });
-    }
-    if (Math.random() > 0.8) {
-      emitRiskEvent({ sellerId: seller.sellerId, domain: 'payout', eventType: 'PAYOUT_HELD', riskScore: Math.floor(Math.random() * 40) + 20, metadata: { seeded: true } });
-    }
-    if (Math.random() > 0.6) {
-      emitRiskEvent({ sellerId: seller.sellerId, domain: 'listing', eventType: 'LISTING_APPROVED', riskScore: -5, metadata: { seeded: true } });
-    }
-    if (Math.random() > 0.85) {
-      emitRiskEvent({ sellerId: seller.sellerId, domain: 'shipping', eventType: 'SHIPPING_FLAGGED', riskScore: Math.floor(Math.random() * 40) + 30, metadata: { seeded: true } });
-    }
-    if (Math.random() > 0.5) {
-      emitRiskEvent({ sellerId: seller.sellerId, domain: 'transaction', eventType: 'TRANSACTION_APPROVED', riskScore: -2, metadata: { seeded: true } });
+    // High-risk sellers get multiple domain events with high scores
+    if (isHighRisk) {
+      emitRiskEvent({ sellerId: seller.sellerId, domain: 'ato', eventType: 'MULTIPLE_FAILED_LOGINS', riskScore: Math.floor(Math.random() * 40) + 60, metadata: { seeded: true } });
+      emitRiskEvent({ sellerId: seller.sellerId, domain: 'payout', eventType: 'PAYOUT_VELOCITY_SPIKE', riskScore: Math.floor(Math.random() * 30) + 50, metadata: { seeded: true } });
+      emitRiskEvent({ sellerId: seller.sellerId, domain: 'shipping', eventType: 'ADDRESS_MISMATCH', riskScore: Math.floor(Math.random() * 30) + 50, metadata: { seeded: true } });
+      if (Math.random() > 0.4) {
+        emitRiskEvent({ sellerId: seller.sellerId, domain: 'listing', eventType: 'BELOW_MARKET_PRICE', riskScore: Math.floor(Math.random() * 30) + 40, metadata: { seeded: true } });
+      }
+      if (Math.random() > 0.3) {
+        emitRiskEvent({ sellerId: seller.sellerId, domain: 'transaction', eventType: 'VELOCITY_SPIKE', riskScore: Math.floor(Math.random() * 40) + 50, metadata: { seeded: true } });
+      }
+      emitRiskEvent({ sellerId: seller.sellerId, domain: 'account_setup', eventType: 'SHARED_PAYMENT_METHOD', riskScore: Math.floor(Math.random() * 30) + 40, metadata: { seeded: true } });
+      emitRiskEvent({ sellerId: seller.sellerId, domain: 'pricing', eventType: 'PRICE_MANIPULATION', riskScore: Math.floor(Math.random() * 30) + 45, metadata: { seeded: true } });
+      if (Math.random() > 0.4) {
+        emitRiskEvent({ sellerId: seller.sellerId, domain: 'returns', eventType: 'HIGH_RETURN_RATE', riskScore: Math.floor(Math.random() * 30) + 40, metadata: { seeded: true } });
+      }
+      if (Math.random() > 0.5) {
+        emitRiskEvent({ sellerId: seller.sellerId, domain: 'profile_updates', eventType: 'BANK_CHANGE_DURING_DISPUTE', riskScore: Math.floor(Math.random() * 30) + 50, metadata: { seeded: true } });
+      }
+    } else if (isMedRisk) {
+      // Medium-risk sellers get some elevated events
+      emitRiskEvent({ sellerId: seller.sellerId, domain: 'ato', eventType: 'NEW_DEVICE_LOGIN', riskScore: Math.floor(Math.random() * 30) + 30, metadata: { seeded: true } });
+      if (Math.random() > 0.4) {
+        emitRiskEvent({ sellerId: seller.sellerId, domain: 'payout', eventType: 'FIRST_PAYOUT_REVIEW', riskScore: Math.floor(Math.random() * 30) + 25, metadata: { seeded: true } });
+      }
+      if (Math.random() > 0.5) {
+        emitRiskEvent({ sellerId: seller.sellerId, domain: 'shipping', eventType: 'FREIGHT_FORWARDER', riskScore: Math.floor(Math.random() * 25) + 20, metadata: { seeded: true } });
+      }
+      if (Math.random() > 0.6) {
+        emitRiskEvent({ sellerId: seller.sellerId, domain: 'transaction', eventType: 'CROSS_BORDER_NEW_ACCOUNT', riskScore: Math.floor(Math.random() * 20) + 15, metadata: { seeded: true } });
+      }
+      if (Math.random() > 0.4) {
+        emitRiskEvent({ sellerId: seller.sellerId, domain: 'account_setup', eventType: 'INCOMPLETE_TAX_CONFIG', riskScore: Math.floor(Math.random() * 20) + 15, metadata: { seeded: true } });
+      }
+      if (Math.random() > 0.5) {
+        emitRiskEvent({ sellerId: seller.sellerId, domain: 'item_setup', eventType: 'MISSING_COMPLIANCE', riskScore: Math.floor(Math.random() * 20) + 10, metadata: { seeded: true } });
+      }
+      if (Math.random() > 0.5) {
+        emitRiskEvent({ sellerId: seller.sellerId, domain: 'pricing', eventType: 'RAPID_PRICE_CHANGE', riskScore: Math.floor(Math.random() * 20) + 15, metadata: { seeded: true } });
+      }
+    } else {
+      // Low-risk sellers get occasional minor events
+      if (Math.random() > 0.7) {
+        emitRiskEvent({ sellerId: seller.sellerId, domain: 'ato', eventType: 'ATO_CHECK_PASSED', riskScore: Math.floor(Math.random() * 15), metadata: { seeded: true } });
+      }
+      if (Math.random() > 0.8) {
+        emitRiskEvent({ sellerId: seller.sellerId, domain: 'payout', eventType: 'PAYOUT_APPROVED', riskScore: Math.floor(Math.random() * 10), metadata: { seeded: true } });
+      }
+      if (Math.random() > 0.6) {
+        emitRiskEvent({ sellerId: seller.sellerId, domain: 'listing', eventType: 'LISTING_APPROVED', riskScore: -5, metadata: { seeded: true } });
+      }
+      if (Math.random() > 0.5) {
+        emitRiskEvent({ sellerId: seller.sellerId, domain: 'transaction', eventType: 'TRANSACTION_APPROVED', riskScore: -2, metadata: { seeded: true } });
+      }
+      if (Math.random() > 0.8) {
+        emitRiskEvent({ sellerId: seller.sellerId, domain: 'account_setup', eventType: 'ACCOUNT_SETUP_OK', riskScore: -3, metadata: { seeded: true } });
+      }
+      if (Math.random() > 0.8) {
+        emitRiskEvent({ sellerId: seller.sellerId, domain: 'returns', eventType: 'RETURN_PROCESSED', riskScore: -2, metadata: { seeded: true } });
+      }
     }
   });
 
@@ -203,10 +277,18 @@ async function seedDatabase() {
       else if (riskScore > 60) priority = 'HIGH';
       else if (riskScore > 40) priority = 'MEDIUM';
 
-      const checkpoints = ['onboarding', 'ato', 'payout', 'listing', 'shipping', 'transaction'];
+      const checkpoints = ['onboarding', 'ato', 'payout', 'listing', 'shipping', 'transaction', 'account_setup', 'item_setup', 'pricing', 'profile_updates', 'shipments', 'returns'];
       const statuses = ['OPEN', 'OPEN', 'OPEN', 'IN_REVIEW', 'IN_REVIEW', 'RESOLVED'];
       const status = statuses[Math.floor(Math.random() * statuses.length)];
       const analysts = ['alice@fraud-team.com', 'bob@fraud-team.com', 'carol@fraud-team.com', null, null];
+      const checkpoint = checkpoints[Math.floor(Math.random() * checkpoints.length)];
+
+      // Pick 1-3 random rule IDs from seeded rules matching this checkpoint
+      const allRules = db_ops.getAll('rules', 10000, 0).map(r => r.data);
+      const matchingRules = allRules.filter(r => r.checkpoint === checkpoint);
+      const rulePool = matchingRules.length > 0 ? matchingRules : allRules;
+      const shuffled = rulePool.sort(() => Math.random() - 0.5);
+      const pickedRules = shuffled.slice(0, Math.floor(Math.random() * 3) + 1).map(r => r.ruleId);
 
       const caseId = `CASE-SEED-${String(caseCount + 1).padStart(3, '0')}`;
       const caseData = {
@@ -215,10 +297,11 @@ async function seedDatabase() {
         priority,
         sourceType: 'transaction',
         sourceId: tx.transactionId,
-        checkpoint: checkpoints[Math.floor(Math.random() * checkpoints.length)],
+        decisionId: `DEC-SEED-${String(caseCount + 1).padStart(3, '0')}`,
+        checkpoint,
         sellerId: tx.sellerId || null,
         riskScore,
-        triggeredRules: [],
+        triggeredRules: pickedRules,
         decision: riskScore > 70 ? 'BLOCK' : 'REVIEW',
         assignee: status !== 'OPEN' ? analysts[Math.floor(Math.random() * 3)] : null,
         notes: status === 'RESOLVED' ? [{ author: 'system', text: 'Auto-resolved during seeding', timestamp: new Date().toISOString() }] : [],
@@ -255,6 +338,12 @@ import agentsRouter from '../services/agents/index.js';
 import riskProfileRouter from '../services/risk-profile/index.js';
 import observabilityRouter from '../services/observability/index.js';
 import caseQueueRouter from '../services/case-queue/index.js';
+import accountSetupRouter from '../services/business/account-setup/index.js';
+import itemSetupRouter from '../services/business/item-setup/index.js';
+import pricingRouter from '../services/business/pricing/index.js';
+import profileUpdatesRouter from '../services/business/profile-updates/index.js';
+import shipmentsRouter from '../services/business/shipments/index.js';
+import returnsRouter from '../services/business/returns/index.js';
 
 const app = express();
 const server = createServer(app);
@@ -322,7 +411,13 @@ app.get('/api/health', (req, res) => {
       'experimentation': 'running',
       'risk-profile': 'running',
       'observability': 'running',
-      'case-queue': 'running'
+      'case-queue': 'running',
+      'account-setup': 'running',
+      'item-setup': 'running',
+      'pricing': 'running',
+      'profile-updates': 'running',
+      'shipments-outbound': 'running',
+      'returns': 'running'
     }
   });
 });
@@ -360,6 +455,13 @@ app.get('/api', (req, res) => {
       '/api/observability': 'Agent Observability & Monitoring',
       // Case Queue
       '/api/cases': 'Case Investigation Queue',
+      // New Business Services
+      '/api/account-setup': 'Account Setup Service',
+      '/api/item-setup': 'Item Setup Service',
+      '/api/pricing': 'Pricing Service',
+      '/api/profile-updates': 'Profile Updates Service',
+      '/api/shipments': 'Shipments Service',
+      '/api/returns': 'Returns Service',
       // Real-time
       '/api/metrics': 'Platform Metrics',
       '/api/stream': 'Transaction Stream',
@@ -374,6 +476,14 @@ app.use('/api/ato', sellerATORouter);
 app.use('/api/payout', sellerPayoutRouter);
 app.use('/api/listing', sellerListingRouter);
 app.use('/api/shipping', sellerShippingRouter);
+
+// New Business Services
+app.use('/api/account-setup', accountSetupRouter);
+app.use('/api/item-setup', itemSetupRouter);
+app.use('/api/pricing', pricingRouter);
+app.use('/api/profile-updates', profileUpdatesRouter);
+app.use('/api/shipments', shipmentsRouter);
+app.use('/api/returns', returnsRouter);
 
 // Data Platform
 app.use('/api/data/ingestion', dataIngestionRouter);
@@ -629,6 +739,12 @@ server.listen(PORT, () => {
 ║   • Risk Profile       /api/risk-profile                    ║
 ║   • Observability       /api/observability                   ║
 ║   • Case Queue          /api/cases                           ║
+║   • Account Setup      /api/account-setup                ║
+║   • Item Setup         /api/item-setup                   ║
+║   • Pricing            /api/pricing                      ║
+║   • Profile Updates    /api/profile-updates              ║
+║   • Shipments          /api/shipments                    ║
+║   • Returns            /api/returns                      ║
 ║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
   `);
