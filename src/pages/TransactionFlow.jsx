@@ -4,7 +4,7 @@ import {
   AlertTriangle, ChevronRight, Clock, Zap, RefreshCw
 } from 'lucide-react'
 
-const API_BASE = 'http://localhost:3001/api'
+const API_BASE = 'http://localhost:3005/api'
 
 export default function TransactionFlow() {
   const [transaction, setTransaction] = useState({

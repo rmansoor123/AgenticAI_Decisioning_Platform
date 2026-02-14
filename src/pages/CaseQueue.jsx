@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { FolderOpen, Clock, User, Filter } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { User, Filter } from 'lucide-react';
 
 const API_BASE = 'http://localhost:3005/api';
 
@@ -27,7 +27,7 @@ export default function CaseQueue() {
   const [filterCheckpoint, setFilterCheckpoint] = useState('');
   const [noteText, setNoteText] = useState('');
 
-  const fetchCases = async () => {
+  const fetchCases = useCallback(async () => {
     try {
       const params = new URLSearchParams();
       if (filterStatus) params.set('status', filterStatus);
@@ -49,14 +49,14 @@ export default function CaseQueue() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filterStatus, filterPriority, filterCheckpoint]);
 
-  useEffect(() => { fetchCases(); }, [filterStatus, filterPriority, filterCheckpoint]);
+  useEffect(() => { fetchCases(); }, [fetchCases]);
 
   useEffect(() => {
     const interval = setInterval(fetchCases, 15000);
     return () => clearInterval(interval);
-  }, [filterStatus, filterPriority, filterCheckpoint]);
+  }, [fetchCases]);
 
   const fetchCaseDetail = async (caseId) => {
     try {
@@ -273,7 +273,7 @@ export default function CaseQueue() {
           </div>
 
           <div className="grid grid-cols-4 gap-4">
-            <div><div className="text-xs text-gray-500">Priority</div><div className={`text-sm font-bold ${caseDetail.priority === 'CRITICAL' ? 'text-red-400' : caseDetail.priority === 'HIGH' ? 'text-orange-400' : 'text-yellow-400'}`}>{caseDetail.priority}</div></div>
+            <div><div className="text-xs text-gray-500">Priority</div><div className={`text-sm font-bold ${caseDetail.priority === 'CRITICAL' ? 'text-red-400' : caseDetail.priority === 'HIGH' ? 'text-orange-400' : caseDetail.priority === 'MEDIUM' ? 'text-yellow-400' : 'text-green-400'}`}>{caseDetail.priority}</div></div>
             <div><div className="text-xs text-gray-500">Checkpoint</div><div className="text-sm text-white capitalize">{caseDetail.checkpoint}</div></div>
             <div><div className="text-xs text-gray-500">Risk Score</div><div className="text-sm text-white font-mono">{caseDetail.riskScore}</div></div>
             <div><div className="text-xs text-gray-500">Decision</div><div className="text-sm text-white">{caseDetail.decision}</div></div>

@@ -5,7 +5,7 @@ import {
   Activity, Clock, ChevronRight, Sparkles, Network
 } from 'lucide-react'
 
-const API_BASE = 'http://localhost:3001/api'
+const API_BASE = 'http://localhost:3005/api'
 
 export default function AgenticAI() {
   const [agents, setAgents] = useState([])

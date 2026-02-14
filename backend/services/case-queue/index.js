@@ -82,7 +82,7 @@ router.get('/:caseId', (req, res) => {
       return res.status(404).json({ success: false, error: 'Case not found' });
     }
 
-    const caseData = record.data;
+    const caseData = { ...record.data };
 
     // Enrich with seller info
     if (caseData.sellerId) {

@@ -349,7 +349,7 @@ function getNestedValue(obj, path) {
 }
 
 function createCaseFromDecision(decision, triggeredRules, transaction) {
-  const caseId = `CASE-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
+  const caseId = `CASE-${uuidv4().substring(0, 10).toUpperCase()}`;
 
   const riskScore = decision.riskScore || 0;
   let priority = 'LOW';
