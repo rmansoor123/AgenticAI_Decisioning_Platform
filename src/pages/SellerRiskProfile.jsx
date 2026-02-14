@@ -149,6 +149,60 @@ function LifecycleFlow({ domainScores }) {
   )
 }
 
+function DomainHeatmap({ sellers }) {
+  const getCellColor = (score) => {
+    if (score >= 75) return 'bg-red-500/60'
+    if (score >= 50) return 'bg-orange-500/50'
+    if (score >= 25) return 'bg-amber-500/30'
+    if (score > 0) return 'bg-emerald-500/20'
+    return 'bg-gray-800/30'
+  }
+
+  if (!sellers || sellers.length === 0) return null
+
+  return (
+    <div className="bg-[#12121a] rounded-xl border border-gray-800 p-6">
+      <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
+        <Activity className="w-4 h-4 text-indigo-400" />
+        Risk Heatmap
+      </h3>
+      <div className="overflow-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr>
+              <th className="text-left text-gray-500 font-medium px-2 py-1 sticky left-0 bg-[#12121a]">Seller</th>
+              {LIFECYCLE_ORDER.map(d => (
+                <th key={d} className="text-center text-gray-500 font-medium px-1 py-1 whitespace-nowrap">
+                  {DOMAIN_LABELS[d]?.slice(0, 6)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sellers.slice(0, 20).map((seller, i) => (
+              <tr key={seller.sellerId || i}>
+                <td className="text-gray-400 px-2 py-1 font-mono sticky left-0 bg-[#12121a]">
+                  {seller.businessName?.slice(0, 15) || seller.sellerId?.slice(0, 12)}
+                </td>
+                {LIFECYCLE_ORDER.map(d => {
+                  const score = Math.round(seller.domainScores?.[d] || 0)
+                  return (
+                    <td key={d} className="px-1 py-1 text-center">
+                      <div className={`w-8 h-6 rounded flex items-center justify-center mx-auto ${getCellColor(score)}`}>
+                        <span className="text-[10px] font-mono text-gray-300">{score > 0 ? score : ''}</span>
+                      </div>
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 export default function SellerRiskProfile() {
   const [stats, setStats] = useState(null)
   const [highRiskSellers, setHighRiskSellers] = useState([])
@@ -727,6 +781,9 @@ export default function SellerRiskProfile() {
           </table>
         </div>
       </div>
+
+      {/* Domain Risk Heatmap */}
+      <DomainHeatmap sellers={highRiskSellers} />
     </div>
   )
 }
