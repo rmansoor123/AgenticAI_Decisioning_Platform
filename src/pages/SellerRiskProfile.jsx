@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import {
   Shield, AlertTriangle, TrendingUp, TrendingDown, Clock, Filter,
   ArrowLeft, UserX, CreditCard, Package, Truck, Activity, ShieldAlert,
-  Eye, RefreshCw
+  Eye, RefreshCw, Settings, DollarSign, UserCog, RotateCcw
 } from 'lucide-react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
@@ -19,30 +19,50 @@ const TIER_COLORS = {
 
 const DOMAIN_ICONS = {
   onboarding: UserX,
-  ato: ShieldAlert,
-  payout: CreditCard,
+  account_setup: Settings,
+  item_setup: Package,
   listing: Package,
+  pricing: DollarSign,
+  transaction: Activity,
+  payout: CreditCard,
   shipping: Truck,
-  transaction: Activity
+  returns: RotateCcw,
+  ato: ShieldAlert,
+  profile_updates: UserCog
 }
 
 const DOMAIN_COLORS = {
   onboarding: 'bg-blue-500',
-  ato: 'bg-red-500',
-  payout: 'bg-amber-500',
+  account_setup: 'bg-cyan-500',
+  item_setup: 'bg-violet-500',
   listing: 'bg-purple-500',
-  shipping: 'bg-cyan-500',
-  transaction: 'bg-emerald-500'
+  pricing: 'bg-emerald-500',
+  transaction: 'bg-indigo-500',
+  payout: 'bg-amber-500',
+  shipping: 'bg-teal-500',
+  returns: 'bg-pink-500',
+  ato: 'bg-red-500',
+  profile_updates: 'bg-orange-500'
 }
 
 const DOMAIN_LABELS = {
   onboarding: 'Onboarding',
-  ato: 'ATO',
-  payout: 'Payout',
+  account_setup: 'Account Setup',
+  item_setup: 'Item Setup',
   listing: 'Listing',
+  pricing: 'Pricing',
+  transaction: 'Transaction',
+  payout: 'Payout',
   shipping: 'Shipping',
-  transaction: 'Transaction'
+  returns: 'Returns',
+  ato: 'ATO',
+  profile_updates: 'Profile Updates'
 }
+
+const LIFECYCLE_ORDER = [
+  'onboarding', 'account_setup', 'item_setup', 'listing', 'pricing',
+  'transaction', 'payout', 'shipping', 'returns', 'ato', 'profile_updates'
+]
 
 function getTierColor(tier) {
   return TIER_COLORS[tier] || TIER_COLORS.LOW
@@ -238,7 +258,7 @@ export default function SellerRiskProfile() {
             Domain Breakdown
           </h3>
           <div className="space-y-4">
-            {['onboarding', 'ato', 'payout', 'listing', 'shipping', 'transaction'].map(domain => {
+            {LIFECYCLE_ORDER.map(domain => {
               const score = domains[domain] || 0
               const DomainIcon = DOMAIN_ICONS[domain]
               const barColor = DOMAIN_COLORS[domain]
@@ -324,7 +344,7 @@ export default function SellerRiskProfile() {
               Event Log
             </h3>
             <div className="flex flex-wrap gap-2">
-              {['all', 'onboarding', 'ato', 'payout', 'listing', 'shipping', 'transaction'].map(d => (
+              {['all', ...LIFECYCLE_ORDER].map(d => (
                 <button
                   key={d}
                   onClick={() => setDomainFilter(d)}
