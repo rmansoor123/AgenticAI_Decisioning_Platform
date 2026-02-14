@@ -85,8 +85,10 @@ router.post('/evaluate', (req, res) => {
     if (txSellerId && !dryRun) {
       if (finalDecision === 'BLOCKED') {
         emitRiskEvent({ sellerId: txSellerId, domain: 'transaction', eventType: 'TRANSACTION_BLOCKED', riskScore: 70, metadata: {} });
+        createCaseFromDecision(decision, triggeredRules, transaction);
       } else if (finalDecision === 'REVIEW') {
         emitRiskEvent({ sellerId: txSellerId, domain: 'transaction', eventType: 'TRANSACTION_REVIEW', riskScore: 40, metadata: {} });
+        createCaseFromDecision(decision, triggeredRules, transaction);
       } else if (finalDecision === 'APPROVED') {
         emitRiskEvent({ sellerId: txSellerId, domain: 'transaction', eventType: 'TRANSACTION_APPROVED', riskScore: -2, metadata: {} });
       }
@@ -344,6 +346,48 @@ function calculateRiskScore(triggeredRules, transaction) {
 
 function getNestedValue(obj, path) {
   return path.split('.').reduce((current, key) => current?.[key], obj);
+}
+
+function createCaseFromDecision(decision, triggeredRules, transaction) {
+  const caseId = `CASE-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
+
+  const riskScore = decision.riskScore || 0;
+  let priority = 'LOW';
+  if (riskScore > 80) priority = 'CRITICAL';
+  else if (riskScore > 60) priority = 'HIGH';
+  else if (riskScore > 40) priority = 'MEDIUM';
+
+  // Determine checkpoint from triggered rules
+  const checkpoints = triggeredRules.map(r => r.checkpoint).filter(Boolean);
+  const checkpoint = checkpoints[0] || 'transaction';
+
+  const caseData = {
+    caseId,
+    status: 'OPEN',
+    priority,
+    sourceType: 'transaction',
+    sourceId: decision.transactionId,
+    decisionId: decision.decisionId,
+    checkpoint,
+    sellerId: transaction?.sellerId || null,
+    riskScore,
+    triggeredRules: triggeredRules.map(r => r.ruleId),
+    decision: decision.action,
+    assignee: null,
+    notes: [],
+    resolution: null,
+    resolvedAt: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  try {
+    db_ops.insert('cases', 'case_id', caseId, caseData);
+  } catch (e) {
+    console.error('Failed to create case:', e.message);
+  }
+
+  return caseData;
 }
 
 export default router;
