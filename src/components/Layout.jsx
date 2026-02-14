@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   Shield, Activity, Database, Brain, Cog, FlaskConical,
-  Home, RefreshCw, Menu, X, ChevronDown, Server, Bot, Users, ShieldAlert, Eye, BookOpen, FolderOpen
+  Home, RefreshCw, Menu, X, ChevronDown, Server, Bot, Users, ShieldAlert, Eye, BookOpen, FolderOpen,
+  Settings, Package, DollarSign, UserCog, Truck, RotateCcw
 } from 'lucide-react'
 import Chatbot from './Chatbot'
 
@@ -79,6 +80,20 @@ export default function Layout({ children, wsConnected }) {
         { name: 'Network Analysis', href: '/seller-network' }
       ]
     },
+    {
+      name: 'Business Services',
+      href: '/account-setup',
+      icon: Settings,
+      color: 'text-cyan-400',
+      children: [
+        { name: 'Account Setup', href: '/account-setup' },
+        { name: 'Item Setup', href: '/item-setup' },
+        { name: 'Pricing', href: '/pricing' },
+        { name: 'Profile Updates', href: '/profile-updates' },
+        { name: 'Shipments', href: '/shipments' },
+        { name: 'Returns', href: '/returns' }
+      ]
+    },
     { name: 'Risk Rules', href: '/risk-rules', icon: BookOpen, color: 'text-amber-400' },
     { name: 'Case Queue', href: '/case-queue', icon: FolderOpen, color: 'text-pink-400' },
     { name: 'Observability', href: '/observability', icon: Eye, color: 'text-cyan-400' },
@@ -87,8 +102,9 @@ export default function Layout({ children, wsConnected }) {
   ]
 
   const NavItem = ({ item }) => {
-    const [expanded, setExpanded] = useState(location.pathname.startsWith(item.href) && item.href !== '/')
-    const isActive = location.pathname === item.href || (item.href !== '/' && location.pathname.startsWith(item.href))
+    const childMatch = item.children?.some(c => location.pathname === c.href)
+    const [expanded, setExpanded] = useState((location.pathname.startsWith(item.href) && item.href !== '/') || childMatch)
+    const isActive = location.pathname === item.href || (item.href !== '/' && location.pathname.startsWith(item.href)) || childMatch
 
     return (
       <div>

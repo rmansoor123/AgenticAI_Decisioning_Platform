@@ -17,6 +17,12 @@ import SellerRiskProfile from './pages/SellerRiskProfile'
 import Observability from './pages/Observability'
 import RiskRules from './pages/RiskRules'
 import CaseQueue from './pages/CaseQueue'
+import AccountSetup from './pages/AccountSetup'
+import ItemSetup from './pages/ItemSetup'
+import Pricing from './pages/Pricing'
+import ProfileUpdates from './pages/ProfileUpdates'
+import Shipments from './pages/Shipments'
+import Returns from './pages/Returns'
 
 const API_BASE = 'http://localhost:3005/api'
 const WS_URL = 'ws://localhost:3005/ws'
@@ -160,6 +166,12 @@ function App() {
           <Route path="/risk-rules" element={<RiskRules />} />
           <Route path="/case-queue" element={<CaseQueue />} />
           <Route path="/risk-profiles" element={<SellerRiskProfile />} />
+          <Route path="/account-setup" element={<AccountSetup />} />
+          <Route path="/item-setup" element={<ItemSetup />} />
+          <Route path="/pricing" element={<Pricing />} />
+          <Route path="/profile-updates" element={<ProfileUpdates />} />
+          <Route path="/shipments" element={<Shipments />} />
+          <Route path="/returns" element={<Returns />} />
         </Routes>
       </Layout>
     </BrowserRouter>
