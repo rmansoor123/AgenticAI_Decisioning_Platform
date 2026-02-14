@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   Shield, Activity, Database, Brain, Cog, FlaskConical,
-  Home, RefreshCw, Menu, X, ChevronDown, Server, Bot, Users, ShieldAlert, Eye
+  Home, RefreshCw, Menu, X, ChevronDown, Server, Bot, Users, ShieldAlert, Eye, BookOpen, FolderOpen
 } from 'lucide-react'
 import Chatbot from './Chatbot'
 
@@ -79,6 +79,8 @@ export default function Layout({ children, wsConnected }) {
         { name: 'Network Analysis', href: '/seller-network' }
       ]
     },
+    { name: 'Risk Rules', href: '/risk-rules', icon: BookOpen, color: 'text-amber-400' },
+    { name: 'Case Queue', href: '/case-queue', icon: FolderOpen, color: 'text-pink-400' },
     { name: 'Observability', href: '/observability', icon: Eye, color: 'text-cyan-400' },
     { name: 'Risk Profiles', href: '/risk-profiles', icon: ShieldAlert, color: 'text-red-400' },
     { name: 'Services', href: '/services', icon: Server, color: 'text-gray-400' }

@@ -15,6 +15,8 @@ import SellerRiskLifecycle from './pages/SellerRiskLifecycle'
 import SellerNetworkAnalysis from './pages/SellerNetworkAnalysis'
 import SellerRiskProfile from './pages/SellerRiskProfile'
 import Observability from './pages/Observability'
+import RiskRules from './pages/RiskRules'
+import CaseQueue from './pages/CaseQueue'
 
 const API_BASE = 'http://localhost:3005/api'
 const WS_URL = 'ws://localhost:3005/ws'
@@ -155,6 +157,8 @@ function App() {
           <Route path="/seller-risk" element={<SellerRiskLifecycle />} />
           <Route path="/seller-network" element={<SellerNetworkAnalysis />} />
           <Route path="/observability" element={<Observability />} />
+          <Route path="/risk-rules" element={<RiskRules />} />
+          <Route path="/case-queue" element={<CaseQueue />} />
           <Route path="/risk-profiles" element={<SellerRiskProfile />} />
         </Routes>
       </Layout>
