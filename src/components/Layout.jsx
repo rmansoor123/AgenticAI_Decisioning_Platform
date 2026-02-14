@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom'
 import {
   Shield, Activity, Database, Brain, Cog, FlaskConical,
   Home, RefreshCw, Menu, X, ChevronDown, Server, Bot, Users, ShieldAlert, Eye, BookOpen, FolderOpen,
-  Settings, Package, DollarSign, UserCog, Truck, RotateCcw
+  Settings, Package, DollarSign, UserCog, Truck, RotateCcw, Layers, ShieldCheck, Tag
 } from 'lucide-react'
 import Chatbot from './Chatbot'
 
@@ -24,81 +24,50 @@ export default function Layout({ children, wsConnected }) {
   const navigation = [
     { name: 'Dashboard', href: '/', icon: Home },
     {
-      name: 'Data Foundation',
-      href: '/data',
-      icon: Database,
+      name: 'Seller Lifecycle',
+      href: '/onboarding',
+      icon: ShieldCheck,
       color: 'text-blue-400',
       children: [
-        { name: 'Ingestion', href: '/data/ingestion' },
-        { name: 'Data Catalog', href: '/data/catalog' },
-        { name: 'Query Federation', href: '/data/query' }
-      ]
-    },
-    {
-      name: 'ML Models',
-      href: '/ml',
-      icon: Brain,
-      color: 'text-purple-400',
-      children: [
-        { name: 'Model Registry', href: '/ml/models' },
-        { name: 'Inference', href: '/ml/inference' },
-        { name: 'Monitoring', href: '/ml/monitoring' }
-      ]
-    },
-    {
-      name: 'Decision Engine',
-      href: '/decisions',
-      icon: Cog,
-      color: 'text-amber-400',
-      children: [
-        { name: 'Rules', href: '/decisions/rules' },
-        { name: 'Rule Builder', href: '/decisions/builder' },
-        { name: 'Execution', href: '/decisions/execution' }
-      ]
-    },
-    {
-      name: 'Experimentation',
-      href: '/experiments',
-      icon: FlaskConical,
-      color: 'text-emerald-400',
-      children: [
-        { name: 'A/B Tests', href: '/experiments/ab' },
-        { name: 'Simulation', href: '/experiments/simulation' }
-      ]
-    },
-    { name: 'Transaction Flow', href: '/flow', icon: Activity, color: 'text-indigo-400' },
-    { name: 'Agentic AI', href: '/agents', icon: Bot, color: 'text-violet-400' },
-    { 
-      name: 'Seller Onboarding', 
-      href: '/onboarding', 
-      icon: Users, 
-      color: 'text-blue-400',
-      children: [
-        { name: 'Onboarding Dashboard', href: '/onboarding' },
-        { name: 'Onboard New Seller', href: '/onboarding/form' },
-        { name: 'Risk Lifecycle', href: '/seller-risk' },
-        { name: 'Network Analysis', href: '/seller-network' }
-      ]
-    },
-    {
-      name: 'Business Services',
-      href: '/account-setup',
-      icon: Settings,
-      color: 'text-cyan-400',
-      children: [
+        { name: 'Onboarding', href: '/onboarding', phase: 'Pre-Launch' },
         { name: 'Account Setup', href: '/account-setup' },
         { name: 'Item Setup', href: '/item-setup' },
+        { name: 'Listings', href: '/listing' },
         { name: 'Pricing', href: '/pricing' },
-        { name: 'Profile Updates', href: '/profile-updates' },
-        { name: 'Shipments', href: '/shipments' },
-        { name: 'Returns', href: '/returns' }
+        { name: 'Transaction', href: '/flow', phase: 'Live Operations' },
+        { name: 'Payout', href: '/payout' },
+        { name: 'Shipping', href: '/shipping' },
+        { name: 'Returns', href: '/returns' },
+        { name: 'ATO', href: '/ato', phase: 'Security' },
+        { name: 'Profile Updates', href: '/profile-updates' }
       ]
     },
-    { name: 'Risk Rules', href: '/risk-rules', icon: BookOpen, color: 'text-amber-400' },
-    { name: 'Case Queue', href: '/case-queue', icon: FolderOpen, color: 'text-pink-400' },
-    { name: 'Observability', href: '/observability', icon: Eye, color: 'text-cyan-400' },
-    { name: 'Risk Profiles', href: '/risk-profiles', icon: ShieldAlert, color: 'text-red-400' },
-    { name: 'Services', href: '/services', icon: Server, color: 'text-gray-400' }
+    {
+      name: 'Risk Operations',
+      href: '/risk-profiles',
+      icon: ShieldAlert,
+      color: 'text-red-400',
+      children: [
+        { name: 'Risk Profiles', href: '/risk-profiles' },
+        { name: 'Risk Rules', href: '/risk-rules' },
+        { name: 'Case Queue', href: '/case-queue' }
+      ]
+    },
+    {
+      name: 'Platform',
+      href: '/data',
+      icon: Layers,
+      color: 'text-purple-400',
+      children: [
+        { name: 'Data Foundation', href: '/data' },
+        { name: 'ML Models', href: '/ml' },
+        { name: 'Decision Engine', href: '/decisions' },
+        { name: 'Experimentation', href: '/experiments' },
+        { name: 'Transaction Flow', href: '/flow-detail' },
+        { name: 'Agentic AI', href: '/agents' },
+        { name: 'Observability', href: '/observability' }
+      ]
+    }
   ]
 
   const NavItem = ({ item }) => {
@@ -131,18 +100,24 @@ export default function Layout({ children, wsConnected }) {
         </div>
         {item.children && expanded && sidebarOpen && (
           <div className="ml-8 mt-1 space-y-1">
-            {item.children.map(child => (
-              <Link
-                key={child.href}
-                to={child.href}
-                className={`block px-3 py-1.5 text-sm rounded-lg transition-colors ${
-                  location.pathname === child.href
-                    ? 'bg-gray-800 text-white'
-                    : 'text-gray-500 hover:text-gray-300'
-                }`}
-              >
-                {child.name}
-              </Link>
+            {item.children.map((child, idx) => (
+              <div key={child.href}>
+                {child.phase && (
+                  <div className={`text-[10px] uppercase tracking-wider text-gray-600 font-semibold ${idx > 0 ? 'mt-3' : ''} mb-1 px-3`}>
+                    {child.phase}
+                  </div>
+                )}
+                <Link
+                  to={child.href}
+                  className={`block px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                    location.pathname === child.href
+                      ? 'bg-gray-800 text-white'
+                      : 'text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  {child.name}
+                </Link>
+              </div>
             ))}
           </div>
         )}
