@@ -399,6 +399,13 @@ export function generateRule() {
     priority: faker.number.int({ min: 1, max: 100 }),
     conditions: generateRuleConditions(),
     action: faker.helpers.arrayElement(actions),
+    checkpoint: faker.helpers.arrayElement(['onboarding', 'ato', 'payout', 'listing', 'shipping', 'transaction']),
+    severity: faker.helpers.arrayElement(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
+    tags: (() => {
+      const allTags = ['velocity', 'threshold', 'geo', 'device', 'identity', 'amount', 'pattern', 'ml-score', 'behavioral', 'network'];
+      const count = faker.number.int({ min: 1, max: 3 });
+      return faker.helpers.arrayElements(allTags, count);
+    })(),
     performance: {
       triggered: faker.number.int({ min: 100, max: 50000 }),
       truePositives: faker.number.int({ min: 50, max: 10000 }),
@@ -425,6 +432,69 @@ function generateRuleConditions() {
 
   const numConditions = faker.number.int({ min: 1, max: 4 });
   return faker.helpers.arrayElements(conditionTypes, numConditions);
+}
+
+export function generateCheckpointRules() {
+  const templates = [
+    // Onboarding (5 rules)
+    { name: 'High-Risk Country Registration', checkpoint: 'onboarding', type: 'LIST_MATCH', severity: 'HIGH', action: 'REVIEW', tags: ['geo', 'identity'], conditions: [{ field: 'seller.country', operator: 'IN', value: ['NG', 'RO', 'UA', 'PK', 'BD'] }], description: 'Flag sellers registering from high-risk countries' },
+    { name: 'Disposable Email Domain', checkpoint: 'onboarding', type: 'LIST_MATCH', severity: 'MEDIUM', action: 'REVIEW', tags: ['identity', 'pattern'], conditions: [{ field: 'seller.emailDomain', operator: 'IN', value: ['tempmail.com', 'guerrillamail.com', 'throwaway.email'] }], description: 'Detect disposable email addresses during registration' },
+    { name: 'Business Category Mismatch', checkpoint: 'onboarding', type: 'PATTERN', severity: 'MEDIUM', action: 'FLAG', tags: ['identity', 'behavioral'], conditions: [{ field: 'seller.categoryMismatchScore', operator: 'GT', value: 0.7 }], description: 'Business description does not match selected category' },
+    { name: 'Duplicate Identity Signals', checkpoint: 'onboarding', type: 'COMPOSITE', severity: 'CRITICAL', action: 'BLOCK', tags: ['identity', 'network'], conditions: [{ field: 'seller.duplicateScore', operator: 'GT', value: 0.85 }], description: 'Multiple accounts sharing identity attributes' },
+    { name: 'New Account Rapid Listing', checkpoint: 'onboarding', type: 'VELOCITY', severity: 'HIGH', action: 'REVIEW', tags: ['velocity', 'behavioral'], conditions: [{ field: 'seller.accountAgeDays', operator: 'LT', value: 3 }, { field: 'seller.listingCount', operator: 'GT', value: 10 }], description: 'New account creating many listings immediately' },
+
+    // ATO (5 rules)
+    { name: 'Multiple Failed Logins', checkpoint: 'ato', type: 'VELOCITY', severity: 'HIGH', action: 'CHALLENGE', tags: ['velocity', 'identity'], conditions: [{ field: 'auth.failedLogins_1h', operator: 'GT', value: 5 }], description: 'Too many failed login attempts in one hour' },
+    { name: 'New Device + Password Change', checkpoint: 'ato', type: 'COMPOSITE', severity: 'CRITICAL', action: 'BLOCK', tags: ['device', 'identity'], conditions: [{ field: 'device.isNew', operator: 'EQ', value: true }, { field: 'auth.passwordChanged', operator: 'EQ', value: true }], description: 'Password changed from a previously unseen device' },
+    { name: 'Impossible Travel', checkpoint: 'ato', type: 'PATTERN', severity: 'CRITICAL', action: 'BLOCK', tags: ['geo', 'behavioral'], conditions: [{ field: 'geo.travelSpeedKmh', operator: 'GT', value: 1000 }], description: 'Login from geographically impossible location given last activity' },
+    { name: 'Session Anomaly', checkpoint: 'ato', type: 'ML_SCORE', severity: 'MEDIUM', action: 'CHALLENGE', tags: ['behavioral', 'ml-score'], conditions: [{ field: 'ml.sessionAnomalyScore', operator: 'GT', value: 0.75 }], description: 'Session behavior deviates from established pattern' },
+    { name: 'Credential Stuffing Pattern', checkpoint: 'ato', type: 'VELOCITY', severity: 'HIGH', action: 'BLOCK', tags: ['velocity', 'network'], conditions: [{ field: 'auth.distinctAccountsFromIP_1h', operator: 'GT', value: 10 }], description: 'Same IP attempting access to multiple accounts' },
+
+    // Payout (5 rules)
+    { name: 'First Payout Above Threshold', checkpoint: 'payout', type: 'THRESHOLD', severity: 'HIGH', action: 'REVIEW', tags: ['amount', 'threshold'], conditions: [{ field: 'payout.isFirst', operator: 'EQ', value: true }, { field: 'payout.amount', operator: 'GT', value: 5000 }], description: 'First-ever payout exceeds safety threshold' },
+    { name: 'Payout Velocity Spike', checkpoint: 'payout', type: 'VELOCITY', severity: 'HIGH', action: 'REVIEW', tags: ['velocity', 'amount'], conditions: [{ field: 'payout.countLast24h', operator: 'GT', value: 3 }], description: 'Unusual number of payout requests in 24 hours' },
+    { name: 'Bank Account Change + Immediate Payout', checkpoint: 'payout', type: 'COMPOSITE', severity: 'CRITICAL', action: 'BLOCK', tags: ['identity', 'behavioral'], conditions: [{ field: 'payout.bankChangedHoursAgo', operator: 'LT', value: 24 }, { field: 'payout.amount', operator: 'GT', value: 1000 }], description: 'Payout requested shortly after changing bank details' },
+    { name: 'Round Amount Pattern', checkpoint: 'payout', type: 'PATTERN', severity: 'MEDIUM', action: 'FLAG', tags: ['amount', 'pattern'], conditions: [{ field: 'payout.isRoundAmount', operator: 'EQ', value: true }, { field: 'payout.amount', operator: 'GT', value: 1000 }], description: 'Payout is a suspiciously round amount' },
+    { name: 'Payout Exceeds Revenue', checkpoint: 'payout', type: 'THRESHOLD', severity: 'CRITICAL', action: 'BLOCK', tags: ['amount', 'threshold'], conditions: [{ field: 'payout.amount', operator: 'GT', value: 0 }, { field: 'payout.exceedsRevenue', operator: 'EQ', value: true }], description: 'Requested payout exceeds total earned revenue' },
+
+    // Listing (5 rules)
+    { name: 'Below-Market Price', checkpoint: 'listing', type: 'THRESHOLD', severity: 'MEDIUM', action: 'FLAG', tags: ['amount', 'pattern'], conditions: [{ field: 'listing.priceBelowMarketPct', operator: 'GT', value: 50 }], description: 'Listed price is significantly below market average' },
+    { name: 'Prohibited Item Keywords', checkpoint: 'listing', type: 'LIST_MATCH', severity: 'HIGH', action: 'BLOCK', tags: ['pattern', 'identity'], conditions: [{ field: 'listing.hasProhibitedKeywords', operator: 'EQ', value: true }], description: 'Listing contains prohibited item keywords' },
+    { name: 'Bulk Listing Creation', checkpoint: 'listing', type: 'VELOCITY', severity: 'HIGH', action: 'REVIEW', tags: ['velocity', 'behavioral'], conditions: [{ field: 'listing.createdLast1h', operator: 'GT', value: 20 }], description: 'Excessive number of listings created in short period' },
+    { name: 'Copied Listing Content', checkpoint: 'listing', type: 'ML_SCORE', severity: 'MEDIUM', action: 'FLAG', tags: ['ml-score', 'pattern'], conditions: [{ field: 'ml.contentSimilarityScore', operator: 'GT', value: 0.9 }], description: 'Listing content appears to be copied from another seller' },
+    { name: 'Mismatched Category Images', checkpoint: 'listing', type: 'ML_SCORE', severity: 'MEDIUM', action: 'FLAG', tags: ['ml-score', 'identity'], conditions: [{ field: 'ml.imageCategoryMatchScore', operator: 'LT', value: 0.3 }], description: 'Product images do not match the listed category' },
+
+    // Shipping (5 rules)
+    { name: 'Address Mismatch', checkpoint: 'shipping', type: 'PATTERN', severity: 'MEDIUM', action: 'FLAG', tags: ['geo', 'identity'], conditions: [{ field: 'shipping.addressMatchScore', operator: 'LT', value: 0.5 }], description: 'Shipping address does not match billing address' },
+    { name: 'Freight Forwarder Destination', checkpoint: 'shipping', type: 'LIST_MATCH', severity: 'HIGH', action: 'REVIEW', tags: ['geo', 'pattern'], conditions: [{ field: 'shipping.isFreightForwarder', operator: 'EQ', value: true }, { field: 'transaction.amount', operator: 'GT', value: 2000 }], description: 'High-value shipment to known freight forwarder' },
+    { name: 'Multiple Shipments Same Address', checkpoint: 'shipping', type: 'VELOCITY', severity: 'MEDIUM', action: 'FLAG', tags: ['velocity', 'network'], conditions: [{ field: 'shipping.sameAddressCount7d', operator: 'GT', value: 5 }], description: 'Multiple different sellers shipping to same address' },
+    { name: 'Delivery Region Anomaly', checkpoint: 'shipping', type: 'PATTERN', severity: 'HIGH', action: 'REVIEW', tags: ['geo', 'behavioral'], conditions: [{ field: 'shipping.regionRiskScore', operator: 'GT', value: 70 }], description: 'Delivery destination is in a high-risk region' },
+    { name: 'Express Shipping on New Account', checkpoint: 'shipping', type: 'COMPOSITE', severity: 'MEDIUM', action: 'FLAG', tags: ['behavioral', 'velocity'], conditions: [{ field: 'seller.accountAgeDays', operator: 'LT', value: 7 }, { field: 'shipping.isExpress', operator: 'EQ', value: true }], description: 'New seller using express shipping on first orders' },
+
+    // Transaction (5 rules)
+    { name: 'Transaction Velocity Spike', checkpoint: 'transaction', type: 'VELOCITY', severity: 'HIGH', action: 'REVIEW', tags: ['velocity', 'amount'], conditions: [{ field: 'transaction.countLast1h', operator: 'GT', value: 10 }], description: 'Unusually high transaction count in last hour' },
+    { name: 'High Amount Threshold', checkpoint: 'transaction', type: 'THRESHOLD', severity: 'HIGH', action: 'REVIEW', tags: ['amount', 'threshold'], conditions: [{ field: 'transaction.amount', operator: 'GT', value: 5000 }], description: 'Transaction amount exceeds review threshold' },
+    { name: 'High-Risk Merchant Category', checkpoint: 'transaction', type: 'LIST_MATCH', severity: 'MEDIUM', action: 'FLAG', tags: ['pattern', 'identity'], conditions: [{ field: 'transaction.merchantCategory', operator: 'IN', value: ['GAMBLING', 'CRYPTO', 'ADULT', 'PHARMACY'] }], description: 'Transaction with high-risk merchant category' },
+    { name: 'Cross-Border New Account', checkpoint: 'transaction', type: 'COMPOSITE', severity: 'HIGH', action: 'REVIEW', tags: ['geo', 'identity'], conditions: [{ field: 'transaction.isCrossBorder', operator: 'EQ', value: true }, { field: 'seller.accountAgeDays', operator: 'LT', value: 14 }], description: 'Cross-border transaction from recently created account' },
+    { name: 'ML Fraud Score Alert', checkpoint: 'transaction', type: 'ML_SCORE', severity: 'CRITICAL', action: 'BLOCK', tags: ['ml-score'], conditions: [{ field: 'ml.fraudScore', operator: 'GT', value: 0.9 }], description: 'ML model predicts high fraud probability' },
+  ];
+
+  return templates.map((t, i) => ({
+    ruleId: `RULE-CP-${String(i + 1).padStart(3, '0')}`,
+    ...t,
+    status: Math.random() > 0.2 ? 'ACTIVE' : 'SHADOW',
+    priority: Math.floor(Math.random() * 50) + 50,
+    performance: {
+      triggered: Math.floor(Math.random() * 5000) + 100,
+      truePositives: Math.floor(Math.random() * 2000) + 50,
+      falsePositives: Math.floor(Math.random() * 500) + 10,
+      catchRate: Math.round((Math.random() * 0.3 + 0.65) * 100) / 100,
+      falsePositiveRate: Math.round((Math.random() * 0.1 + 0.01) * 100) / 100
+    },
+    createdAt: new Date(Date.now() - Math.random() * 180 * 24 * 60 * 60 * 1000).toISOString(),
+    updatedAt: new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000).toISOString(),
+    createdBy: 'system@fraud-platform.com'
+  }));
 }
 
 // ============================================================================
@@ -590,6 +660,7 @@ export default {
   generateShipment,
   generateMLModel,
   generateRule,
+  generateCheckpointRules,
   generateExperiment,
   generateDataset,
   generateMetricsSnapshot
