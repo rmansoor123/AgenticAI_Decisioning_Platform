@@ -1,6 +1,6 @@
 import express from 'express';
 import { db_ops } from '../../../shared/common/database.js';
-import { generateRule } from '../../../shared/synthetic-data/generators.js';
+import { generateRule, generateCheckpointRules } from '../../../shared/synthetic-data/generators.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();
@@ -8,7 +8,7 @@ const router = express.Router();
 // Get all rules
 router.get('/', (req, res) => {
   try {
-    const { limit = 50, status, type, action } = req.query;
+    const { limit = 10000, status, type, action } = req.query;
 
     let rules = db_ops.getAll('rules', parseInt(limit), 0);
     rules = rules.map(r => r.data);
@@ -16,6 +16,15 @@ router.get('/', (req, res) => {
     if (status) rules = rules.filter(r => r.status === status);
     if (type) rules = rules.filter(r => r.type === type);
     if (action) rules = rules.filter(r => r.action === action);
+    if (req.query.checkpoint) {
+      rules = rules.filter(r => r.checkpoint === req.query.checkpoint);
+    }
+    if (req.query.severity) {
+      rules = rules.filter(r => r.severity === req.query.severity);
+    }
+    if (req.query.tag) {
+      rules = rules.filter(r => r.tags && r.tags.includes(req.query.tag));
+    }
 
     // Sort by priority
     rules.sort((a, b) => (a.priority || 100) - (b.priority || 100));
@@ -25,6 +34,54 @@ router.get('/', (req, res) => {
       data: rules,
       total: db_ops.count('rules')
     });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get rules grouped by checkpoint
+router.get('/by-checkpoint', (req, res) => {
+  try {
+    const allRules = db_ops.getAll('rules', 10000, 0).map(r => r.data);
+    const checkpoints = ['onboarding', 'ato', 'payout', 'listing', 'shipping', 'transaction'];
+
+    const grouped = {};
+    for (const cp of checkpoints) {
+      const cpRules = allRules.filter(r => r.checkpoint === cp);
+      grouped[cp] = {
+        total: cpRules.length,
+        active: cpRules.filter(r => r.status === 'ACTIVE').length,
+        rules: cpRules.sort((a, b) => (b.priority || 0) - (a.priority || 0))
+      };
+    }
+
+    // Rules without a checkpoint
+    const uncategorized = allRules.filter(r => !r.checkpoint);
+    if (uncategorized.length > 0) {
+      grouped.uncategorized = {
+        total: uncategorized.length,
+        active: uncategorized.filter(r => r.status === 'ACTIVE').length,
+        rules: uncategorized
+      };
+    }
+
+    res.json({ success: true, data: grouped });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get rule templates for each checkpoint
+router.get('/templates', (req, res) => {
+  try {
+    const templates = generateCheckpointRules();
+
+    const { checkpoint } = req.query;
+    const filtered = checkpoint
+      ? templates.filter(t => t.checkpoint === checkpoint)
+      : templates;
+
+    res.json({ success: true, data: filtered });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
