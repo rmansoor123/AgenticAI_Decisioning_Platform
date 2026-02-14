@@ -705,6 +705,260 @@ export function generateMetricsSnapshot() {
   };
 }
 
+const STORE_CATEGORIES_SETUP = ['ELECTRONICS', 'FASHION', 'HOME_GARDEN', 'SPORTS', 'HEALTH_BEAUTY', 'TOYS', 'FOOD_GROCERY', 'JEWELRY', 'AUTOMOTIVE', 'BOOKS'];
+const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY'];
+const TIMEZONES = ['America/New_York', 'America/Los_Angeles', 'Europe/London', 'Europe/Berlin', 'Asia/Tokyo', 'Asia/Shanghai', 'Australia/Sydney'];
+const PROFILE_UPDATE_TYPES = ['ADDRESS_CHANGE', 'BANK_CHANGE', 'EMAIL_CHANGE', 'PHONE_CHANGE', 'NAME_CHANGE', 'ID_DOCUMENT_UPLOAD', 'TAX_INFO_UPDATE'];
+const CARRIERS_LIST = ['USPS', 'UPS', 'FEDEX', 'DHL', 'AMAZON_LOGISTICS'];
+const RETURN_REASONS = ['DEFECTIVE', 'WRONG_ITEM', 'NOT_AS_DESCRIBED', 'CHANGED_MIND', 'ARRIVED_LATE', 'BETTER_PRICE_FOUND', 'ACCIDENTAL_ORDER'];
+
+// ============================================================================
+// ACCOUNT SETUP GENERATORS
+// ============================================================================
+
+export function generateAccountSetup(sellerId = null) {
+  const status = faker.helpers.weightedArrayElement([
+    { weight: 60, value: 'COMPLETE' },
+    { weight: 20, value: 'PENDING' },
+    { weight: 10, value: 'INCOMPLETE' },
+    { weight: 5, value: 'SUSPENDED' },
+    { weight: 5, value: 'UNDER_REVIEW' }
+  ]);
+
+  return {
+    setupId: `ASET-${uuidv4().substring(0, 10).toUpperCase()}`,
+    sellerId: sellerId || `SLR-${faker.string.alphanumeric(8).toUpperCase()}`,
+    storeName: faker.company.name() + ' Store',
+    storeCategory: faker.helpers.arrayElement(STORE_CATEGORIES_SETUP),
+    currency: faker.helpers.arrayElement(CURRENCIES),
+    timezone: faker.helpers.arrayElement(TIMEZONES),
+    taxConfigComplete: faker.datatype.boolean({ probability: 0.8 }),
+    paymentMethods: faker.number.int({ min: 1, max: 4 }),
+    businessRegistration: {
+      type: faker.helpers.arrayElement(['LLC', 'SOLE_PROPRIETOR', 'CORPORATION', 'PARTNERSHIP']),
+      verified: faker.datatype.boolean({ probability: 0.85 }),
+      country: faker.helpers.arrayElement(COUNTRIES)
+    },
+    status,
+    riskScore: faker.number.int({ min: 0, max: 100 }),
+    riskFlags: {
+      brandInfringement: faker.datatype.boolean({ probability: 0.03 }),
+      sharedPaymentMethod: faker.datatype.boolean({ probability: 0.02 }),
+      timezoneCurrencyAnomaly: faker.datatype.boolean({ probability: 0.05 })
+    },
+    createdAt: faker.date.past({ years: 1 }).toISOString(),
+    updatedAt: faker.date.recent({ days: 30 }).toISOString()
+  };
+}
+
+// ============================================================================
+// ITEM SETUP GENERATORS
+// ============================================================================
+
+export function generateItemSetup(sellerId = null) {
+  const status = faker.helpers.weightedArrayElement([
+    { weight: 65, value: 'ACTIVE' },
+    { weight: 15, value: 'DRAFT' },
+    { weight: 10, value: 'PENDING_REVIEW' },
+    { weight: 5, value: 'SUSPENDED' },
+    { weight: 5, value: 'ARCHIVED' }
+  ]);
+
+  return {
+    itemId: `ITEM-${uuidv4().substring(0, 10).toUpperCase()}`,
+    sellerId: sellerId || `SLR-${faker.string.alphanumeric(8).toUpperCase()}`,
+    productName: faker.commerce.productName(),
+    sku: faker.string.alphanumeric(12).toUpperCase(),
+    category: faker.helpers.arrayElement(BUSINESS_CATEGORIES),
+    variants: faker.number.int({ min: 1, max: 20 }),
+    inventoryCount: faker.number.int({ min: 0, max: 500 }),
+    weight: faker.number.float({ min: 0.1, max: 50, fractionDigits: 2 }),
+    dimensions: {
+      length: faker.number.float({ min: 1, max: 100, fractionDigits: 1 }),
+      width: faker.number.float({ min: 1, max: 80, fractionDigits: 1 }),
+      height: faker.number.float({ min: 1, max: 60, fractionDigits: 1 })
+    },
+    complianceData: faker.datatype.boolean({ probability: 0.85 }),
+    status,
+    riskScore: faker.number.int({ min: 0, max: 100 }),
+    riskFlags: {
+      restrictedCategory: faker.datatype.boolean({ probability: 0.02 }),
+      weightAnomaly: faker.datatype.boolean({ probability: 0.04 }),
+      duplicateProduct: faker.datatype.boolean({ probability: 0.03 })
+    },
+    createdAt: faker.date.past({ years: 1 }).toISOString(),
+    updatedAt: faker.date.recent({ days: 30 }).toISOString()
+  };
+}
+
+// ============================================================================
+// PRICING GENERATORS
+// ============================================================================
+
+export function generatePricingRecord(sellerId = null) {
+  const currentPrice = faker.number.float({ min: 5, max: 2000, fractionDigits: 2 });
+  const previousPrice = currentPrice * (1 + (faker.number.float({ min: -0.3, max: 0.5, fractionDigits: 2 })));
+  const status = faker.helpers.weightedArrayElement([
+    { weight: 70, value: 'ACTIVE' },
+    { weight: 15, value: 'PENDING_REVIEW' },
+    { weight: 10, value: 'ADJUSTED' },
+    { weight: 5, value: 'BLOCKED' }
+  ]);
+
+  return {
+    pricingId: `PRC-${uuidv4().substring(0, 10).toUpperCase()}`,
+    sellerId: sellerId || `SLR-${faker.string.alphanumeric(8).toUpperCase()}`,
+    productName: faker.commerce.productName(),
+    currentPrice,
+    previousPrice: Math.round(previousPrice * 100) / 100,
+    currency: 'USD',
+    changeType: faker.helpers.arrayElement(['MANUAL', 'DYNAMIC', 'PROMOTION', 'BULK_UPDATE']),
+    priceChanges24h: faker.number.int({ min: 0, max: 8 }),
+    activeDiscounts: faker.number.int({ min: 0, max: 3 }),
+    effectiveDiscountPct: faker.number.float({ min: 0, max: 50, fractionDigits: 1 }),
+    status,
+    riskScore: faker.number.int({ min: 0, max: 100 }),
+    riskFlags: {
+      belowCost: faker.datatype.boolean({ probability: 0.04 }),
+      priceManipulation: faker.datatype.boolean({ probability: 0.03 }),
+      arbitrage: faker.datatype.boolean({ probability: 0.02 })
+    },
+    createdAt: faker.date.past({ years: 0.5 }).toISOString(),
+    updatedAt: faker.date.recent({ days: 7 }).toISOString()
+  };
+}
+
+// ============================================================================
+// PROFILE UPDATES GENERATORS
+// ============================================================================
+
+export function generateProfileUpdate(sellerId = null) {
+  const updateType = faker.helpers.arrayElement(PROFILE_UPDATE_TYPES);
+  const status = faker.helpers.weightedArrayElement([
+    { weight: 60, value: 'APPROVED' },
+    { weight: 20, value: 'PENDING' },
+    { weight: 10, value: 'UNDER_REVIEW' },
+    { weight: 5, value: 'REJECTED' },
+    { weight: 5, value: 'BLOCKED' }
+  ]);
+
+  return {
+    updateId: `PUPD-${uuidv4().substring(0, 10).toUpperCase()}`,
+    sellerId: sellerId || `SLR-${faker.string.alphanumeric(8).toUpperCase()}`,
+    updateType,
+    fieldChanged: updateType.toLowerCase().replace('_change', '').replace('_upload', '').replace('_update', ''),
+    previousValue: '[REDACTED]',
+    newDevice: faker.datatype.boolean({ probability: 0.2 }),
+    deviceFingerprint: faker.string.alphanumeric(32),
+    ipAddress: faker.internet.ip(),
+    status,
+    riskScore: faker.number.int({ min: 0, max: 100 }),
+    riskFlags: {
+      openDispute: faker.datatype.boolean({ probability: 0.05 }),
+      newDevice: faker.datatype.boolean({ probability: 0.15 }),
+      emailDomainDowngrade: faker.datatype.boolean({ probability: 0.03 })
+    },
+    createdAt: faker.date.past({ years: 0.5 }).toISOString(),
+    updatedAt: faker.date.recent({ days: 14 }).toISOString()
+  };
+}
+
+// ============================================================================
+// OUTBOUND SHIPMENTS GENERATORS
+// ============================================================================
+
+export function generateOutboundShipment(sellerId = null) {
+  const status = faker.helpers.weightedArrayElement([
+    { weight: 25, value: 'LABEL_CREATED' },
+    { weight: 25, value: 'PICKED_UP' },
+    { weight: 20, value: 'IN_TRANSIT' },
+    { weight: 20, value: 'DELIVERED' },
+    { weight: 5, value: 'FAILED' },
+    { weight: 5, value: 'RETURNED_TO_SENDER' }
+  ]);
+
+  const declaredValue = faker.number.float({ min: 10, max: 2000, fractionDigits: 2 });
+
+  return {
+    shipmentId: `SHPM-${uuidv4().substring(0, 10).toUpperCase()}`,
+    sellerId: sellerId || `SLR-${faker.string.alphanumeric(8).toUpperCase()}`,
+    orderId: `ORD-${faker.string.alphanumeric(10).toUpperCase()}`,
+    carrier: faker.helpers.arrayElement(CARRIERS_LIST),
+    trackingNumber: faker.string.alphanumeric(22).toUpperCase(),
+    declaredWeight: faker.number.float({ min: 0.5, max: 30, fractionDigits: 2 }),
+    actualWeight: faker.number.float({ min: 0.5, max: 30, fractionDigits: 2 }),
+    declaredValue,
+    insured: declaredValue > 200 ? faker.datatype.boolean({ probability: 0.7 }) : faker.datatype.boolean({ probability: 0.2 }),
+    origin: {
+      city: faker.location.city(),
+      state: faker.location.state({ abbreviated: true }),
+      country: 'US',
+      zip: faker.location.zipCode()
+    },
+    destination: {
+      city: faker.location.city(),
+      state: faker.location.state({ abbreviated: true }),
+      country: faker.helpers.weightedArrayElement([
+        { weight: 80, value: 'US' },
+        { weight: 10, value: 'CA' },
+        { weight: 5, value: 'MX' },
+        { weight: 5, value: 'GB' }
+      ]),
+      zip: faker.location.zipCode()
+    },
+    status,
+    riskScore: faker.number.int({ min: 0, max: 100 }),
+    riskFlags: {
+      noMatchingOrder: faker.datatype.boolean({ probability: 0.02 }),
+      weightDiscrepancy: faker.datatype.boolean({ probability: 0.05 }),
+      carrierMismatch: faker.datatype.boolean({ probability: 0.04 }),
+      dropShipSuspected: faker.datatype.boolean({ probability: 0.03 })
+    },
+    createdAt: faker.date.recent({ days: 14 }).toISOString(),
+    updatedAt: faker.date.recent({ days: 3 }).toISOString()
+  };
+}
+
+// ============================================================================
+// RETURNS GENERATORS
+// ============================================================================
+
+export function generateReturn(sellerId = null) {
+  const status = faker.helpers.weightedArrayElement([
+    { weight: 30, value: 'REQUESTED' },
+    { weight: 25, value: 'APPROVED' },
+    { weight: 20, value: 'RECEIVED' },
+    { weight: 15, value: 'REFUNDED' },
+    { weight: 5, value: 'REJECTED' },
+    { weight: 5, value: 'UNDER_REVIEW' }
+  ]);
+
+  const purchaseAmount = faker.number.float({ min: 10, max: 1000, fractionDigits: 2 });
+  const refundAmount = purchaseAmount * faker.number.float({ min: 0.8, max: 1.05, fractionDigits: 2 });
+
+  return {
+    returnId: `RET-${uuidv4().substring(0, 10).toUpperCase()}`,
+    sellerId: sellerId || `SLR-${faker.string.alphanumeric(8).toUpperCase()}`,
+    orderId: `ORD-${faker.string.alphanumeric(10).toUpperCase()}`,
+    buyerId: `BYR-${faker.string.alphanumeric(8).toUpperCase()}`,
+    reason: faker.helpers.arrayElement(RETURN_REASONS),
+    purchaseAmount,
+    refundAmount: Math.round(refundAmount * 100) / 100,
+    returnShippingPaid: faker.helpers.arrayElement(['BUYER', 'SELLER', 'PLATFORM']),
+    status,
+    riskScore: faker.number.int({ min: 0, max: 100 }),
+    riskFlags: {
+      serialReturner: faker.datatype.boolean({ probability: 0.04 }),
+      emptyBox: faker.datatype.boolean({ probability: 0.02 }),
+      refundExceedsPurchase: refundAmount > purchaseAmount,
+      wardrobing: faker.datatype.boolean({ probability: 0.03 }),
+      fundsWithdrawn: faker.datatype.boolean({ probability: 0.05 })
+    },
+    createdAt: faker.date.recent({ days: 30 }).toISOString(),
+    updatedAt: faker.date.recent({ days: 7 }).toISOString()
+  };
+}
+
 export default {
   generateSeller,
   generateTransaction,
@@ -717,5 +971,11 @@ export default {
   generateCheckpointRules,
   generateExperiment,
   generateDataset,
-  generateMetricsSnapshot
+  generateMetricsSnapshot,
+  generateAccountSetup,
+  generateItemSetup,
+  generatePricingRecord,
+  generateProfileUpdate,
+  generateOutboundShipment,
+  generateReturn
 };
