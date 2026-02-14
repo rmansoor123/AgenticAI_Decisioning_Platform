@@ -14,7 +14,22 @@ import { BaseAgent } from '../core/base-agent.js';
 import { db_ops } from '../../shared/common/database.js';
 import { checkIpReputation, verifyEmail, checkBusinessRegistration } from '../tools/external-apis.js';
 import { checkFraudList, checkConsortiumData } from '../tools/fraud-databases.js';
+import {
+  verifyIdentityReal,
+  verifyEmailReal,
+  checkIpReputationReal,
+  verifyBankAccountReal,
+  verifyBusinessReal,
+  screenWatchlistReal
+} from '../tools/real-apis.js';
 import { CONFIDENCE } from '../core/chain-of-thought.js';
+import { getKnowledgeBase } from '../core/knowledge-base.js';
+import { getContextEngine } from '../core/context-engine.js';
+import { createSelfCorrection } from '../core/self-correction.js';
+import { createToolExecutor } from '../core/tool-executor.js';
+
+// Use environment variable to switch between real and simulated
+const USE_REAL_APIS = process.env.USE_REAL_APIS === 'true';
 
 export class SellerOnboardingAgent extends BaseAgent {
   constructor() {
@@ -42,6 +57,18 @@ export class SellerOnboardingAgent extends BaseAgent {
     };
 
     this.registerTools();
+
+    this.knowledgeBase = getKnowledgeBase();
+    this.contextEngine = getContextEngine();
+    this.selfCorrection = createSelfCorrection(this.agentId);
+    this.toolExecutor = createToolExecutor(this.agentId);
+
+    // Autonomy thresholds
+    this.autonomyThresholds = {
+      AUTO_APPROVE_MAX_RISK: 30,
+      AUTO_REJECT_MIN_RISK: 80,
+      ESCALATE_MIN_RISK: 60
+    };
   }
 
   registerTools() {
@@ -52,7 +79,15 @@ export class SellerOnboardingAgent extends BaseAgent {
     // Tool: Verify identity documents
     this.registerTool('verify_identity', 'Verify identity documents (ID, passport, etc.)', async (params) => {
       const { documentType, documentNumber, country } = params;
-      
+
+      if (USE_REAL_APIS) {
+        try {
+          return await verifyIdentityReal(params);
+        } catch (e) {
+          console.warn("Real API failed, using simulation: ", e);
+        }
+      }
+
       // Simulate identity verification
       const verification = {
         documentType,
@@ -71,9 +106,17 @@ export class SellerOnboardingAgent extends BaseAgent {
     // Tool: Verify business registration
     this.registerTool('verify_business', 'Verify business registration and legitimacy', async (params) => {
       const { businessName, registrationNumber, country, businessCategory } = params;
-      
+
+      if (USE_REAL_APIS) {
+        try {
+          return await verifyBusinessReal(params);
+        } catch (e) {
+          console.warn("Real API failed, using simulation: ", e);
+        }
+      }
+
       const business = await checkBusinessRegistration({ businessName, registrationNumber, country });
-      
+
       return {
         success: true,
         data: {
@@ -94,7 +137,7 @@ export class SellerOnboardingAgent extends BaseAgent {
     // Tool: Check address verification
     this.registerTool('verify_address', 'Verify business and mailing address', async (params) => {
       const { address, country, addressType } = params;
-      
+
       return {
         success: true,
         data: {
@@ -116,7 +159,15 @@ export class SellerOnboardingAgent extends BaseAgent {
     // Tool: Screen against watchlists
     this.registerTool('screen_watchlist', 'Screen against sanctions, PEP, and watchlists', async (params) => {
       const { name, dateOfBirth, country, businessName } = params;
-      
+
+      if (USE_REAL_APIS) {
+        try {
+          return await screenWatchlistReal(params);
+        } catch (e) {
+          console.warn("Real API failed, using simulation: ", e);
+        }
+      }
+
       return {
         success: true,
         data: {
@@ -135,10 +186,10 @@ export class SellerOnboardingAgent extends BaseAgent {
     // Tool: Check fraud databases
     this.registerTool('check_fraud_databases', 'Check seller against fraud databases', async (params) => {
       const { email, businessName, phone, taxId } = params;
-      
+
       const fraudCheck = await checkFraudList({ email, businessName, phone });
       const consortiumCheck = await checkConsortiumData({ email, businessName, phone });
-      
+
       return {
         success: true,
         data: {
@@ -159,7 +210,15 @@ export class SellerOnboardingAgent extends BaseAgent {
     // Tool: Verify bank account
     this.registerTool('verify_bank_account', 'Verify bank account details and ownership', async (params) => {
       const { accountNumber, routingNumber, accountHolderName, bankName, country } = params;
-      
+
+      if (USE_REAL_APIS) {
+        try {
+          return await verifyBankAccountReal(params);
+        } catch (e) {
+          console.warn("Real API failed, using simulation: ", e);
+        }
+      }
+
       return {
         success: true,
         data: {
@@ -180,7 +239,7 @@ export class SellerOnboardingAgent extends BaseAgent {
     // Tool: Check financial history
     this.registerTool('check_financial_history', 'Check credit and financial history', async (params) => {
       const { businessName, taxId, country } = params;
-      
+
       return {
         success: true,
         data: {
@@ -206,6 +265,15 @@ export class SellerOnboardingAgent extends BaseAgent {
       if (!email) {
         return { success: false, error: 'Email is required' };
       }
+
+      if (USE_REAL_APIS) {
+        try {
+          return await verifyEmailReal(email);
+        } catch (e) {
+          console.warn("Real API failed, using simulation: ", e);
+        }
+      }
+
       return await verifyEmail(email);
     });
 
@@ -215,6 +283,15 @@ export class SellerOnboardingAgent extends BaseAgent {
       if (!ipAddress) {
         return { success: false, error: 'IP address is required' };
       }
+
+      if (USE_REAL_APIS) {
+        try {
+          return await checkIpReputationReal(ipAddress);
+        } catch (e) {
+          console.warn("Real API failed, using simulation: ", e);
+        }
+      }
+
       return await checkIpReputation(ipAddress);
     });
 
@@ -225,13 +302,13 @@ export class SellerOnboardingAgent extends BaseAgent {
     // Tool: Analyze business category risk
     this.registerTool('analyze_business_category', 'Assess risk of business category', async (params) => {
       const { businessCategory, country } = params;
-      
+
       const highRiskCategories = ['GAMBLING', 'ADULT_CONTENT', 'CRYPTO', 'PHARMACEUTICALS'];
       const mediumRiskCategories = ['ELECTRONICS', 'JEWELRY', 'TICKETS', 'GIFT_CARDS'];
-      
+
       const isHighRisk = highRiskCategories.includes(businessCategory);
       const isMediumRisk = mediumRiskCategories.includes(businessCategory);
-      
+
       return {
         success: true,
         data: {
@@ -251,15 +328,15 @@ export class SellerOnboardingAgent extends BaseAgent {
     // Tool: Check for duplicate sellers
     this.registerTool('check_duplicates', 'Check for duplicate or related seller accounts', async (params) => {
       const { email, phone, businessName, taxId } = params;
-      
+
       // Check database for similar sellers
       const allSellers = db_ops.getAll('sellers', 10000, 0).map(s => s.data);
-      
+
       const duplicates = allSellers.filter(s => {
         return s.email === email ||
-               s.phone === phone ||
-               s.businessName === businessName ||
-               (taxId && s.taxId === taxId);
+          s.phone === phone ||
+          s.businessName === businessName ||
+          (taxId && s.taxId === taxId);
       });
 
       return {
@@ -269,9 +346,9 @@ export class SellerOnboardingAgent extends BaseAgent {
           duplicates: duplicates.map(s => ({
             sellerId: s.sellerId,
             businessName: s.businessName,
-            matchType: s.email === email ? 'EMAIL' : 
-                      s.phone === phone ? 'PHONE' : 
-                      s.businessName === businessName ? 'BUSINESS_NAME' : 'TAX_ID',
+            matchType: s.email === email ? 'EMAIL' :
+              s.phone === phone ? 'PHONE' :
+                s.businessName === businessName ? 'BUSINESS_NAME' : 'TAX_ID',
             status: s.status,
             riskTier: s.riskTier
           })),
@@ -284,15 +361,15 @@ export class SellerOnboardingAgent extends BaseAgent {
     // Tool: Analyze historical patterns
     this.registerTool('analyze_historical_patterns', 'Check for patterns in similar sellers', async (params) => {
       const { businessCategory, country, businessAge } = params;
-      
+
       const similarSellers = db_ops.getAll('sellers', 10000, 0)
         .map(s => s.data)
         .filter(s => s.businessCategory === businessCategory && s.country === country);
-      
+
       const fraudRate = similarSellers.length > 0
         ? similarSellers.filter(s => s.status === 'BLOCKED' || s.riskTier === 'CRITICAL').length / similarSellers.length
         : 0.1;
-      
+
       return {
         success: true,
         data: {
@@ -314,14 +391,14 @@ export class SellerOnboardingAgent extends BaseAgent {
     // Tool: Request investigation from Fraud Investigation Agent
     this.registerTool('request_fraud_investigation', 'Request deep investigation from Fraud Investigation Agent', async (params) => {
       const { sellerId, riskFactors } = params;
-      
+
       try {
         const result = await this.requestHelp('transaction_analysis', {
           type: 'seller_onboarding_investigation',
           sellerId,
           riskFactors
         }, { requestingAgent: this.agentId });
-        
+
         return {
           success: true,
           data: result || {
@@ -337,6 +414,36 @@ export class SellerOnboardingAgent extends BaseAgent {
           data: { recommendation: 'REVIEW', confidence: 0.5 }
         };
       }
+    });
+
+    // ============================================================================
+    // AGENTIC AI TOOLS
+    // ============================================================================
+
+    this.registerTool('search_knowledge_base', 'Search knowledge base for similar past cases', async (params) => {
+      const { query, namespace, sellerId } = params;
+      const results = this.knowledgeBase.searchKnowledge(
+        namespace || null,
+        query,
+        sellerId ? { sellerId } : {},
+        5
+      );
+      return { success: true, data: { results, count: results.length } };
+    });
+
+    this.registerTool('query_risk_profile', 'Get current risk profile for seller', async (params) => {
+      const { sellerId } = params;
+      const record = db_ops.getById('seller_risk_profiles', 'seller_id', sellerId);
+      return {
+        success: true,
+        data: record ? record.data : { exists: false, sellerId }
+      };
+    });
+
+    this.registerTool('retrieve_memory', 'Retrieve relevant patterns from long-term memory', async (params) => {
+      const { context } = params;
+      const memories = this.memoryStore.queryLongTerm(this.agentId, context, 5);
+      return { success: true, data: { memories, count: memories.length } };
     });
   }
 
@@ -385,10 +492,34 @@ export class SellerOnboardingAgent extends BaseAgent {
     if (analysis.strategy.intensity === 'COMPREHENSIVE') {
       actions.push({ type: 'check_financial_history', params: context.input?.sellerData });
       actions.push({ type: 'analyze_historical_patterns', params: context.input?.sellerData });
-      
+
       if (context.input?.sellerData?.ipAddress) {
         actions.push({ type: 'check_ip_reputation', params: { ipAddress: context.input.sellerData.ipAddress } });
       }
+    }
+
+    // Search knowledge base for similar cases
+    actions.push({
+      type: 'search_knowledge_base',
+      params: {
+        query: `onboarding ${context.input?.sellerData?.businessCategory || ''} ${context.input?.sellerData?.country || ''}`,
+        namespace: 'onboarding',
+        sellerId: context.input?.sellerId
+      }
+    });
+
+    // Retrieve relevant memory
+    actions.push({
+      type: 'retrieve_memory',
+      params: { context: `onboarding evaluation ${context.input?.sellerData?.businessCategory || ''}` }
+    });
+
+    // Check existing risk profile
+    if (context.input?.sellerId) {
+      actions.push({
+        type: 'query_risk_profile',
+        params: { sellerId: context.input.sellerId }
+      });
     }
 
     // Request fraud investigation for high-risk cases
@@ -428,17 +559,46 @@ export class SellerOnboardingAgent extends BaseAgent {
       this.addEvidence(`Risk factor: ${factor.factor} (${factor.severity})`);
     }
 
+    // Autonomous decision-making based on risk score
+    const isAutonomous = overallRisk.score < this.autonomyThresholds.ESCALATE_MIN_RISK;
+    const needsHumanReview = !isAutonomous || decision.action === 'REVIEW';
+
+    // Log prediction for self-correction
+    if (context.input?.sellerId) {
+      this.selfCorrection.logPrediction(
+        `ONB-${Date.now().toString(36).toUpperCase()}`,
+        context.input.sellerId,
+        decision.action,
+        decision.confidence,
+        this.generateOnboardingReasoning(riskFactors, decision)
+      );
+    }
+
+    // Add to knowledge base for future RAG
+    this.knowledgeBase.addKnowledge('onboarding', [{
+      _id: `ONB-${Date.now()}`,
+      text: `Onboarding evaluation for seller ${context.input?.sellerId || 'unknown'}. Decision: ${decision.action}. Risk score: ${overallRisk.score}. Factors: ${riskFactors.map(f => f.factor).join(', ')}`,
+      category: 'onboarding',
+      sellerId: context.input?.sellerId,
+      domain: 'onboarding',
+      outcome: decision.action === 'APPROVE' ? 'legitimate' : decision.action === 'REJECT' ? 'fraud' : 'pending',
+      riskScore: overallRisk.score,
+      source: this.agentId
+    }]);
+
     return {
       success: true,
       onboardingId: `ONB-${Date.now().toString(36).toUpperCase()}`,
-      summary: `Onboarding evaluation complete. ${riskFactors.length} risk factors identified.`,
+      summary: `Onboarding evaluation complete. ${riskFactors.length} risk factors identified. ${isAutonomous ? 'Autonomous decision.' : 'Requires human review.'}`,
       evidence,
       riskFactors,
       overallRisk,
       decision,
       confidence: decision.confidence,
-      needsHumanReview: decision.action === 'REVIEW' || overallRisk.score > 50,
-      escalationReason: decision.action === 'REVIEW' ? 'Moderate risk requires manual review' : null,
+      isAutonomous,
+      needsHumanReview,
+      escalationReason: needsHumanReview ? `Risk score ${overallRisk.score} requires human review` : null,
+      selfCorrectionStats: this.selfCorrection.getAccuracy(),
       reasoning: this.generateOnboardingReasoning(riskFactors, decision)
     };
   }
@@ -446,7 +606,7 @@ export class SellerOnboardingAgent extends BaseAgent {
   // Helper methods
   determineInvestigationStrategy(sellerData) {
     const riskIndicators = this.identifyInitialRiskIndicators(sellerData);
-    
+
     if (riskIndicators.length >= 3) {
       return { intensity: 'COMPREHENSIVE', checks: 'all' };
     } else if (riskIndicators.length >= 1) {
@@ -457,11 +617,11 @@ export class SellerOnboardingAgent extends BaseAgent {
 
   identifyInitialRiskIndicators(sellerData) {
     const indicators = [];
-    
+
     if (!sellerData?.kycVerified) indicators.push('KYC_NOT_VERIFIED');
     if (!sellerData?.bankVerified) indicators.push('BANK_NOT_VERIFIED');
     if (['NG', 'RO', 'UA', 'PK', 'BD'].includes(sellerData?.country)) indicators.push('HIGH_RISK_COUNTRY');
-    
+
     const emailDomain = sellerData?.email?.split('@')[1];
     if (emailDomain && ['tempmail.com', 'guerrillamail.com'].includes(emailDomain)) {
       indicators.push('DISPOSABLE_EMAIL');
@@ -470,23 +630,23 @@ export class SellerOnboardingAgent extends BaseAgent {
     // Check ID verification results if available
     if (sellerData?.idVerification) {
       const idVerif = sellerData.idVerification;
-      
+
       if (!idVerif.isValid) {
         indicators.push('ID_VERIFICATION_FAILED');
       }
-      
+
       if (idVerif.faceMatch && !idVerif.faceMatch.matchResult.isMatch) {
         indicators.push('FACE_MISMATCH');
       }
-      
+
       if (idVerif.validation?.isExpired) {
         indicators.push('ID_EXPIRED');
       }
-      
+
       if (idVerif.validation?.issues && idVerif.validation.issues.length > 0) {
         indicators.push('ID_VALIDATION_ISSUES');
       }
-      
+
       if (idVerif.confidence < 0.70) {
         indicators.push('LOW_ID_VERIFICATION_CONFIDENCE');
       }
@@ -494,7 +654,7 @@ export class SellerOnboardingAgent extends BaseAgent {
       // No ID verification provided
       indicators.push('NO_ID_VERIFICATION');
     }
-    
+
     return indicators;
   }
 
@@ -504,14 +664,14 @@ export class SellerOnboardingAgent extends BaseAgent {
     // Check ID verification results from seller data (if available)
     if (sellerData?.idVerification) {
       const idVerif = sellerData.idVerification;
-      
+
       if (!idVerif.isValid) {
         factors.push({ factor: 'ID_VERIFICATION_FAILED', severity: 'CRITICAL', score: 50 });
       } else {
         // Positive factor for valid ID verification
         factors.push({ factor: 'ID_VERIFICATION_PASSED', severity: 'POSITIVE', score: -20 });
       }
-      
+
       if (idVerif.faceMatch) {
         if (!idVerif.faceMatch.matchResult.isMatch) {
           factors.push({ factor: 'FACE_MISMATCH', severity: 'CRITICAL', score: 45 });
@@ -519,24 +679,24 @@ export class SellerOnboardingAgent extends BaseAgent {
           factors.push({ factor: 'FACE_MATCH_CONFIRMED', severity: 'POSITIVE', score: -15 });
         }
       }
-      
+
       if (idVerif.validation) {
         if (idVerif.validation.isExpired) {
           factors.push({ factor: 'ID_EXPIRED', severity: 'HIGH', score: 35 });
         }
         if (idVerif.validation.issues && idVerif.validation.issues.length > 0) {
-          factors.push({ 
-            factor: 'ID_VALIDATION_ISSUES', 
-            severity: 'HIGH', 
+          factors.push({
+            factor: 'ID_VALIDATION_ISSUES',
+            severity: 'HIGH',
             score: 25,
-            details: idVerif.validation.issues 
+            details: idVerif.validation.issues
           });
         }
         if (idVerif.validation.validationScore < 70) {
           factors.push({ factor: 'LOW_ID_VALIDATION_SCORE', severity: 'MEDIUM', score: 20 });
         }
       }
-      
+
       if (idVerif.confidence < 0.70) {
         factors.push({ factor: 'LOW_ID_VERIFICATION_CONFIDENCE', severity: 'MEDIUM', score: 20 });
       }
@@ -699,10 +859,8 @@ ${factors.length > 0 ? `Total risk score: ${factors.reduce((sum, f) => sum + f.s
     this.status = 'EVALUATING';
     this.currentTask = sellerId;
 
-    const result = await this.reason({
-      sellerId,
-      sellerData
-    });
+    const input = { sellerId, sellerData };
+    const result = await this.reason(input, { input });
 
     this.status = 'IDLE';
     this.currentTask = null;
