@@ -142,6 +142,7 @@ import abTestingRouter from '../services/experimentation/ab-testing/index.js';
 import simulationRouter from '../services/experimentation/simulation/index.js';
 import agentsRouter from '../services/agents/index.js';
 import riskProfileRouter from '../services/risk-profile/index.js';
+import observabilityRouter from '../services/observability/index.js';
 
 const app = express();
 const server = createServer(app);
@@ -207,7 +208,8 @@ app.get('/api/health', (req, res) => {
       'ml-platform': 'running',
       'decision-engine': 'running',
       'experimentation': 'running',
-      'risk-profile': 'running'
+      'risk-profile': 'running',
+      'observability': 'running'
     }
   });
 });
@@ -241,6 +243,8 @@ app.get('/api', (req, res) => {
       '/api/simulation': 'Rule Simulation Engine',
       // Risk Profile
       '/api/risk-profile': 'Seller Risk Profile Service',
+      // Observability
+      '/api/observability': 'Agent Observability & Monitoring',
       // Real-time
       '/api/metrics': 'Platform Metrics',
       '/api/stream': 'Transaction Stream',
@@ -279,6 +283,9 @@ app.use('/api/agents', agentsRouter);
 
 // Risk Profile
 app.use('/api/risk-profile', riskProfileRouter);
+
+// Observability
+app.use('/api/observability', observabilityRouter);
 
 // ============================================================================
 // METRICS & DASHBOARD ENDPOINTS
@@ -502,6 +509,7 @@ server.listen(PORT, () => {
 ║   • Experiments          /api/experiments                     ║
 ║   • Simulation           /api/simulation                      ║
 ║   • Risk Profile       /api/risk-profile                    ║
+║   • Observability       /api/observability                   ║
 ║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
   `);

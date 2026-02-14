@@ -17,6 +17,9 @@ import { getPatternMemory, PATTERN_TYPES, CONFIDENCE_LEVELS } from './pattern-me
 import { createChainOfThought, STEP_TYPES, CONFIDENCE } from './chain-of-thought.js';
 import { getMemoryStore } from './memory-store.js';
 import { getContextEngine } from './context-engine.js';
+import { getMetricsCollector } from './metrics-collector.js';
+import { getTraceCollector } from './trace-collector.js';
+import { getDecisionLogger } from './decision-logger.js';
 
 // Import event bus (only if running in context with WebSocket)
 let eventBus = null;
@@ -50,6 +53,9 @@ export class BaseAgent {
     this.memoryStore = getMemoryStore();
     this.sessionId = `SESSION-${Date.now().toString(36)}`;
     this.contextEngine = getContextEngine();
+    this.metricsCollector = getMetricsCollector();
+    this.traceCollector = getTraceCollector();
+    this.decisionLogger = getDecisionLogger();
 
     // Register with messenger
     this.messenger.register(this.agentId, (message) => this.handleMessage(message));
@@ -82,6 +88,12 @@ export class BaseAgent {
       result: null,
       chainOfThought: null
     };
+
+    // Start trace for this reasoning session
+    const traceId = `TRACE-${this.agentId}-${Date.now().toString(36)}`;
+    this.traceCollector.startTrace(traceId, this.agentId, input);
+    thought.traceId = traceId;
+    const reasonStartTime = Date.now();
 
     try {
       // Emit agent start event
@@ -131,6 +143,7 @@ export class BaseAgent {
           params: this.sanitizeInput(action.params)
         });
 
+        this.traceCollector.startSpan(traceId, `action:${action.type}`, action.params);
         const actionResult = await this.act(action);
         thought.actions.push({ action, result: actionResult });
 
@@ -140,6 +153,7 @@ export class BaseAgent {
           action: action.type,
           success: actionResult?.success !== false
         });
+        this.traceCollector.endSpan(traceId, `action:${action.type}`, { success: actionResult?.success !== false });
 
         // Record as evidence in chain of thought
         if (actionResult?.data) {
@@ -176,11 +190,29 @@ export class BaseAgent {
       // Attach chain of thought to result
       thought.chainOfThought = this.currentChain.generateTrace();
 
+      // Record metrics and end trace
+      const reasonDuration = Date.now() - reasonStartTime;
+      this.metricsCollector.recordExecution(this.agentId, reasonDuration, thought.result?.success !== false);
+      this.traceCollector.endTrace(traceId, { success: thought.result?.success !== false, summary: thought.result?.summary });
+
+      // Log decision
+      if (thought.result?.recommendation || thought.result?.decision) {
+        this.decisionLogger.logDecision(
+          this.agentId,
+          thought.result.recommendation || thought.result.decision,
+          { input: this.sanitizeInput(input), actionCount: thought.actions.length },
+          thought.result.summary || ''
+        );
+      }
+
     } catch (error) {
       thought.error = error.message;
       thought.result = { success: false, error: error.message };
       this.currentChain.conclude(`Error: ${error.message}`, CONFIDENCE.CERTAIN);
       thought.chainOfThought = this.currentChain.generateTrace();
+      const reasonDuration = Date.now() - reasonStartTime;
+      this.metricsCollector.recordExecution(this.agentId, reasonDuration, false);
+      this.traceCollector.endTrace(traceId, { success: false, error: error.message });
     }
 
     this.thoughtLog.push(thought);
