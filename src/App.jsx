@@ -7,7 +7,10 @@ import MLPlatform from './pages/MLPlatform'
 import DecisionEngine from './pages/DecisionEngine'
 import Experimentation from './pages/Experimentation'
 import TransactionFlow from './pages/TransactionFlow'
-import Services from './pages/Services'
+import Listing from './pages/Listing'
+import Payout from './pages/Payout'
+import ATO from './pages/ATO'
+import Shipping from './pages/Shipping'
 import AgenticAI from './pages/AgenticAI'
 import Onboarding from './pages/Onboarding'
 import SellerOnboardingForm from './pages/SellerOnboardingForm'
@@ -21,7 +24,6 @@ import AccountSetup from './pages/AccountSetup'
 import ItemSetup from './pages/ItemSetup'
 import Pricing from './pages/Pricing'
 import ProfileUpdates from './pages/ProfileUpdates'
-import Shipments from './pages/Shipments'
 import Returns from './pages/Returns'
 
 const API_BASE = 'http://localhost:3005/api'
@@ -156,7 +158,10 @@ function App() {
           <Route path="/experiments/ab" element={<Experimentation />} />
           <Route path="/experiments/simulation" element={<Experimentation />} />
           <Route path="/flow" element={<TransactionFlow />} />
-          <Route path="/services" element={<Services />} />
+          <Route path="/listing" element={<Listing />} />
+          <Route path="/payout" element={<Payout />} />
+          <Route path="/ato" element={<ATO />} />
+          <Route path="/shipping" element={<Shipping />} />
           <Route path="/agents" element={<AgenticAI />} />
           <Route path="/onboarding" element={<Onboarding />} />
           <Route path="/onboarding/form" element={<SellerOnboardingForm />} />
@@ -170,7 +175,7 @@ function App() {
           <Route path="/item-setup" element={<ItemSetup />} />
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/profile-updates" element={<ProfileUpdates />} />
-          <Route path="/shipments" element={<Shipments />} />
+          <Route path="/flow-detail" element={<TransactionFlow />} />
           <Route path="/returns" element={<Returns />} />
         </Routes>
       </Layout>
