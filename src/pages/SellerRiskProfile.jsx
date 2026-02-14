@@ -75,6 +75,80 @@ function getScoreColor(score) {
   return 'text-emerald-400'
 }
 
+function LifecycleFlow({ domainScores }) {
+  const getNodeColor = (score) => {
+    if (score >= 75) return { bg: 'bg-red-500/30', border: 'border-red-500', text: 'text-red-400' }
+    if (score >= 50) return { bg: 'bg-orange-500/30', border: 'border-orange-500', text: 'text-orange-400' }
+    if (score >= 25) return { bg: 'bg-amber-500/30', border: 'border-amber-500', text: 'text-amber-400' }
+    return { bg: 'bg-emerald-500/20', border: 'border-emerald-500/50', text: 'text-emerald-400' }
+  }
+
+  const preLaunch = ['onboarding', 'account_setup', 'item_setup', 'listing', 'pricing']
+  const liveOps = ['transaction', 'payout', 'shipping', 'returns']
+  const security = ['ato', 'profile_updates']
+
+  const renderNode = (domain) => {
+    const score = Math.round(domainScores[domain] || 0)
+    const colors = getNodeColor(score)
+    const Icon = DOMAIN_ICONS[domain]
+    return (
+      <div key={domain} className={`flex flex-col items-center gap-1 p-2 rounded-lg border ${colors.bg} ${colors.border}`}>
+        <Icon className={`w-4 h-4 ${colors.text}`} />
+        <span className="text-[10px] text-gray-400 whitespace-nowrap">{DOMAIN_LABELS[domain]}</span>
+        <span className={`text-sm font-bold font-mono ${colors.text}`}>{score}</span>
+      </div>
+    )
+  }
+
+  const renderArrow = () => (
+    <div className="text-gray-600 flex items-center px-0.5">&rarr;</div>
+  )
+
+  return (
+    <div className="bg-[#12121a] rounded-xl border border-gray-800 p-6">
+      <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
+        <Shield className="w-4 h-4 text-indigo-400" />
+        Seller Lifecycle
+      </h3>
+      <div className="space-y-4">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-gray-600 font-semibold mb-2">Pre-Launch</div>
+          <div className="flex items-center gap-1 flex-wrap">
+            {preLaunch.map((d, i) => (
+              <div key={d} className="flex items-center">
+                {renderNode(d)}
+                {i < preLaunch.length - 1 && renderArrow()}
+              </div>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-gray-600 font-semibold mb-2">Live Operations</div>
+          <div className="flex items-center gap-1 flex-wrap">
+            {liveOps.map((d, i) => (
+              <div key={d} className="flex items-center">
+                {renderNode(d)}
+                {i < liveOps.length - 1 && renderArrow()}
+              </div>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-gray-600 font-semibold mb-2">Security</div>
+          <div className="flex items-center gap-1 flex-wrap">
+            {security.map((d, i) => (
+              <div key={d} className="flex items-center">
+                {renderNode(d)}
+                {i < security.length - 1 && renderArrow()}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function SellerRiskProfile() {
   const [stats, setStats] = useState(null)
   const [highRiskSellers, setHighRiskSellers] = useState([])
@@ -250,6 +324,9 @@ export default function SellerRiskProfile() {
             </div>
           </div>
         )}
+
+        {/* Lifecycle Flow */}
+        <LifecycleFlow domainScores={domains} />
 
         {/* Domain Breakdown */}
         <div className="bg-[#12121a] rounded-xl border border-gray-800 p-6">
