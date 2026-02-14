@@ -15,7 +15,11 @@ export const MESSAGE_TYPES = {
   TASK_DELEGATION: 'task_delegation',
   TASK_RESULT: 'task_result',
   BROADCAST: 'broadcast',
-  ACKNOWLEDGEMENT: 'acknowledgement'
+  ACKNOWLEDGEMENT: 'acknowledgement',
+  CONSENSUS_REQUEST: 'consensus_request',
+  CONSENSUS_VOTE: 'consensus_vote',
+  CONFLICT_ESCALATION: 'conflict_escalation',
+  RESULT_REPORT: 'result_report'
 };
 
 /**

@@ -5,6 +5,7 @@
  */
 
 import { orchestrator } from './core/agent-orchestrator.js';
+import { getAgentCoordinator } from './core/agent-coordinator.js';
 import FraudInvestigationAgent from './specialized/fraud-investigation-agent.js';
 import RuleOptimizationAgent from './specialized/rule-optimization-agent.js';
 import AlertTriageAgent from './specialized/alert-triage-agent.js';
@@ -103,8 +104,12 @@ orchestrator.defineWorkflow('full_case_review', {
   triggers: ['ESCALATION', 'MANUAL']
 });
 
+// Initialize coordinator with orchestrator reference
+const coordinator = getAgentCoordinator(orchestrator);
+
 export {
   orchestrator,
+  coordinator,
   fraudInvestigator,
   ruleOptimizer,
   alertTriage,
@@ -113,6 +118,7 @@ export {
 
 export default {
   orchestrator,
+  coordinator,
   agents: {
     fraudInvestigator,
     ruleOptimizer,

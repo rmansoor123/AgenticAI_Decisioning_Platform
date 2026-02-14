@@ -483,6 +483,43 @@ export class BaseAgent {
     });
   }
 
+  /**
+   * Delegate a subtask to another agent
+   */
+  async delegate(targetAgentId, subtask) {
+    this.emitEvent('agent:action:start', {
+      agentId: this.agentId,
+      action: 'delegate',
+      target: targetAgentId
+    });
+
+    try {
+      const result = await this.messenger.delegateTask({
+        from: this.agentId,
+        to: targetAgentId,
+        task: subtask.task || 'delegated_task',
+        input: subtask,
+        context: { delegatedFrom: this.agentId }
+      });
+
+      this.emitEvent('agent:action:complete', {
+        agentId: this.agentId,
+        action: 'delegate',
+        success: true
+      });
+
+      return result;
+    } catch (error) {
+      this.emitEvent('agent:action:complete', {
+        agentId: this.agentId,
+        action: 'delegate',
+        success: false,
+        error: error.message
+      });
+      return null;
+    }
+  }
+
   // ============================================================================
   // CHAIN OF THOUGHT HELPERS
   // ============================================================================
