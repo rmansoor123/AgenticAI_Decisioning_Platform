@@ -122,11 +122,7 @@ export class BaseAgent {
       });
       context._assembledContext = assembledContext;
 
-      // Step 1: THINK - Analyze the situation
-      this.currentChain.observe('Received input for analysis', input);
-      thought.reasoning.push(await this.think(input, context));
-
-      // Step 2: Check pattern memory for similar cases
+      // Step 1: Check pattern memory (BEFORE think)
       const patternMatches = this.checkPatterns(input);
       if (patternMatches.matches.length > 0) {
         this.currentChain.recordEvidence(
@@ -137,6 +133,11 @@ export class BaseAgent {
         );
         thought.patternMatches = patternMatches;
       }
+      context._patternMatches = patternMatches;
+
+      // Step 2: THINK - Analyze the situation
+      this.currentChain.observe('Received input for analysis', input);
+      thought.reasoning.push(await this.think(input, context));
 
       // Step 3: PLAN - Determine actions needed
       const plan = await this.plan(thought.reasoning[0], context);
