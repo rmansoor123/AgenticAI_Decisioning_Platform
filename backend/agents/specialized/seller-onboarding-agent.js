@@ -27,6 +27,7 @@ import { getKnowledgeBase } from '../core/knowledge-base.js';
 import { getContextEngine } from '../core/context-engine.js';
 import { createSelfCorrection } from '../core/self-correction.js';
 import { createToolExecutor } from '../core/tool-executor.js';
+import { getThresholdManager } from '../core/threshold-manager.js';
 
 // Use environment variable to switch between real and simulated
 const USE_REAL_APIS = process.env.USE_REAL_APIS === 'true';
@@ -63,12 +64,12 @@ export class SellerOnboardingAgent extends BaseAgent {
     this.selfCorrection = createSelfCorrection(this.agentId);
     this.toolExecutor = createToolExecutor(this.agentId);
 
-    // Autonomy thresholds
-    this.autonomyThresholds = {
-      AUTO_APPROVE_MAX_RISK: 30,
-      AUTO_REJECT_MIN_RISK: 80,
-      ESCALATE_MIN_RISK: 60
-    };
+    // Dynamic autonomy thresholds from threshold manager
+    this._thresholdManager = getThresholdManager();
+  }
+
+  get autonomyThresholds() {
+    return this._thresholdManager.getThresholds(this.agentId);
   }
 
   registerTools() {
@@ -825,13 +826,14 @@ export class SellerOnboardingAgent extends BaseAgent {
       }
     }
 
-    if (risk.score >= this.riskThresholds.REJECT.min || risk.criticalFactors > 0) {
+    const thresholds = this.autonomyThresholds;
+    if (risk.score >= thresholds.AUTO_REJECT_MIN_RISK || risk.criticalFactors > 0) {
       return {
         action: 'REJECT',
         confidence: 0.90,
         reason: 'High risk seller with critical indicators - cannot approve'
       };
-    } else if (risk.score >= this.riskThresholds.REVIEW.min) {
+    } else if (risk.score >= thresholds.AUTO_APPROVE_MAX_RISK) {
       return {
         action: 'REVIEW',
         confidence: 0.75,
