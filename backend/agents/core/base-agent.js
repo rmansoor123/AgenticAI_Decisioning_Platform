@@ -28,6 +28,7 @@ import {
   parseLLMJson,
   formatToolCatalog
 } from './prompt-templates.js';
+import { getKnowledgeBase } from './knowledge-base.js';
 
 // Import event bus (only if running in context with WebSocket)
 let eventBus = null;
@@ -235,13 +236,12 @@ export class BaseAgent {
     // Gather advisory context for the LLM
     const recentMemory = this.memoryStore.getShortTerm(this.agentId, this.sessionId).slice(0, 5);
     const patternMatches = this.checkPatterns(input);
+    // Try dual retrieval (vector + TF-IDF)
+    const queryText = typeof input === 'string' ? input : JSON.stringify(input).slice(0, 200);
+    const domain = input?.domain || context?.domain || 'fraud';
     let knowledgeResults = [];
-
-    // Try dual retrieval (vector + TF-IDF) — Layer 3 will enhance this further
     try {
-      const queryText = typeof input === 'string' ? input : JSON.stringify(input).slice(0, 200);
-      const longTermResults = this.memoryStore.queryLongTerm(this.agentId, queryText, 3);
-      knowledgeResults = longTermResults;
+      knowledgeResults = await this.dualRetrieve(queryText, domain);
     } catch (e) {
       // Knowledge retrieval failed, proceed without it
     }
@@ -445,6 +445,77 @@ export class BaseAgent {
     // Also check persistent long-term memory
     const longTerm = this.memoryStore.queryLongTerm(this.agentId, inputStr.slice(0, 100), 3);
     return { recent: inMemory, learned: longTerm };
+  }
+
+  /**
+   * Dual retrieval: Pinecone vector search + TF-IDF knowledge base.
+   * Returns merged, deduplicated results with source tags.
+   */
+  async dualRetrieve(query, domain) {
+    const results = [];
+
+    // Map domain to namespace
+    const domainToNamespace = {
+      'onboarding': 'onboarding-knowledge',
+      'transaction': 'fraud-cases',
+      'transactions': 'fraud-cases',
+      'fraud': 'fraud-cases',
+      'risk': 'risk-patterns'
+    };
+    const vectorNamespace = domainToNamespace[domain] || 'fraud-cases';
+    const tfidfNamespace = {
+      'onboarding': 'onboarding',
+      'transaction': 'transactions',
+      'transactions': 'transactions',
+      'fraud': 'transactions',
+      'risk': 'risk-events'
+    }[domain] || 'transactions';
+
+    // 1. Try Pinecone vector search
+    const evalServiceUrl = process.env.EVAL_SERVICE_URL || 'http://localhost:8000';
+    try {
+      const response = await fetch(`${evalServiceUrl}/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, namespace: vectorNamespace, top_k: 5 }),
+        signal: AbortSignal.timeout(3000)
+      });
+      if (response.ok) {
+        const data = await response.json();
+        for (const r of (data.results || [])) {
+          results.push({
+            text: r.text,
+            _score: r.score,
+            _source: 'vector',
+            ...r.metadata
+          });
+        }
+      }
+    } catch (e) {
+      // Vector search unavailable
+    }
+
+    // 2. TF-IDF knowledge base search
+    try {
+      const knowledgeBase = getKnowledgeBase();
+      const tfidfResults = knowledgeBase.searchKnowledge(tfidfNamespace, query, {}, 5);
+      for (const r of tfidfResults) {
+        // Deduplicate: skip if similar text already in results
+        const isDuplicate = results.some(existing =>
+          existing.text && r.text && existing.text.slice(0, 80) === r.text.slice(0, 80)
+        );
+        if (!isDuplicate) {
+          results.push({ ...r, _source: 'tfidf' });
+        }
+      }
+    } catch (e) {
+      // TF-IDF search failed
+    }
+
+    // Sort by score descending, take top 5
+    return results
+      .sort((a, b) => (b._score || 0) - (a._score || 0))
+      .slice(0, 5);
   }
 
   extractKeyFacts(thought) {
