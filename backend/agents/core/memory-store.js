@@ -282,6 +282,46 @@ class MemoryStore {
     return consolidated;
   }
 
+  /**
+   * Consolidate high-confidence patterns from pattern memory into long-term memory.
+   * Patterns with > 10 occurrences and > 70% success rate become "validated knowledge."
+   * @param {string} agentId - The agent ID
+   * @param {Array} patterns - Array of pattern objects from patternMemory.getTopPatterns()
+   * @returns {number} Number of patterns consolidated
+   */
+  consolidatePatterns(agentId, patterns) {
+    if (!patterns || patterns.length === 0) return 0;
+
+    let consolidated = 0;
+
+    for (const pattern of patterns) {
+      if (pattern.occurrences >= 10 && pattern.successRate >= 0.7) {
+        // Check if we already consolidated this pattern
+        const existing = this.queryLongTerm(agentId, pattern.patternId, 1);
+        if (existing.length > 0 && JSON.stringify(existing[0]).includes(pattern.patternId)) {
+          continue; // Already consolidated
+        }
+
+        this.saveLongTerm(agentId, 'validated_knowledge', {
+          patternId: pattern.patternId,
+          type: pattern.type,
+          outcome: pattern.outcome,
+          occurrences: pattern.occurrences,
+          successRate: pattern.successRate,
+          confidence: pattern.confidence,
+          features: pattern.features,
+          consolidatedAt: new Date().toISOString(),
+          description: `Validated pattern: ${pattern.type} → ${pattern.outcome} (${(pattern.successRate * 100).toFixed(0)}% success over ${pattern.occurrences} cases)`
+        }, Math.min(0.5 + (pattern.successRate * 0.3), 0.95));
+
+        consolidated++;
+        this.stats.consolidations++;
+      }
+    }
+
+    return consolidated;
+  }
+
   // ============================================================================
   // CLEANUP
   // ============================================================================
