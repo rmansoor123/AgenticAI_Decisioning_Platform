@@ -368,22 +368,29 @@ export class FraudInvestigationAgent extends BaseAgent {
     };
   }
 
-  // Override think to implement investigation logic
+  // Override think — LLM-first, template fallback
   async think(input, context) {
     const { transactionId, alertType, riskScore } = input;
 
-    // Add observation to chain of thought
     this.addObservation(`Starting investigation for ${alertType || 'suspicious'} transaction ${transactionId}`);
-
-    // Determine investigation strategy based on alert type
-    const strategy = this.investigationTemplates[alertType] ||
-      this.investigationTemplates.HIGH_VALUE;
-
-    // Add hypothesis
     this.addHypothesis(
       `Transaction may be ${alertType === 'HIGH_VALUE' ? 'fraudulent due to unusual amount' : 'suspicious based on alert type'}`,
       CONFIDENCE.POSSIBLE
     );
+
+    // Try LLM-enhanced thinking (calls base agent with structured prompts)
+    const llmThink = await super.think(input, context);
+    if (llmThink.llmEnhanced) {
+      return {
+        ...llmThink,
+        alertType,
+        riskLevel: riskScore > 70 ? 'HIGH' : riskScore > 40 ? 'MEDIUM' : 'LOW'
+      };
+    }
+
+    // Fallback: template-based strategy
+    const strategy = this.investigationTemplates[alertType] ||
+      this.investigationTemplates.HIGH_VALUE;
 
     return {
       understanding: `Investigating ${alertType || 'suspicious'} transaction ${transactionId}`,
@@ -394,9 +401,17 @@ export class FraudInvestigationAgent extends BaseAgent {
     };
   }
 
-  // Override plan to create investigation plan
+  // Override plan — LLM-first, template fallback
   async plan(analysis, context) {
-    const actions = analysis.strategy.map(toolName => ({
+    // Try LLM-enhanced planning (calls base agent)
+    const llmPlan = await super.plan(analysis, context);
+    if (llmPlan.llmEnhanced && llmPlan.actions.length > 0) {
+      return llmPlan;
+    }
+
+    // Fallback: template-based planning
+    const strategy = analysis.strategy || this.investigationTemplates.HIGH_VALUE;
+    const actions = strategy.map(toolName => ({
       type: toolName,
       params: {
         transactionId: context.input?.transactionId,
@@ -407,31 +422,18 @@ export class FraudInvestigationAgent extends BaseAgent {
       }
     }));
 
-    // Always query ML model
-    actions.push({
-      type: 'query_ml_model',
-      params: { features: context.input }
-    });
+    actions.push({ type: 'query_ml_model', params: { features: context.input } });
+    actions.push({ type: 'search_similar_cases', params: { pattern: strategy[0] } });
 
-    // Search for similar cases
-    actions.push({
-      type: 'search_similar_cases',
-      params: { pattern: analysis.strategy[0] }
-    });
-
-    // Request rule analysis for high-risk cases
     if (analysis.riskLevel === 'HIGH') {
       actions.push({
         type: 'request_rule_analysis',
-        params: {
-          transactionId: context.input?.transactionId,
-          riskFactors: []
-        }
+        params: { transactionId: context.input?.transactionId, riskFactors: [] }
       });
     }
 
     return {
-      goal: `Complete investigation for transaction`,
+      goal: 'Complete investigation for transaction',
       actions,
       fallback: { type: 'escalate_to_human', reason: 'investigation_incomplete' }
     };

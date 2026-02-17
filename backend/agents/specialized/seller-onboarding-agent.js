@@ -447,22 +447,31 @@ export class SellerOnboardingAgent extends BaseAgent {
     });
   }
 
-  // Override think to implement onboarding logic
+  // Override think — LLM-first, strategy fallback
   async think(input, context) {
     const { sellerId, sellerData } = input;
 
     this.addObservation(`Starting onboarding evaluation for seller: ${sellerId || 'NEW'}`);
 
-    // Determine investigation strategy based on risk indicators
-    const strategy = this.determineInvestigationStrategy(sellerData);
+    // Try LLM-enhanced thinking
+    const llmThink = await super.think(input, context);
+    if (llmThink.llmEnhanced) {
+      return {
+        ...llmThink,
+        riskIndicators: this.identifyInitialRiskIndicators(sellerData),
+        strategy: this.determineInvestigationStrategy(sellerData)
+      };
+    }
 
+    // Fallback: rule-based strategy
+    const strategy = this.determineInvestigationStrategy(sellerData);
     this.addHypothesis(
       `Seller may require ${strategy.intensity} level verification based on initial data`,
       CONFIDENCE.POSSIBLE
     );
 
     return {
-      understanding: `Evaluating seller application for onboarding`,
+      understanding: 'Evaluating seller application for onboarding',
       strategy,
       riskIndicators: this.identifyInitialRiskIndicators(sellerData),
       relevantMemory: this.retrieveRelevantMemory(input),
@@ -470,8 +479,15 @@ export class SellerOnboardingAgent extends BaseAgent {
     };
   }
 
-  // Override plan to create onboarding investigation plan
+  // Override plan — LLM-first, rule fallback
   async plan(analysis, context) {
+    // Try LLM-enhanced planning
+    const llmPlan = await super.plan(analysis, context);
+    if (llmPlan.llmEnhanced && llmPlan.actions.length > 0) {
+      return llmPlan;
+    }
+
+    // Fallback: rule-based planning
     const actions = [];
 
     // Always perform basic checks
@@ -480,7 +496,6 @@ export class SellerOnboardingAgent extends BaseAgent {
     actions.push({ type: 'check_duplicates', params: context.input?.sellerData });
     actions.push({ type: 'screen_watchlist', params: context.input?.sellerData });
 
-    // Conditional checks based on strategy
     if (analysis.strategy.intensity === 'COMPREHENSIVE' || analysis.strategy.intensity === 'STANDARD') {
       actions.push({ type: 'verify_business', params: context.input?.sellerData });
       actions.push({ type: 'verify_bank_account', params: context.input?.sellerData });
@@ -492,13 +507,11 @@ export class SellerOnboardingAgent extends BaseAgent {
     if (analysis.strategy.intensity === 'COMPREHENSIVE') {
       actions.push({ type: 'check_financial_history', params: context.input?.sellerData });
       actions.push({ type: 'analyze_historical_patterns', params: context.input?.sellerData });
-
       if (context.input?.sellerData?.ipAddress) {
         actions.push({ type: 'check_ip_reputation', params: { ipAddress: context.input.sellerData.ipAddress } });
       }
     }
 
-    // Search knowledge base for similar cases
     actions.push({
       type: 'search_knowledge_base',
       params: {
@@ -507,29 +520,19 @@ export class SellerOnboardingAgent extends BaseAgent {
         sellerId: context.input?.sellerId
       }
     });
-
-    // Retrieve relevant memory
     actions.push({
       type: 'retrieve_memory',
       params: { context: `onboarding evaluation ${context.input?.sellerData?.businessCategory || ''}` }
     });
 
-    // Check existing risk profile
     if (context.input?.sellerId) {
-      actions.push({
-        type: 'query_risk_profile',
-        params: { sellerId: context.input.sellerId }
-      });
+      actions.push({ type: 'query_risk_profile', params: { sellerId: context.input.sellerId } });
     }
 
-    // Request fraud investigation for high-risk cases
-    if (analysis.riskIndicators.length > 2) {
+    if (analysis.riskIndicators?.length > 2) {
       actions.push({
         type: 'request_fraud_investigation',
-        params: {
-          sellerId: context.input?.sellerId,
-          riskFactors: analysis.riskIndicators
-        }
+        params: { sellerId: context.input?.sellerId, riskFactors: analysis.riskIndicators }
       });
     }
 
