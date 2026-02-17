@@ -29,6 +29,8 @@ import {
   formatToolCatalog
 } from './prompt-templates.js';
 import { getKnowledgeBase } from './knowledge-base.js';
+import { getOutcomeSimulator } from './outcome-simulator.js';
+import { getThresholdManager } from './threshold-manager.js';
 
 // Import event bus (only if running in context with WebSocket)
 let eventBus = null;
@@ -66,6 +68,17 @@ export class BaseAgent {
     this.traceCollector = getTraceCollector();
     this.decisionLogger = getDecisionLogger();
     this.llmClient = getLLMClient();
+    this.outcomeSimulator = getOutcomeSimulator();
+    this.thresholdManager = getThresholdManager();
+
+    // Listen for outcome feedback events
+    if (eventBus) {
+      eventBus.subscribe('agent:outcome:received', (payload) => {
+        if (payload.agentId === this.agentId) {
+          this.handleOutcomeFeedback(payload);
+        }
+      });
+    }
 
     // Register with messenger
     this.messenger.register(this.agentId, (message) => this.handleMessage(message));
@@ -192,6 +205,24 @@ export class BaseAgent {
       // Step 7: LEARN - Update memory and patterns
       this.updateMemory(thought);
       this.learnFromResult(input, thought.result);
+
+      // Step 7.5: Schedule simulated outcome for feedback loop
+      const decision = thought.result?.recommendation?.action || thought.result?.decision;
+      if (decision) {
+        const decisionId = `DEC-${this.agentId}-${Date.now().toString(36)}`;
+        this.outcomeSimulator.scheduleOutcome({
+          agentId: this.agentId,
+          decisionId,
+          action: decision,
+          riskScore: thought.result?.riskScore || thought.result?.overallRisk?.score || 50,
+          confidence: thought.result?.confidence || 0.5
+        });
+
+        // Save pattern IDs for feedback later
+        if (thought.patternMatches?.matches?.length > 0) {
+          this.memory.working._lastPatternIds = thought.patternMatches.matches.map(m => m.patternId);
+        }
+      }
 
       // Emit thought event
       this.emitEvent('agent:thought', {
@@ -579,6 +610,52 @@ export class BaseAgent {
     } catch (e) {
       // Pinecone ingest failed — not critical
     }
+  }
+
+  /**
+   * Handle outcome feedback — update patterns, memory, and knowledge base.
+   * Called when agent:outcome:received event fires for this agent's decision.
+   */
+  handleOutcomeFeedback(payload) {
+    const { decisionId, originalDecision, outcome, wasCorrect } = payload;
+
+    // 1. Update pattern memory feedback (provideFeedback finally gets called!)
+    if (this.memory.working._lastPatternIds) {
+      for (const patternId of this.memory.working._lastPatternIds) {
+        this.patternMemory.provideFeedback(patternId, outcome, wasCorrect === true);
+      }
+    }
+
+    // 2. Record outcome in threshold manager
+    this.thresholdManager.recordOutcome(
+      this.agentId,
+      originalDecision.action,
+      outcome,
+      originalDecision.riskScore
+    );
+
+    // 3. Save outcome to long-term memory
+    const importance = wasCorrect === false ? 0.8 : 0.5;
+    const type = wasCorrect === false ? 'correction' : 'insight';
+    this.memoryStore.saveLongTerm(this.agentId, type, {
+      decisionId,
+      originalAction: originalDecision.action,
+      originalRiskScore: originalDecision.riskScore,
+      outcome,
+      wasCorrect,
+      lesson: wasCorrect === false
+        ? `Decision ${originalDecision.action} at risk ${originalDecision.riskScore} was WRONG (outcome: ${outcome})`
+        : `Decision ${originalDecision.action} at risk ${originalDecision.riskScore} was correct (outcome: ${outcome})`,
+      timestamp: new Date().toISOString()
+    }, importance);
+
+    // 4. Emit feedback event
+    this.emitEvent('agent:feedback:processed', {
+      agentId: this.agentId,
+      decisionId,
+      outcome,
+      wasCorrect
+    });
   }
 
   extractKeyFacts(thought) {
