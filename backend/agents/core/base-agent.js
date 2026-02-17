@@ -31,6 +31,7 @@ import {
 import { getKnowledgeBase } from './knowledge-base.js';
 import { getOutcomeSimulator } from './outcome-simulator.js';
 import { getThresholdManager } from './threshold-manager.js';
+import { getPolicyEngine } from './policy-engine.js';
 
 // Import event bus (only if running in context with WebSocket)
 let eventBus = null;
@@ -70,6 +71,7 @@ export class BaseAgent {
     this.llmClient = getLLMClient();
     this.outcomeSimulator = getOutcomeSimulator();
     this.thresholdManager = getThresholdManager();
+    this.policyEngine = getPolicyEngine();
 
     // Listen for outcome feedback events
     if (eventBus) {
@@ -192,6 +194,37 @@ export class BaseAgent {
 
       // Step 5: OBSERVE - Evaluate results
       thought.result = await this.observe(thought.actions, context);
+
+      // Step 5.25: POLICY CHECK — enforce hard/soft policies on the proposed decision
+      const proposedDecision = thought.result?.recommendation || { action: thought.result?.decision, confidence: thought.result?.confidence };
+      if (proposedDecision?.action) {
+        const policyResult = this.policyEngine.enforce(
+          proposedDecision,
+          thought.actions.map(a => ({ source: a.action?.type, data: a.result?.data, success: a.result?.success !== false })),
+          {
+            riskScore: thought.result?.riskScore || thought.result?.overallRisk?.score || 0,
+            thresholds: this.thresholdManager.getThresholds(this.agentId),
+            patternRecommendation: thought.patternMatches?.recommendation?.action,
+            criticalFactors: thought.result?.overallRisk?.criticalFactors || 0
+          }
+        );
+
+        // Apply policy enforcement
+        if (!policyResult.allowed) {
+          thought.result.recommendation = policyResult.enforcedDecision;
+          thought.result.decision = policyResult.enforcedDecision.action;
+          thought.result.policyOverride = true;
+          thought.result.policyViolations = policyResult.violations;
+          this.emitEvent('agent:policy:override', {
+            agentId: this.agentId,
+            originalAction: policyResult.originalDecision.action,
+            enforcedAction: policyResult.enforcedDecision.action,
+            violations: policyResult.violations.map(v => v.policyId)
+          });
+        } else if (policyResult.flags.length > 0) {
+          thought.result.policyFlags = policyResult.flags;
+        }
+      }
 
       // Step 5.5: Write decision back to knowledge base
       await this.writeBackKnowledge(input, thought.result);
