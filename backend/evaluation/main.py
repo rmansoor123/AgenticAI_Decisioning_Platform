@@ -5,12 +5,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import EVAL_SERVICE_PORT
+from services.pinecone_service import get_pinecone_service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown."""
     print("[EvalService] Starting up...")
+    try:
+        get_pinecone_service()
+    except Exception as e:
+        print(f"[EvalService] Pinecone init failed (will retry on first request): {e}")
     yield
     print("[EvalService] Shutting down...")
 
