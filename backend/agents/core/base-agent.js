@@ -388,7 +388,7 @@ export class BaseAgent {
     };
   }
 
-  // Memory management
+  // Memory management — enhanced with long-term insights
   updateMemory(thought) {
     // Add to short-term memory
     this.memory.shortTerm.push({
@@ -400,11 +400,10 @@ export class BaseAgent {
     // Trim short-term memory if needed
     if (this.memory.shortTerm.length > this.maxMemorySize) {
       const removed = this.memory.shortTerm.shift();
-      // Optionally consolidate into long-term memory
       this.consolidateToLongTerm(removed);
     }
 
-    // Persist to memory store
+    // Persist to short-term memory store
     this.memoryStore.saveShortTerm(this.agentId, this.sessionId, {
       timestamp: thought.timestamp,
       type: thought.actions?.[0]?.action?.type || 'reasoning',
@@ -412,6 +411,29 @@ export class BaseAgent {
       key_facts: this.extractKeyFacts(thought),
       success: thought.result?.success
     });
+
+    // Save structured insight to long-term memory
+    const decision = thought.result?.recommendation?.action || thought.result?.decision;
+    if (decision) {
+      const riskScore = thought.result?.overallRisk?.score || thought.result?.riskScore || 0;
+      const isUnusual = (decision === 'APPROVE' && riskScore > 50) || (decision === 'REJECT' && riskScore < 30);
+      const importance = isUnusual ? 0.8 : (riskScore > 70 ? 0.6 : 0.4);
+
+      this.memoryStore.saveLongTerm(this.agentId, 'insight', {
+        decision,
+        riskScore,
+        summary: thought.result?.summary || '',
+        actionCount: thought.actions?.length || 0,
+        wasUnusual: isUnusual,
+        timestamp: thought.timestamp
+      }, importance);
+    }
+
+    // Periodically consolidate pattern memory (every 20 decisions)
+    if (this.thoughtLog.length % 20 === 0 && this.thoughtLog.length > 0) {
+      const topPatterns = this.patternMemory.getTopPatterns(50);
+      this.memoryStore.consolidatePatterns(this.agentId, topPatterns);
+    }
   }
 
   retrieveRelevantMemory(input) {
