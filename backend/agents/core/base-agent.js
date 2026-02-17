@@ -180,6 +180,9 @@ export class BaseAgent {
       // Step 5: OBSERVE - Evaluate results
       thought.result = await this.observe(thought.actions, context);
 
+      // Step 5.5: Write decision back to knowledge base
+      await this.writeBackKnowledge(input, thought.result);
+
       // Step 6: Form conclusion
       this.currentChain.conclude(
         thought.result?.summary || 'Analysis complete',
@@ -516,6 +519,66 @@ export class BaseAgent {
     return results
       .sort((a, b) => (b._score || 0) - (a._score || 0))
       .slice(0, 5);
+  }
+
+  /**
+   * Write decision back to knowledge base and Pinecone.
+   * Called after observe() in the reason() loop.
+   */
+  async writeBackKnowledge(input, result) {
+    const decision = result?.recommendation?.action || result?.decision;
+    if (!decision) return;
+
+    const domain = input?.domain || 'transactions';
+    const namespace = {
+      'onboarding': 'onboarding',
+      'transaction': 'transactions',
+      'transactions': 'transactions',
+      'fraud': 'transactions',
+      'risk': 'risk-events'
+    }[domain] || 'decisions';
+
+    const text = `Decision: ${decision}. ${result?.summary || ''}. Risk: ${result?.riskScore || result?.overallRisk?.score || 'unknown'}.`;
+    const knowledgeEntry = {
+      text,
+      category: domain,
+      sellerId: input?.sellerId || null,
+      domain,
+      outcome: decision === 'APPROVE' ? 'legitimate' : decision === 'REJECT' || decision === 'BLOCK' ? 'fraud' : 'pending',
+      riskScore: result?.riskScore || result?.overallRisk?.score || null,
+      source: this.agentId,
+      timestamp: new Date().toISOString()
+    };
+
+    // Write to local knowledge base
+    try {
+      const knowledgeBase = getKnowledgeBase();
+      knowledgeBase.addKnowledge(namespace, [knowledgeEntry]);
+    } catch (e) {
+      // Local KB write failed — not critical
+    }
+
+    // Write to Pinecone via eval service
+    const evalServiceUrl = process.env.EVAL_SERVICE_URL || 'http://localhost:8000';
+    try {
+      const vectorNamespace = {
+        'onboarding': 'onboarding-knowledge',
+        'transactions': 'fraud-cases',
+        'risk-events': 'risk-patterns'
+      }[namespace] || 'fraud-cases';
+
+      await fetch(`${evalServiceUrl}/ingest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          namespace: vectorNamespace,
+          records: [{ id: `decision-${Date.now()}`, text, ...knowledgeEntry }]
+        }),
+        signal: AbortSignal.timeout(5000)
+      });
+    } catch (e) {
+      // Pinecone ingest failed — not critical
+    }
   }
 
   extractKeyFacts(thought) {
