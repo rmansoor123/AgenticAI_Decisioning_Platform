@@ -67,3 +67,45 @@ async def search_investigate(req: SearchRequest):
         for h in top
     ]
     return SearchResponse(success=True, results=results, namespace="all", query=req.query)
+
+
+from services.query_decomposer import decompose_query
+
+
+@router.post("/advanced", response_model=SearchResponse)
+async def search_advanced(req: SearchRequest):
+    """Advanced RAG: decompose query, search multiple namespaces, rerank."""
+    svc = get_pinecone_service()
+
+    # Decompose the query into sub-queries
+    sub_queries = decompose_query(req.query, max_sub_queries=3)
+
+    # Search across all namespaces for each sub-query
+    all_results = []
+    seen_ids = set()
+    namespaces = ["fraud-cases", "onboarding-knowledge", "risk-patterns", "investigations"]
+
+    for sq in sub_queries:
+        for ns in namespaces:
+            try:
+                hits = svc.search(namespace=ns, query=sq, top_k=3, rerank=True)
+                for h in hits:
+                    if h["id"] not in seen_ids:
+                        seen_ids.add(h["id"])
+                        h["metadata"]["namespace"] = ns
+                        h["metadata"]["sub_query"] = sq
+                        all_results.append(h)
+            except Exception:
+                continue
+
+    # Sort by score, take top_k
+    all_results.sort(key=lambda x: x["score"], reverse=True)
+    top = all_results[: req.top_k]
+
+    results = [
+        SearchResult(id=h["id"], text=h["text"], score=h["score"], metadata=h["metadata"])
+        for h in top
+    ]
+    return SearchResponse(
+        success=True, results=results, namespace="advanced", query=req.query
+    )
