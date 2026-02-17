@@ -25,9 +25,11 @@ import ItemSetup from './pages/ItemSetup'
 import Pricing from './pages/Pricing'
 import ProfileUpdates from './pages/ProfileUpdates'
 import Returns from './pages/Returns'
+import StreamingPipeline from './pages/StreamingPipeline'
+import RAGEvaluation from './pages/RAGEvaluation'
 
-const API_BASE = 'http://localhost:3005/api'
-const WS_URL = 'ws://localhost:3005/ws'
+const API_BASE = '/api'
+const WS_URL = ((window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host + '/ws')
 
 function App() {
   const [transactions, setTransactions] = useState([])
@@ -177,6 +179,8 @@ function App() {
           <Route path="/profile-updates" element={<ProfileUpdates />} />
           <Route path="/flow-detail" element={<TransactionFlow />} />
           <Route path="/returns" element={<Returns />} />
+          <Route path="/streaming" element={<StreamingPipeline />} />
+          <Route path="/rag-evaluation" element={<RAGEvaluation />} />
         </Routes>
       </Layout>
     </BrowserRouter>

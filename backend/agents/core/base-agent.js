@@ -20,6 +20,7 @@ import { getContextEngine } from './context-engine.js';
 import { getMetricsCollector } from './metrics-collector.js';
 import { getTraceCollector } from './trace-collector.js';
 import { getDecisionLogger } from './decision-logger.js';
+import { getLLMClient } from './llm-client.js';
 
 // Import event bus (only if running in context with WebSocket)
 let eventBus = null;
@@ -56,6 +57,7 @@ export class BaseAgent {
     this.metricsCollector = getMetricsCollector();
     this.traceCollector = getTraceCollector();
     this.decisionLogger = getDecisionLogger();
+    this.llmClient = getLLMClient();
 
     // Register with messenger
     this.messenger.register(this.agentId, (message) => this.handleMessage(message));
@@ -104,7 +106,7 @@ export class BaseAgent {
       });
 
       // Assemble context from all sources
-      const assembledContext = this.contextEngine.assembleContext(this.agentId, input, {
+      const assembledContext = await this.contextEngine.assembleContext(this.agentId, input, {
         sessionId: this.sessionId,
         systemPrompt: `You are ${this.name}, a ${this.role} agent.`,
         domain: input?.domain || context?.domain || null,
@@ -222,6 +224,26 @@ export class BaseAgent {
 
   // Analyze input and context
   async think(input, context) {
+    // Try LLM-enhanced thinking if enabled and context has assembled prompt
+    if (this.llmClient?.enabled && context?._assembledContext) {
+      try {
+        const systemPrompt = `You are ${this.name}, a ${this.role} agent in a fraud detection platform. Analyze the input and provide your understanding of the situation, relevant patterns, and available approaches. Be concise.`;
+        const userPrompt = `Analyze this input and provide your understanding:\n${JSON.stringify(input).slice(0, 1000)}\n\nAvailable tools: ${Array.from(this.tools.keys()).join(', ')}`;
+
+        const llmResult = await this.llmClient.complete(systemPrompt, userPrompt);
+        if (llmResult?.content) {
+          return {
+            understanding: llmResult.content,
+            relevantMemory: this.retrieveRelevantMemory(input),
+            availableTools: Array.from(this.tools.keys()),
+            llmEnhanced: true
+          };
+        }
+      } catch (e) {
+        // Fall through to hardcoded logic
+      }
+    }
+
     return {
       understanding: `Analyzing: ${JSON.stringify(input).slice(0, 200)}`,
       relevantMemory: this.retrieveRelevantMemory(input),
@@ -231,6 +253,35 @@ export class BaseAgent {
 
   // Create action plan
   async plan(analysis, context) {
+    // Try LLM-enhanced planning if enabled
+    if (this.llmClient?.enabled && context?._assembledContext) {
+      try {
+        const systemPrompt = `You are ${this.name}, a ${this.role} agent. Given an analysis, decide which tools to use and in what order. Return a JSON object with format: {"goal": "string", "actions": [{"type": "tool_name", "params": {}}]}. Available tools: ${Array.from(this.tools.keys()).join(', ')}`;
+        const userPrompt = `Based on this analysis, create an action plan:\n${JSON.stringify(analysis).slice(0, 1000)}`;
+
+        const llmResult = await this.llmClient.complete(systemPrompt, userPrompt);
+        if (llmResult?.content) {
+          try {
+            const jsonMatch = llmResult.content.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              const parsed = JSON.parse(jsonMatch[0]);
+              if (parsed.actions?.length > 0) {
+                // Validate tool names
+                const validActions = parsed.actions.filter(a => this.tools.has(a.type));
+                if (validActions.length > 0) {
+                  return { goal: parsed.goal || 'LLM-planned actions', actions: validActions, fallback: null, llmEnhanced: true };
+                }
+              }
+            }
+          } catch (e) {
+            // JSON parse failed, fall through
+          }
+        }
+      } catch (e) {
+        // Fall through to hardcoded logic
+      }
+    }
+
     return {
       goal: 'Process input and generate response',
       actions: [{ type: 'analyze', params: {} }],
@@ -640,7 +691,8 @@ export class BaseAgent {
       },
       currentTask: this.currentTask,
       thoughtLogSize: this.thoughtLog.length,
-      patternStats: this.patternMemory.getStats()
+      patternStats: this.patternMemory.getStats(),
+      llmEnabled: this.llmClient?.enabled || false
     };
   }
 

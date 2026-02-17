@@ -67,7 +67,7 @@ class ContextEngine {
    * }
    * @returns {Object} { prompt: string, sources: Object, tokenCount: number }
    */
-  assembleContext(agentId, task, options = {}) {
+  async assembleContext(agentId, task, options = {}) {
     const {
       sessionId,
       systemPrompt = '',
@@ -108,25 +108,53 @@ class ContextEngine {
       }
     }
 
-    // 4. RAG results from knowledge base
+    // 4. RAG results — try vector search via Python eval service, fallback to TF-IDF
     const queryText = typeof task === 'string' ? task : (task.type || task.eventType || JSON.stringify(task).slice(0, 200));
     const namespace = domain ? (DOMAIN_TO_NAMESPACE[domain] || null) : null;
     if (namespace) {
+      let ragResults = [];
+
+      // Try Python eval service (Pinecone vector search)
+      const evalServiceUrl = process.env.EVAL_SERVICE_URL || 'http://localhost:8000';
       try {
-        const ragResults = this.knowledgeBase.searchKnowledge(
-          namespace,
-          queryText,
-          sellerId ? { sellerId } : {},
-          5
-        );
-        if (ragResults.length > 0) {
-          const ragText = this.promptBuilder.formatRAGResults(ragResults, 5);
-          sections.ragResults = this.promptBuilder.truncateToTokenBudget(ragText, SOURCE_BUDGETS.ragResults.maxTokens);
-          totalTokens += this.promptBuilder.estimateTokens(sections.ragResults);
-          sourceMeta.ragResults = { included: true, results: ragResults.length, tokens: this.promptBuilder.estimateTokens(sections.ragResults) };
+        const vectorResponse = await fetch(`${evalServiceUrl}/search`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: queryText,
+            namespace: namespace === 'onboarding' ? 'onboarding-knowledge' : namespace === 'risk-events' ? 'fraud-cases' : namespace,
+            top_k: 5,
+            filters: sellerId ? { sellerId } : null,
+          }),
+          signal: AbortSignal.timeout(3000),
+        });
+        if (vectorResponse.ok) {
+          const vectorData = await vectorResponse.json();
+          ragResults = (vectorData.results || []).map(r => ({
+            text: r.text,
+            relevanceScore: r.score,
+            outcome: r.metadata?.outcome || null,
+            ...r.metadata,
+          }));
         }
       } catch (e) {
-        // RAG search failed (e.g. invalid namespace); skip gracefully
+        // Vector search unavailable — fall through to TF-IDF
+      }
+
+      // Fallback to TF-IDF if vector search returned nothing
+      if (ragResults.length === 0) {
+        try {
+          ragResults = this.knowledgeBase.searchKnowledge(namespace, queryText, sellerId ? { sellerId } : {}, 5);
+        } catch (e) {
+          // TF-IDF also failed; skip
+        }
+      }
+
+      if (ragResults.length > 0) {
+        const ragText = this.promptBuilder.formatRAGResults(ragResults, 5);
+        sections.ragResults = this.promptBuilder.truncateToTokenBudget(ragText, SOURCE_BUDGETS.ragResults.maxTokens);
+        totalTokens += this.promptBuilder.estimateTokens(sections.ragResults);
+        sourceMeta.ragResults = { included: true, results: ragResults.length, source: ragResults[0].relevanceScore ? 'vector' : 'tfidf', tokens: this.promptBuilder.estimateTokens(sections.ragResults) };
       }
     }
 

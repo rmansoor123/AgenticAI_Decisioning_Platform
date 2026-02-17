@@ -96,11 +96,35 @@ router.post('/sellers', async (req, res) => {
         agentName: sellerOnboarding.name,
         evidenceGathered: agentResult.result?.evidence?.length || 0,
         riskFactors: agentResult.result?.riskFactors?.length || 0,
-        chainOfThought: agentResult.chainOfThought
+        chainOfThought: (() => {
+          try { return JSON.parse(JSON.stringify(agentResult.chainOfThought || [])); }
+          catch { return []; }
+        })()
       }
     };
 
     sellerData.onboardingRiskAssessment = riskAssessment;
+
+    // Fire-and-forget evaluation via Python eval service
+    const evalInterval = parseInt(process.env.EVAL_INTERVAL || '5');
+    if (!global._evalCounter) global._evalCounter = 0;
+    global._evalCounter++;
+
+    if (global._evalCounter % evalInterval === 0) {
+      const evalServiceUrl = process.env.EVAL_SERVICE_URL || 'http://localhost:8000';
+      fetch(`${evalServiceUrl}/evaluate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: `Evaluate seller: ${sellerData.businessName || 'Unknown'} (${sellerData.businessCategory || 'Unknown'}) from ${sellerData.country || 'Unknown'}`,
+          retrieved_contexts: (riskAssessment.agentEvaluation?.chainOfThought || []).map(s => s.content || JSON.stringify(s)).slice(0, 5),
+          agent_response: `Decision: ${decision.action || 'UNKNOWN'}. Risk Score: ${riskAssessment.riskScore || 0}. ${agentResult.result?.reasoning || ''}`,
+          ground_truth: null,
+          use_case: 'onboarding_decision',
+          agent_id: 'seller-onboarding-agent',
+        }),
+      }).catch(() => {}); // fire-and-forget
+    }
 
     // Set status based on agent decision
     if (decision.action === 'REJECT') {
@@ -155,10 +179,12 @@ router.post('/sellers', async (req, res) => {
       }
     }
 
+    // Safely serialize to avoid circular references
+    const safeSellerData = JSON.parse(JSON.stringify(sellerData));
     res.status(201).json({
       success: true,
-      data: sellerData,
-      riskAssessment,
+      data: safeSellerData,
+      riskAssessment: safeSellerData.onboardingRiskAssessment,
       agentEvaluation: {
         agentId: sellerOnboarding.agentId,
         decision: decision.action,
@@ -529,6 +555,50 @@ router.get('/images/:imageId', (req, res) => {
         createdAt: image.created_at
       }
     });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================================================
+// MCP TOOL EXECUTION ENDPOINT
+// ============================================================================
+
+// Execute a single agent tool by name (used by MCP server)
+router.post('/tools/execute', async (req, res) => {
+  try {
+    const { toolName, params } = req.body;
+
+    if (!toolName) {
+      return res.status(400).json({ success: false, error: 'toolName is required' });
+    }
+
+    // Get the tool from the agent's registered tools (Map<name, {name, description, handler}>)
+    const tool = sellerOnboarding.tools?.get(toolName);
+    if (!tool) {
+      return res.status(404).json({
+        success: false,
+        error: `Tool '${toolName}' not found`,
+        availableTools: Array.from(sellerOnboarding.tools?.keys() || [])
+      });
+    }
+
+    // Execute the tool handler
+    const result = await tool.handler(params || {});
+    res.json({ success: true, toolName, result });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// List all available agent tools (used by MCP server for discovery)
+router.get('/tools', (req, res) => {
+  try {
+    const tools = Array.from(sellerOnboarding.tools?.entries() || []).map(([name, t]) => ({
+      name,
+      description: t.description
+    }));
+    res.json({ success: true, data: tools });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

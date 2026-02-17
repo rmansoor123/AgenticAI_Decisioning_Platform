@@ -6,6 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import EVAL_SERVICE_PORT
 from services.pinecone_service import get_pinecone_service
+from routers.ingest import router as ingest_router
+from routers.search import router as search_router
+from routers.evaluate import router as evaluate_router
+from routers.dashboard import router as dashboard_router
 
 
 @asynccontextmanager
@@ -32,6 +36,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(ingest_router)
+app.include_router(search_router)
+app.include_router(evaluate_router)
+app.include_router(dashboard_router)
 
 
 @app.get("/health")

@@ -1,5 +1,8 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+
+const EVAL_SERVICE_URL = process.env.EVAL_SERVICE_URL || 'http://localhost:8000';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import { initializeDatabase, isSeeded, db_ops } from '../shared/common/database.js';
@@ -338,6 +341,8 @@ import agentsRouter from '../services/agents/index.js';
 import riskProfileRouter from '../services/risk-profile/index.js';
 import observabilityRouter from '../services/observability/index.js';
 import caseQueueRouter from '../services/case-queue/index.js';
+import streamingRouter from '../services/streaming/index.js';
+import graphRouter from '../services/graph/index.js';
 import accountSetupRouter from '../services/business/account-setup/index.js';
 import itemSetupRouter from '../services/business/item-setup/index.js';
 import pricingRouter from '../services/business/pricing/index.js';
@@ -375,6 +380,25 @@ initializeMLModels().catch(err => {
   console.error('Warning: ML model initialization failed:', err.message);
   console.log('ML inference will initialize models on first request');
 });
+
+// Initialize Streaming Engine + Feature Store + Processors
+import { getStreamEngine } from '../streaming/stream-engine.js';
+import { getFeatureStore } from '../streaming/feature-store.js';
+import { initStreamProcessors } from '../streaming/stream-processors.js';
+import { setStreamEngine } from './websocket/transaction-pipeline.js';
+
+const streamEngine = getStreamEngine();
+const featureStore = getFeatureStore();
+await initStreamProcessors(streamEngine, featureStore);
+console.log('Streaming engine initialized with', streamEngine.getTopics().length, 'topics');
+
+// Initialize Graph Engine + Build from seed data
+import { getGraphEngine } from '../graph/graph-engine.js';
+import { buildFromSellers } from '../graph/relationship-builder.js';
+
+const graphEngine = getGraphEngine();
+buildFromSellers();
+console.log(`Graph built: ${graphEngine.nodes.size} nodes, ${graphEngine.edges.size} edges`);
 
 // ============================================================================
 // API ROUTES
@@ -415,7 +439,9 @@ app.get('/api/health', (req, res) => {
       'item-setup': 'running',
       'pricing': 'running',
       'profile-updates': 'running',
-      'returns': 'running'
+      'returns': 'running',
+      'streaming': 'running',
+      'graph': 'running'
     }
   });
 });
@@ -459,6 +485,9 @@ app.get('/api', (req, res) => {
       '/api/pricing': 'Pricing Service',
       '/api/profile-updates': 'Profile Updates Service',
       '/api/returns': 'Returns Service',
+      // Streaming & Graph
+      '/api/streaming': 'Streaming Engine (Topics, Consumer Groups, Feature Store)',
+      '/api/graph': 'Graph Database (Network Analysis, Clusters, Fraud Rings)',
       // Real-time
       '/api/metrics': 'Platform Metrics',
       '/api/stream': 'Transaction Stream',
@@ -510,6 +539,12 @@ app.use('/api/observability', observabilityRouter);
 
 // Case Queue
 app.use('/api/cases', caseQueueRouter);
+
+// Streaming Engine
+app.use('/api/streaming', streamingRouter);
+
+// Graph Database
+app.use('/api/graph', graphRouter);
 
 // ============================================================================
 // METRICS & DASHBOARD ENDPOINTS
@@ -613,6 +648,9 @@ import { handleMessage } from './websocket/message-handlers.js';
 const wsManager = getWebSocketManager();
 const eventBus = getEventBus();
 const transactionPipeline = getTransactionPipeline();
+
+// Wire pipeline to streaming engine
+setStreamEngine(streamEngine);
 
 wss.on('connection', (ws, req) => {
   // Register client with WebSocket manager
@@ -740,6 +778,8 @@ server.listen(PORT, () => {
 ║   • Pricing            /api/pricing                      ║
 ║   • Profile Updates    /api/profile-updates              ║
 ║   • Returns            /api/returns                      ║
+║   • Streaming Engine   /api/streaming                    ║
+║   • Graph Database     /api/graph                        ║
 ║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
   `);
