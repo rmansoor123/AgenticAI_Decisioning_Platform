@@ -12,7 +12,7 @@ import {
   PieChart, Pie, Cell
 } from 'recharts'
 
-const API_BASE = 'http://localhost:3005/api'
+const API_BASE = '/api'
 
 export default function Dashboard({ transactions, metrics, wsConnected }) {
   const [models, setModels] = useState([])

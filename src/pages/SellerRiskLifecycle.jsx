@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts'
 
-const API_BASE = 'http://localhost:3005/api'
+const API_BASE = '/api'
 
 export default function SellerRiskLifecycle() {
   const [selectedStage, setSelectedStage] = useState('onboarding')

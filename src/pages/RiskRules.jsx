@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Shield, Search, ChevronDown, ChevronRight, Activity, AlertTriangle, Zap, Eye } from 'lucide-react';
 
-const API_BASE = 'http://localhost:3005/api';
+const API_BASE = '/api';
 
 const CHECKPOINTS = [
   { id: 'all', label: 'All Checkpoints', icon: Shield },

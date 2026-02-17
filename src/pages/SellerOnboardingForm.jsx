@@ -6,7 +6,7 @@ import {
   FileCheck, Scan
 } from 'lucide-react'
 
-const API_BASE = 'http://localhost:3005/api'
+const API_BASE = '/api'
 
 export default function SellerOnboardingForm() {
   const [formData, setFormData] = useState({

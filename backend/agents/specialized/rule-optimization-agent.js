@@ -200,6 +200,30 @@ export class RuleOptimizationAgent extends BaseAgent {
     const insights = [];
     const recommendations = [];
 
+    // Try LLM-enhanced synthesis of rule optimization insights
+    if (this.llmClient?.enabled) {
+      try {
+        const actionsData = actions.map(a => ({
+          type: a.action.type,
+          data: a.result?.data ? JSON.stringify(a.result.data).slice(0, 500) : null
+        }));
+        const systemPrompt = 'You are a rule optimization agent. Synthesize the data into insights and recommendations. Return ONLY valid JSON: {"insights":[{"type":"string","description":"string"}], "recommendations":[{"type":"string","priority":"HIGH|MEDIUM|LOW","description":"string"}]}';
+        const userPrompt = `Optimization data:\n${JSON.stringify(actionsData)}`;
+
+        const result = await this.llmClient.complete(systemPrompt, userPrompt);
+        if (result?.content) {
+          const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (parsed.insights) parsed.insights.forEach(i => insights.push({ ...i, llmEnhanced: true }));
+            if (parsed.recommendations) parsed.recommendations.forEach(r => recommendations.push({ ...r, llmEnhanced: true }));
+          }
+        }
+      } catch (e) {
+        // Fall through to hardcoded analysis below which will add to insights/recommendations
+      }
+    }
+
     actions.forEach(a => {
       if (a.action.type === 'get_rules_performance' && a.result?.data) {
         // Analyze underperforming rules

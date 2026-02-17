@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 
-const API_BASE = 'http://localhost:3005/api'
+const API_BASE = '/api'
 
 export default function Experimentation() {
   const location = useLocation()

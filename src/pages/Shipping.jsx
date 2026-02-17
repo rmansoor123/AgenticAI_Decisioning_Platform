@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Truck, AlertTriangle, CheckCircle, MapPin } from 'lucide-react'
 
-const API_BASE = 'http://localhost:3005/api'
+const API_BASE = '/api'
 
 export default function Shipping() {
   const [stats, setStats] = useState(null)

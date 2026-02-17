@@ -6,7 +6,7 @@ import {
   Activity, TrendingUp, TrendingDown, Zap, ChevronRight
 } from 'lucide-react'
 
-const API_BASE = 'http://localhost:3005/api'
+const API_BASE = '/api'
 
 export default function Onboarding() {
   const [sellers, setSellers] = useState([])

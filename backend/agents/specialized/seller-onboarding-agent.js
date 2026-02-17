@@ -552,7 +552,7 @@ export class SellerOnboardingAgent extends BaseAgent {
     // Analyze evidence (pass sellerData to include ID verification results)
     const riskFactors = this.analyzeOnboardingEvidence(evidence, context.input?.sellerData);
     const overallRisk = this.calculateOnboardingRisk(riskFactors);
-    const decision = this.generateOnboardingDecision(overallRisk, riskFactors);
+    const decision = await this.generateOnboardingDecision(overallRisk, riskFactors);
 
     // Add evidence to chain of thought
     for (const factor of riskFactors) {
@@ -800,7 +800,28 @@ export class SellerOnboardingAgent extends BaseAgent {
     };
   }
 
-  generateOnboardingDecision(risk, factors) {
+  async generateOnboardingDecision(risk, factors) {
+    // Try LLM-enhanced decision
+    if (this.llmClient?.enabled) {
+      try {
+        const systemPrompt = 'You are a seller onboarding agent. Weigh the verification evidence and decide APPROVE, REVIEW, or REJECT. Return ONLY valid JSON: {"action":"...", "confidence":0.0-1.0, "reason":"..."}';
+        const userPrompt = `Risk score: ${risk.score}/100, Critical: ${risk.criticalFactors}, High: ${risk.highFactors}, Positive: ${risk.positiveFactors || 0}\nFactors: ${factors.map(f => `${f.factor} (${f.severity}, score:${f.score})`).join(', ')}`;
+
+        const result = await this.llmClient.complete(systemPrompt, userPrompt);
+        if (result?.content) {
+          const jsonMatch = result.content.match(/\{[\s\S]*?\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (['APPROVE', 'REVIEW', 'REJECT'].includes(parsed.action)) {
+              return { ...parsed, llmEnhanced: true };
+            }
+          }
+        }
+      } catch (e) {
+        // Fall through to hardcoded logic
+      }
+    }
+
     if (risk.score >= this.riskThresholds.REJECT.min || risk.criticalFactors > 0) {
       return {
         action: 'REJECT',

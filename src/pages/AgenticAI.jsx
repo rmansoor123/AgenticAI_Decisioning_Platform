@@ -5,7 +5,7 @@ import {
   Activity, Clock, ChevronRight, Sparkles, Network
 } from 'lucide-react'
 
-const API_BASE = 'http://localhost:3005/api'
+const API_BASE = '/api'
 
 export default function AgenticAI() {
   const [agents, setAgents] = useState([])
@@ -14,10 +14,22 @@ export default function AgenticAI() {
   const [loading, setLoading] = useState(false)
   const [activeAgent, setActiveAgent] = useState(null)
   const [investigationResult, setInvestigationResult] = useState(null)
+  const [llmStatus, setLlmStatus] = useState(null)
 
   useEffect(() => {
     fetchAgentStatus()
+    fetchLLMStatus()
   }, [])
+
+  const fetchLLMStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/agents/llm-status`)
+      const data = await res.json()
+      if (data.success) setLlmStatus(data.data)
+    } catch (error) {
+      console.error('Error fetching LLM status:', error)
+    }
+  }
 
   const fetchAgentStatus = async () => {
     try {
@@ -100,7 +112,22 @@ export default function AgenticAI() {
           </h1>
           <p className="text-gray-400 mt-1">Autonomous AI agents for intelligent fraud detection</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-3 items-center">
+          {llmStatus && (
+            <div className={`px-3 py-1.5 rounded-lg flex items-center gap-2 text-sm ${
+              llmStatus.enabled
+                ? 'bg-emerald-500/20 border border-emerald-500/30'
+                : 'bg-gray-700/50 border border-gray-600/30'
+            }`}>
+              <div className={`w-2 h-2 rounded-full ${llmStatus.enabled ? 'bg-emerald-400' : 'bg-gray-500'}`} />
+              <span className={llmStatus.enabled ? 'text-emerald-400' : 'text-gray-400'}>
+                LLM: {llmStatus.enabled ? 'Active' : 'Disabled'}
+              </span>
+              {llmStatus.enabled && llmStatus.calls > 0 && (
+                <span className="text-emerald-400/60 text-xs">({llmStatus.calls} calls)</span>
+              )}
+            </div>
+          )}
           <button
             onClick={fetchAgentStatus}
             className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg flex items-center gap-2 text-gray-300"

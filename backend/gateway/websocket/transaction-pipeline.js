@@ -9,6 +9,27 @@ import generators from '../../shared/synthetic-data/generators.js';
 
 const { generateTransaction, generateMetricsSnapshot } = generators;
 
+// Streaming engine integration (lazy-loaded)
+let _streamEngine = null;
+
+/**
+ * Set the stream engine instance for pipeline integration.
+ * Called from server.js after stream engine initialization.
+ */
+export function setStreamEngine(engine) {
+  _streamEngine = engine;
+}
+
+/** Produce a message to the streaming engine (fire-and-forget). */
+function produceToStream(topic, key, value) {
+  if (!_streamEngine) return;
+  try {
+    _streamEngine.produce(topic, key, value);
+  } catch (e) {
+    // Non-critical — don't break the pipeline if streaming fails
+  }
+}
+
 /**
  * Pipeline stages
  */
@@ -207,6 +228,18 @@ class TransactionPipeline {
       ...data
     });
 
+    // Produce to the corresponding streaming topic
+    const topicMap = {
+      received: 'transactions.received',
+      enriched: 'transactions.enriched',
+      scored: 'transactions.scored',
+      decided: 'transactions.decided'
+    };
+    const topic = topicMap[stage];
+    if (topic) {
+      produceToStream(topic, data.transaction?.transactionId || data.pipelineId, data);
+    }
+
     // Small delay to simulate processing
     await this.delay(this.config.pipelineDelayMs);
   }
@@ -342,6 +375,7 @@ class TransactionPipeline {
     };
 
     this.eventBus.publish(EVENT_TYPES.ALERT_CREATED, alert);
+    produceToStream('alerts.created', alert.alertId, alert);
 
     return alert;
   }
@@ -429,4 +463,4 @@ export function getTransactionPipeline() {
 }
 
 export { PIPELINE_STAGES };
-export default { TransactionPipeline, getTransactionPipeline, PIPELINE_STAGES };
+export default { TransactionPipeline, getTransactionPipeline, PIPELINE_STAGES, setStreamEngine };

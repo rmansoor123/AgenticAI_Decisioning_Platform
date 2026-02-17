@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { User, Filter } from 'lucide-react';
 
-const API_BASE = 'http://localhost:3005/api';
+const API_BASE = '/api';
 
 const PRIORITY_COLORS = {
   CRITICAL: 'bg-red-500/20 text-red-400 border-red-500/30',

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { UserCog, AlertTriangle, Shield, Clock } from 'lucide-react'
 
-const API_BASE = 'http://localhost:3005/api'
+const API_BASE = '/api'
 
 export default function ProfileUpdates() {
   const [stats, setStats] = useState(null)

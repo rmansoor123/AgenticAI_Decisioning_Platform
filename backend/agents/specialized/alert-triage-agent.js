@@ -163,7 +163,7 @@ export class AlertTriageAgent extends BaseAgent {
     const groupedAlerts = this.groupAlerts(prioritizedAlerts);
 
     // Generate routing assignments
-    const assignments = this.generateAssignments(groupedAlerts, analysts);
+    const assignments = await this.generateAssignments(groupedAlerts, analysts);
 
     // Calculate queue health
     const queueHealth = this.calculateQueueHealth(alerts, analysts);
@@ -242,7 +242,28 @@ export class AlertTriageAgent extends BaseAgent {
     return groups;
   }
 
-  generateAssignments(alerts, analysts) {
+  async generateAssignments(alerts, analysts) {
+    // Try LLM-enhanced routing
+    if (this.llmClient?.enabled && alerts.length > 0 && analysts.length > 0) {
+      try {
+        const systemPrompt = 'You are an alert triage agent. Route alerts to the best analysts. Return ONLY valid JSON array: [{"alertId":"...", "analystId":"...", "analystName":"...", "team":"...", "priority":"...", "reason":"..."}]';
+        const userPrompt = `Alerts (top 5): ${JSON.stringify(alerts.slice(0, 5).map(a => ({ alertId: a.alertId || a.groupId, alertType: a.alertType, priorityLevel: a.priorityLevel })))}\nAnalysts: ${JSON.stringify(analysts.map(a => ({ id: a.id, name: a.name, team: a.team, currentLoad: a.currentLoad, maxLoad: a.maxLoad })))}`;
+
+        const result = await this.llmClient.complete(systemPrompt, userPrompt);
+        if (result?.content) {
+          const jsonMatch = result.content.match(/\[[\s\S]*\]/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].alertId) {
+              return parsed.map(a => ({ ...a, llmEnhanced: true }));
+            }
+          }
+        }
+      } catch (e) {
+        // Fall through to hardcoded logic
+      }
+    }
+
     const assignments = [];
     const analystLoads = new Map(analysts.map(a => [a.id, a.currentLoad]));
 

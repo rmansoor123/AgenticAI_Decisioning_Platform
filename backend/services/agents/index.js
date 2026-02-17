@@ -13,6 +13,7 @@ import {
   sellerOnboarding
 } from '../../agents/index.js';
 import { getAgentCoordinator } from '../../agents/core/agent-coordinator.js';
+import { getLLMClient } from '../../agents/core/llm-client.js';
 
 const router = express.Router();
 
@@ -84,6 +85,18 @@ router.get('/executions/:executionId', (req, res) => {
     return res.status(404).json({ success: false, error: 'Execution not found' });
   }
   res.json({ success: true, data: execution });
+});
+
+// ============================================================================
+// LLM STATUS ENDPOINT
+// ============================================================================
+
+router.get('/llm-status', (req, res) => {
+  const llmClient = getLLMClient();
+  res.json({
+    success: true,
+    data: llmClient.getStats()
+  });
 });
 
 // ============================================================================

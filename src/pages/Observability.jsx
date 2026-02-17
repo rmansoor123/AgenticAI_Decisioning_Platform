@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 
-const API_BASE = 'http://localhost:3005/api'
+const API_BASE = '/api'
 
 export default function Observability() {
   const [activeTab, setActiveTab] = useState('health')

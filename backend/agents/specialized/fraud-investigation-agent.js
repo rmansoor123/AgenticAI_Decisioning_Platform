@@ -16,6 +16,8 @@ import { db_ops } from '../../shared/common/database.js';
 import { checkIpReputation, verifyEmail, checkDeviceReputation, getGeoLocation } from '../tools/external-apis.js';
 import { checkFraudList, checkConsortiumData, checkConsortiumVelocity } from '../tools/fraud-databases.js';
 import { CONFIDENCE } from '../core/chain-of-thought.js';
+import { getGraphEngine } from '../../graph/graph-engine.js';
+import { riskPropagation, findClusters, pageRank } from '../../graph/graph-queries.js';
 
 export class FraudInvestigationAgent extends BaseAgent {
   constructor() {
@@ -109,16 +111,118 @@ export class FraudInvestigationAgent extends BaseAgent {
     // Tool: Check for related accounts (network analysis)
     this.registerTool('check_network', 'Analyze account network connections', async (params) => {
       const { userId } = params;
-      const network = {
-        linkedAccounts: Math.floor(Math.random() * 10),
-        sharedDevices: Math.floor(Math.random() * 5),
-        sharedPaymentMethods: Math.floor(Math.random() * 3),
-        networkRiskScore: Math.floor(Math.random() * 100),
-        knownFraudConnections: Math.random() > 0.8 ? 1 : 0,
-        clusterSize: Math.floor(Math.random() * 20) + 1,
-        avgClusterRisk: Math.floor(Math.random() * 50)
-      };
-      return { success: true, data: network };
+      const sellerId = userId;
+
+      try {
+        const engine = getGraphEngine();
+        const sellerNode = engine.getNode(sellerId);
+
+        // If the graph has no data for this seller, fall back to simulated data
+        if (!sellerNode) {
+          const network = {
+            linkedAccounts: Math.floor(Math.random() * 10),
+            sharedDevices: Math.floor(Math.random() * 5),
+            sharedPaymentMethods: Math.floor(Math.random() * 3),
+            networkRiskScore: Math.floor(Math.random() * 100),
+            knownFraudConnections: Math.random() > 0.8 ? 1 : 0,
+            clusterSize: Math.floor(Math.random() * 20) + 1,
+            avgClusterRisk: Math.floor(Math.random() * 50)
+          };
+          return { success: true, data: network, source: 'simulated' };
+        }
+
+        // Get neighbors within 2 hops
+        const neighborhood = engine.getNeighbors(sellerId, 2);
+        const neighborNodes = neighborhood.nodes.filter(n => n.id !== sellerId);
+        const neighborEdges = neighborhood.edges;
+
+        // Count shared devices and payment methods from edge types
+        let sharedDevices = 0;
+        let sharedPaymentMethods = 0;
+        for (const edge of neighborEdges) {
+          const edgeType = (edge.type || '').toLowerCase();
+          if (edgeType.includes('device') || edgeType === 'shared_device') {
+            sharedDevices++;
+          }
+          if (edgeType.includes('payment') || edgeType === 'shared_payment') {
+            sharedPaymentMethods++;
+          }
+        }
+
+        // Get risk propagation data from this seller
+        const riskMap = riskPropagation(sellerId);
+
+        // Calculate network risk score as the average propagated risk across neighbors
+        let totalPropagatedRisk = 0;
+        let propagatedCount = 0;
+        for (const neighbor of neighborNodes) {
+          const risk = riskMap.get(neighbor.id) ?? 0;
+          totalPropagatedRisk += risk;
+          propagatedCount++;
+        }
+        const networkRiskScore = propagatedCount > 0
+          ? Math.round(totalPropagatedRisk / propagatedCount)
+          : 0;
+
+        // Count known fraud connections (neighbors with high risk score)
+        const HIGH_RISK_THRESHOLD = 70;
+        let knownFraudConnections = 0;
+        for (const neighbor of neighborNodes) {
+          const riskScore = neighbor.properties?.riskScore ?? 0;
+          if (riskScore >= HIGH_RISK_THRESHOLD) {
+            knownFraudConnections++;
+          }
+        }
+
+        // Get PageRank scores
+        const pageRankScores = pageRank();
+        const pageRankScore = pageRankScores.get(sellerId) ?? 0;
+
+        // Find which cluster this seller belongs to
+        const clusters = findClusters();
+        let sellerCluster = null;
+        for (const cluster of clusters) {
+          if (cluster.nodes.includes(sellerId)) {
+            sellerCluster = cluster;
+            break;
+          }
+        }
+
+        // Build neighbor details
+        const neighborDetails = neighborNodes.map(n => ({
+          id: n.id,
+          type: n.type,
+          riskScore: n.properties?.riskScore ?? 0,
+          propagatedRisk: riskMap.get(n.id) ?? 0,
+          pageRank: pageRankScores.get(n.id) ?? 0
+        }));
+
+        const network = {
+          linkedAccounts: neighborNodes.length,
+          sharedDevices,
+          sharedPaymentMethods,
+          networkRiskScore,
+          knownFraudConnections,
+          clusterSize: sellerCluster ? sellerCluster.size : 1,
+          avgClusterRisk: sellerCluster ? Math.round(sellerCluster.avgRisk) : 0,
+          pageRankScore,
+          neighborDetails
+        };
+
+        return { success: true, data: network, source: 'graph' };
+      } catch (error) {
+        // On any graph error, fall back to simulated data
+        const network = {
+          linkedAccounts: Math.floor(Math.random() * 10),
+          sharedDevices: Math.floor(Math.random() * 5),
+          sharedPaymentMethods: Math.floor(Math.random() * 3),
+          networkRiskScore: Math.floor(Math.random() * 100),
+          knownFraudConnections: Math.random() > 0.8 ? 1 : 0,
+          clusterSize: Math.floor(Math.random() * 20) + 1,
+          avgClusterRisk: Math.floor(Math.random() * 50)
+        };
+        return { success: true, data: network, source: 'simulated', error: error.message };
+      }
     });
 
     // Tool: Analyze geographic patterns
@@ -345,7 +449,7 @@ export class FraudInvestigationAgent extends BaseAgent {
     // Calculate overall risk based on evidence
     const riskFactors = this.analyzeEvidence(evidence);
     const overallRisk = this.calculateOverallRisk(riskFactors);
-    const recommendation = this.generateRecommendation(overallRisk, riskFactors);
+    const recommendation = await this.generateRecommendation(overallRisk, riskFactors);
 
     // Add evidence and conclusion to chain of thought
     for (const factor of riskFactors) {
@@ -495,7 +599,28 @@ export class FraudInvestigationAgent extends BaseAgent {
     };
   }
 
-  generateRecommendation(risk, factors) {
+  async generateRecommendation(risk, factors) {
+    // Try LLM-enhanced recommendation
+    if (this.llmClient?.enabled) {
+      try {
+        const systemPrompt = 'You are a fraud investigation agent. Given risk factors, recommend BLOCK, REVIEW, MONITOR, or APPROVE. Return ONLY valid JSON: {"action":"...", "confidence":0.0-1.0, "reason":"..."}';
+        const userPrompt = `Risk score: ${risk.score}/100, Critical factors: ${risk.criticalFactors}, High factors: ${risk.highFactors}\nFactors: ${factors.map(f => `${f.factor} (${f.severity})`).join(', ')}`;
+
+        const result = await this.llmClient.complete(systemPrompt, userPrompt);
+        if (result?.content) {
+          const jsonMatch = result.content.match(/\{[\s\S]*?\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (['BLOCK', 'REVIEW', 'MONITOR', 'APPROVE'].includes(parsed.action)) {
+              return { ...parsed, llmEnhanced: true };
+            }
+          }
+        }
+      } catch (e) {
+        // Fall through to hardcoded logic
+      }
+    }
+
     if (risk.score > 85 || risk.criticalFactors > 0) {
       return {
         action: 'BLOCK',

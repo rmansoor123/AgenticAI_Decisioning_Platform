@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { DollarSign, AlertTriangle, TrendingUp, Tag } from 'lucide-react'
 
-const API_BASE = 'http://localhost:3005/api'
+const API_BASE = '/api'
 
 export default function Pricing() {
   const [stats, setStats] = useState(null)
