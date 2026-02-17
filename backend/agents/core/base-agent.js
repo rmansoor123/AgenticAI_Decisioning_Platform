@@ -21,6 +21,13 @@ import { getMetricsCollector } from './metrics-collector.js';
 import { getTraceCollector } from './trace-collector.js';
 import { getDecisionLogger } from './decision-logger.js';
 import { getLLMClient } from './llm-client.js';
+import {
+  buildThinkPrompt,
+  buildPlanPrompt,
+  buildObservePrompt,
+  parseLLMJson,
+  formatToolCatalog
+} from './prompt-templates.js';
 
 // Import event bus (only if running in context with WebSocket)
 let eventBus = null;
@@ -222,20 +229,44 @@ export class BaseAgent {
     return thought;
   }
 
-  // Analyze input and context
+  // Analyze input and context — LLM-enhanced with structured prompts
   async think(input, context) {
-    // Try LLM-enhanced thinking if enabled and context has assembled prompt
-    if (this.llmClient?.enabled && context?._assembledContext) {
-      try {
-        const systemPrompt = `You are ${this.name}, a ${this.role} agent in a fraud detection platform. Analyze the input and provide your understanding of the situation, relevant patterns, and available approaches. Be concise.`;
-        const userPrompt = `Analyze this input and provide your understanding:\n${JSON.stringify(input).slice(0, 1000)}\n\nAvailable tools: ${Array.from(this.tools.keys()).join(', ')}`;
+    // Gather advisory context for the LLM
+    const recentMemory = this.memoryStore.getShortTerm(this.agentId, this.sessionId).slice(0, 5);
+    const patternMatches = this.checkPatterns(input);
+    let knowledgeResults = [];
 
-        const llmResult = await this.llmClient.complete(systemPrompt, userPrompt);
-        if (llmResult?.content) {
+    // Try dual retrieval (vector + TF-IDF) — Layer 3 will enhance this further
+    try {
+      const queryText = typeof input === 'string' ? input : JSON.stringify(input).slice(0, 200);
+      const longTermResults = this.memoryStore.queryLongTerm(this.agentId, queryText, 3);
+      knowledgeResults = longTermResults;
+    } catch (e) {
+      // Knowledge retrieval failed, proceed without it
+    }
+
+    // Try LLM-enhanced thinking
+    if (this.llmClient?.enabled) {
+      try {
+        const { system, user } = buildThinkPrompt({
+          agentName: this.name,
+          agentRole: this.role,
+          input,
+          recentMemory,
+          knowledgeResults,
+          patternMatches,
+          tools: this.tools
+        });
+
+        const llmResult = await this.llmClient.complete(system, user);
+        const parsed = parseLLMJson(llmResult?.content, null);
+
+        if (parsed?.understanding) {
           return {
-            understanding: llmResult.content,
+            ...parsed,
             relevantMemory: this.retrieveRelevantMemory(input),
             availableTools: Array.from(this.tools.keys()),
+            patternMatches,
             llmEnhanced: true
           };
         }
@@ -244,37 +275,53 @@ export class BaseAgent {
       }
     }
 
+    // Fallback: hardcoded analysis
     return {
       understanding: `Analyzing: ${JSON.stringify(input).slice(0, 200)}`,
+      key_risks: [],
+      confidence: 0.5,
+      suggested_approach: 'default',
       relevantMemory: this.retrieveRelevantMemory(input),
-      availableTools: Array.from(this.tools.keys())
+      availableTools: Array.from(this.tools.keys()),
+      patternMatches
     };
   }
 
-  // Create action plan
+  // Create action plan — LLM selects tools with reasoning
   async plan(analysis, context) {
-    // Try LLM-enhanced planning if enabled
-    if (this.llmClient?.enabled && context?._assembledContext) {
-      try {
-        const systemPrompt = `You are ${this.name}, a ${this.role} agent. Given an analysis, decide which tools to use and in what order. Return a JSON object with format: {"goal": "string", "actions": [{"type": "tool_name", "params": {}}]}. Available tools: ${Array.from(this.tools.keys()).join(', ')}`;
-        const userPrompt = `Based on this analysis, create an action plan:\n${JSON.stringify(analysis).slice(0, 1000)}`;
+    // Gather long-term memory for lessons learned
+    const queryText = analysis.understanding || JSON.stringify(context).slice(0, 200);
+    const longTermMemory = this.memoryStore.queryLongTerm(this.agentId, queryText, 3);
 
-        const llmResult = await this.llmClient.complete(systemPrompt, userPrompt);
-        if (llmResult?.content) {
-          try {
-            const jsonMatch = llmResult.content.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-              const parsed = JSON.parse(jsonMatch[0]);
-              if (parsed.actions?.length > 0) {
-                // Validate tool names
-                const validActions = parsed.actions.filter(a => this.tools.has(a.type));
-                if (validActions.length > 0) {
-                  return { goal: parsed.goal || 'LLM-planned actions', actions: validActions, fallback: null, llmEnhanced: true };
-                }
-              }
-            }
-          } catch (e) {
-            // JSON parse failed, fall through
+    // Try LLM-enhanced planning
+    if (this.llmClient?.enabled) {
+      try {
+        const { system, user } = buildPlanPrompt({
+          agentName: this.name,
+          agentRole: this.role,
+          thinkResult: analysis,
+          longTermMemory,
+          tools: this.tools,
+          input: context?.input || context
+        });
+
+        const llmResult = await this.llmClient.complete(system, user);
+        const parsed = parseLLMJson(llmResult?.content, null);
+
+        if (parsed?.actions?.length > 0) {
+          // Validate tool names — only allow tools the agent actually has
+          const validActions = parsed.actions
+            .filter(a => this.tools.has(a.tool))
+            .map(a => ({ type: a.tool, params: a.params || {}, rationale: a.rationale }));
+
+          if (validActions.length > 0) {
+            return {
+              goal: parsed.goal || 'LLM-planned investigation',
+              reasoning: parsed.reasoning || '',
+              actions: validActions.slice(0, 10), // Guardrail: max 10 actions
+              fallback: null,
+              llmEnhanced: true
+            };
           }
         }
       } catch (e) {
@@ -282,6 +329,7 @@ export class BaseAgent {
       }
     }
 
+    // Fallback: generic analyze action
     return {
       goal: 'Process input and generate response',
       actions: [{ type: 'analyze', params: {} }],
@@ -298,8 +346,40 @@ export class BaseAgent {
     return { executed: false, reason: 'Unknown action type' };
   }
 
-  // Evaluate results
+  // Evaluate results — LLM synthesizes findings into risk assessment
   async observe(actions, context) {
+    // Try LLM-enhanced observation
+    if (this.llmClient?.enabled) {
+      try {
+        const { system, user } = buildObservePrompt({
+          agentName: this.name,
+          agentRole: this.role,
+          actions,
+          input: context?.input || context
+        });
+
+        const llmResult = await this.llmClient.complete(system, user);
+        const parsed = parseLLMJson(llmResult?.content, null);
+
+        if (parsed?.summary) {
+          return {
+            success: true,
+            summary: parsed.summary,
+            riskScore: parsed.risk_score,
+            recommendation: { action: parsed.recommendation, confidence: parsed.confidence, reason: parsed.reasoning },
+            decision: parsed.recommendation,
+            confidence: parsed.confidence,
+            key_findings: parsed.key_findings || [],
+            actions,
+            llmEnhanced: true
+          };
+        }
+      } catch (e) {
+        // Fall through to hardcoded logic
+      }
+    }
+
+    // Fallback: rule-based observation
     return {
       success: actions.every(a => a.result?.success !== false),
       summary: `Completed ${actions.length} actions`,
