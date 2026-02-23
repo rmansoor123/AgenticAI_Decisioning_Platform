@@ -338,6 +338,7 @@ import executionRouter from '../services/decision-engine/execution/index.js';
 import abTestingRouter from '../services/experimentation/ab-testing/index.js';
 import simulationRouter from '../services/experimentation/simulation/index.js';
 import agentsRouter from '../services/agents/index.js';
+import { getEvalTracker } from '../agents/core/eval-tracker.js';
 import riskProfileRouter from '../services/risk-profile/index.js';
 import observabilityRouter from '../services/observability/index.js';
 import caseQueueRouter from '../services/case-queue/index.js';
@@ -530,6 +531,36 @@ app.use('/api/simulation', simulationRouter);
 
 // Agentic AI
 app.use('/api/agents', agentsRouter);
+
+// ── Eval Tracking API ──────────────────────────────────────────────────────
+
+app.get('/api/agents/evals/stats', (req, res) => {
+  try {
+    const evalTracker = getEvalTracker();
+    res.json(evalTracker.getSystemEvalStats());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/agents/:agentId/evals', (req, res) => {
+  try {
+    const evalTracker = getEvalTracker();
+    const limit = parseInt(req.query.limit) || 50;
+    res.json(evalTracker.getEvalHistory(req.params.agentId, limit));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/agents/:agentId/evals/stats', (req, res) => {
+  try {
+    const evalTracker = getEvalTracker();
+    res.json(evalTracker.getAgentEvalStats(req.params.agentId));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Risk Profile
 app.use('/api/risk-profile', riskProfileRouter);
