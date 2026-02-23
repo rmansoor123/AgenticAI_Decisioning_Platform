@@ -25,6 +25,7 @@ import {
   buildThinkPrompt,
   buildPlanPrompt,
   buildObservePrompt,
+  buildReflectPrompt,
   parseLLMJson,
   formatToolCatalog
 } from './prompt-templates.js';
@@ -32,6 +33,7 @@ import { getKnowledgeBase } from './knowledge-base.js';
 import { getOutcomeSimulator } from './outcome-simulator.js';
 import { getThresholdManager } from './threshold-manager.js';
 import { getPolicyEngine } from './policy-engine.js';
+import { getEvalTracker } from './eval-tracker.js';
 
 // Import event bus (only if running in context with WebSocket)
 let eventBus = null;
@@ -72,6 +74,7 @@ export class BaseAgent {
     this.outcomeSimulator = getOutcomeSimulator();
     this.thresholdManager = getThresholdManager();
     this.policyEngine = getPolicyEngine();
+    this.evalTracker = getEvalTracker();
 
     // Listen for outcome feedback events
     if (eventBus) {
@@ -195,6 +198,46 @@ export class BaseAgent {
       // Step 5: OBSERVE - Evaluate results
       thought.result = await this.observe(thought.actions, context);
 
+      // Step 5.1: REFLECT — critique proposed decision before policy check
+      this.traceCollector.startSpan(traceId, 'reflection', {
+        proposedDecision: thought.result?.recommendation?.action || thought.result?.decision
+      });
+
+      const reflection = await this.reflect(thought.result, thought.actions, input, context);
+      thought.reflection = reflection;
+
+      if (reflection.concerns.length > 0) {
+        this.currentChain.addStep({
+          type: 'validation',
+          content: `Reflection raised ${reflection.concerns.length} concern(s): ${reflection.concerns.join('; ')}`,
+          confidence: reflection.shouldRevise ? CONFIDENCE.POSSIBLE : CONFIDENCE.LIKELY
+        });
+      }
+
+      if (reflection.shouldRevise && reflection.revisedAction) {
+        const originalAction = thought.result?.recommendation?.action || thought.result?.decision;
+        thought.result.recommendation = {
+          ...thought.result.recommendation,
+          action: reflection.revisedAction,
+          originalAction,
+          revisedByReflection: true,
+          reflectionConcerns: reflection.concerns
+        };
+        thought.result.decision = reflection.revisedAction;
+        thought.result.confidence = reflection.revisedConfidence || (thought.result.confidence || 0.8) * 0.8;
+        this.emitEvent('agent:reflection:revision', {
+          agentId: this.agentId,
+          originalAction,
+          revisedAction: reflection.revisedAction,
+          concerns: reflection.concerns
+        });
+      }
+
+      this.traceCollector.endSpan(traceId, 'reflection', {
+        shouldRevise: reflection.shouldRevise,
+        concerns: reflection.concerns.length
+      });
+
       // Step 5.25: POLICY CHECK — enforce hard/soft policies on the proposed decision
       const proposedDecision = thought.result?.recommendation || { action: thought.result?.decision, confidence: thought.result?.confidence };
       if (proposedDecision?.action) {
@@ -282,6 +325,17 @@ export class BaseAgent {
           thought.result.summary || ''
         );
       }
+
+      // Step 9: EVALUATE (async, non-blocking)
+      const evalDecisionId = `DEC-${this.agentId}-${Date.now().toString(36)}`;
+      this.evalTracker.evaluateDecision(
+        this.agentId,
+        evalDecisionId,
+        input,
+        thought.actions,
+        thought.result,
+        thought.chainOfThought
+      ).catch(err => console.warn('[EvalTracker] Async eval failed:', err.message));
 
     } catch (error) {
       thought.error = error.message;
@@ -452,6 +506,119 @@ export class BaseAgent {
       success: actions.every(a => a.result?.success !== false),
       summary: `Completed ${actions.length} actions`,
       actions
+    };
+  }
+
+  /**
+   * Reflect on proposed decision — LLM-enhanced with rule-based fallback.
+   * Catches contradictions, overconfidence, and reasoning errors before policy check.
+   */
+  async reflect(observation, actions, input, context) {
+    // LLM-enhanced reflection
+    if (this.llmClient?.enabled) {
+      try {
+        const proposedDecision = observation?.recommendation || { action: observation?.decision, reason: observation?.summary };
+        const { system, user } = buildReflectPrompt({
+          agentName: this.name,
+          agentRole: this.role,
+          input,
+          evidence: actions,
+          proposedDecision,
+          riskScore: observation?.riskScore || observation?.overallRisk?.score,
+          confidence: observation?.confidence
+        });
+
+        const llmResult = await this.llmClient.complete(system, user);
+        const parsed = parseLLMJson(llmResult?.content, null);
+
+        if (parsed) {
+          return {
+            shouldRevise: parsed.shouldRevise || false,
+            revisedAction: parsed.revisedAction || null,
+            revisedConfidence: parsed.revisedConfidence || null,
+            concerns: parsed.concerns || [],
+            contraArgument: parsed.contraArgument || '',
+            reflectionConfidence: parsed.reflectionConfidence || 0.5,
+            llmEnhanced: true
+          };
+        }
+      } catch (e) {
+        // Fall through to rule-based reflection
+      }
+    }
+
+    // Hardcoded fallback: mechanical contradiction checks
+    return this._ruleBasedReflection(observation, actions);
+  }
+
+  /**
+   * Rule-based reflection fallback — works without LLM.
+   * Checks for evidence contradictions, confidence mismatches, and alignment issues.
+   */
+  _ruleBasedReflection(observation, actions) {
+    const concerns = [];
+    const decision = observation?.recommendation?.action || observation?.decision;
+    const riskScore = observation?.riskScore || observation?.overallRisk?.score || 0;
+    const confidence = observation?.confidence || 0;
+
+    // 1. Evidence contradiction: count approve vs reject signals
+    const toolResults = actions.map(a => a.result).filter(Boolean);
+    let approveSignals = 0;
+    let rejectSignals = 0;
+    for (const r of toolResults) {
+      if (r.success === false) rejectSignals++;
+      else approveSignals++;
+      if (r.data?.riskLevel === 'HIGH' || r.data?.riskLevel === 'CRITICAL') rejectSignals++;
+      if (r.data?.riskLevel === 'LOW') approveSignals++;
+      if (r.data?.verified === true) approveSignals++;
+      if (r.data?.verified === false) rejectSignals++;
+      if (r.data?.matched === true || r.data?.onWatchlist === true) rejectSignals++;
+    }
+    const totalSignals = approveSignals + rejectSignals;
+    if (totalSignals > 0) {
+      const disagreement = Math.min(approveSignals, rejectSignals) / totalSignals;
+      if (disagreement > 0.3) {
+        concerns.push(`Evidence is contradictory: ${approveSignals} approve signals vs ${rejectSignals} reject signals`);
+      }
+    }
+
+    // 2. Confidence-evidence mismatch
+    const toolsRun = actions.length;
+    if (confidence > 0.8 && toolsRun < 3) {
+      concerns.push(`High confidence (${confidence}) with only ${toolsRun} tools executed — potentially overconfident`);
+    }
+
+    // 3. Risk score vs decision alignment
+    if (riskScore > 60 && decision === 'APPROVE') {
+      concerns.push(`Risk score ${riskScore} is elevated but decision is APPROVE`);
+    }
+    if (riskScore < 20 && (decision === 'REJECT' || decision === 'BLOCK')) {
+      concerns.push(`Risk score ${riskScore} is low but decision is ${decision}`);
+    }
+
+    // 4. Tool failures
+    const failedTools = actions.filter(a => a.result?.success === false);
+    if (failedTools.length > 0) {
+      concerns.push(`${failedTools.length} tool(s) failed: ${failedTools.map(a => a.action?.type).join(', ')} — incomplete evidence`);
+    }
+
+    // Only recommend revision if 2+ concerns
+    const shouldRevise = concerns.length >= 2;
+    let revisedAction = null;
+    if (shouldRevise && riskScore > 60 && decision === 'APPROVE') {
+      revisedAction = 'REVIEW';
+    } else if (shouldRevise && riskScore < 20 && decision === 'REJECT') {
+      revisedAction = 'REVIEW';
+    }
+
+    return {
+      shouldRevise,
+      revisedAction,
+      revisedConfidence: shouldRevise ? Math.min(confidence, 0.6) : null,
+      concerns,
+      contraArgument: concerns.length > 0 ? concerns[0] : 'No significant concerns found.',
+      reflectionConfidence: 0.7,
+      llmEnhanced: false
     };
   }
 
