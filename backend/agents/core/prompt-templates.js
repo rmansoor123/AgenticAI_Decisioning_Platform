@@ -187,6 +187,53 @@ Synthesize all evidence and return your final assessment as JSON.`;
 }
 
 /**
+ * Build the REFLECT phase prompt.
+ * LLM returns: { shouldRevise, revisedAction, revisedConfidence, concerns, contraArgument, reflectionConfidence }
+ */
+export function buildReflectPrompt({ agentName, agentRole, input, evidence, proposedDecision, riskScore, confidence, chainOfThought }) {
+  const system = `You are a critical reviewer auditing a ${agentRole} agent's decision in a fraud detection platform.
+Your job is to find flaws, contradictions, and unjustified assumptions. Be adversarial — actively argue against the proposed decision.
+
+You MUST return valid JSON with this exact schema:
+{
+  "shouldRevise": boolean,
+  "revisedAction": "APPROVE" | "REVIEW" | "REJECT" | "BLOCK" | "MONITOR" | null,
+  "revisedConfidence": 0.0-1.0 or null,
+  "concerns": ["string array of specific concerns"],
+  "contraArgument": "string — strongest case against the current decision",
+  "reflectionConfidence": 0.0-1.0
+}
+
+RULES:
+- Only set shouldRevise to true if there is a clear error or contradiction.
+- Minor concerns are NOT grounds for revision — list them but keep shouldRevise false.
+- Return ONLY the JSON object. No markdown.`;
+
+  const evidenceSummary = (evidence || []).map(a => {
+    const toolName = a.action?.type || 'unknown';
+    const success = a.result?.success !== false;
+    const data = a.result?.data ? JSON.stringify(a.result.data).slice(0, 200) : 'no data';
+    return `- ${toolName}: ${success ? 'OK' : 'FAILED'} — ${data}`;
+  }).join('\n');
+
+  const user = `## Original Input
+${JSON.stringify(input, null, 2).slice(0, 500)}
+
+## Evidence Gathered
+${evidenceSummary || 'No evidence collected.'}
+
+## Proposed Decision
+- Action: ${proposedDecision?.action || 'UNKNOWN'}
+- Risk Score: ${riskScore ?? 'N/A'}
+- Confidence: ${confidence ?? 'N/A'}
+- Reasoning: ${proposedDecision?.reason || proposedDecision?.reasoning || 'none provided'}
+
+Critically evaluate this decision. What could go wrong? Should it be revised?`;
+
+  return { system, user };
+}
+
+/**
  * Safely parse LLM JSON output with fallback.
  * @param {string} text - Raw LLM output
  * @param {Object} fallback - Fallback value if parsing fails
