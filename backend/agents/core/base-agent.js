@@ -34,6 +34,7 @@ import { getOutcomeSimulator } from './outcome-simulator.js';
 import { getThresholdManager } from './threshold-manager.js';
 import { getPolicyEngine } from './policy-engine.js';
 import { getEvalTracker } from './eval-tracker.js';
+import { getPromptRegistry } from './prompt-registry.js';
 
 // Import event bus (only if running in context with WebSocket)
 let eventBus = null;
@@ -43,6 +44,14 @@ try {
 } catch (e) {
   // Event bus not available, that's okay
 }
+
+// Map agent IDs to prompt directory names
+const AGENT_PROMPT_MAP = {
+  'SELLER_ONBOARDING': 'seller-onboarding',
+  'FRAUD_INVESTIGATOR': 'fraud-investigation',
+  'ALERT_TRIAGE': 'alert-triage',
+  'RULE_OPTIMIZER': 'rule-optimization'
+};
 
 export class BaseAgent {
   constructor(config) {
@@ -75,6 +84,7 @@ export class BaseAgent {
     this.thresholdManager = getThresholdManager();
     this.policyEngine = getPolicyEngine();
     this.evalTracker = getEvalTracker();
+    this.promptRegistry = getPromptRegistry();
 
     // Listen for outcome feedback events
     if (eventBus) {
@@ -90,6 +100,13 @@ export class BaseAgent {
 
     // Chain of thought for current reasoning
     this.currentChain = null;
+  }
+
+  /**
+   * Get the prompt directory key for this agent.
+   */
+  getPromptKey() {
+    return AGENT_PROMPT_MAP[this.agentId] || this.agentId.toLowerCase().replace(/_/g, '-');
   }
 
   // Register a tool the agent can use
@@ -370,6 +387,7 @@ export class BaseAgent {
     // Try LLM-enhanced thinking
     if (this.llmClient?.enabled) {
       try {
+        const domainKnowledge = this.promptRegistry.getPrompts(this.getPromptKey(), 'think');
         const { system, user } = buildThinkPrompt({
           agentName: this.name,
           agentRole: this.role,
@@ -377,7 +395,8 @@ export class BaseAgent {
           recentMemory,
           knowledgeResults,
           patternMatches,
-          tools: this.tools
+          tools: this.tools,
+          domainKnowledge
         });
 
         const llmResult = await this.llmClient.complete(system, user);
@@ -418,13 +437,15 @@ export class BaseAgent {
     // Try LLM-enhanced planning
     if (this.llmClient?.enabled) {
       try {
+        const domainKnowledge = this.promptRegistry.getPrompts(this.getPromptKey(), 'plan');
         const { system, user } = buildPlanPrompt({
           agentName: this.name,
           agentRole: this.role,
           thinkResult: analysis,
           longTermMemory,
           tools: this.tools,
-          input: context?.input || context
+          input: context?.input || context,
+          domainKnowledge
         });
 
         const llmResult = await this.llmClient.complete(system, user);
@@ -473,11 +494,13 @@ export class BaseAgent {
     // Try LLM-enhanced observation
     if (this.llmClient?.enabled) {
       try {
+        const domainKnowledge = this.promptRegistry.getPrompts(this.getPromptKey(), 'observe');
         const { system, user } = buildObservePrompt({
           agentName: this.name,
           agentRole: this.role,
           actions,
-          input: context?.input || context
+          input: context?.input || context,
+          domainKnowledge
         });
 
         const llmResult = await this.llmClient.complete(system, user);
@@ -517,6 +540,7 @@ export class BaseAgent {
     // LLM-enhanced reflection
     if (this.llmClient?.enabled) {
       try {
+        const domainKnowledge = this.promptRegistry.getPrompts(this.getPromptKey(), 'reflect');
         const proposedDecision = observation?.recommendation || { action: observation?.decision, reason: observation?.summary };
         const { system, user } = buildReflectPrompt({
           agentName: this.name,
@@ -525,7 +549,8 @@ export class BaseAgent {
           evidence: actions,
           proposedDecision,
           riskScore: observation?.riskScore || observation?.overallRisk?.score,
-          confidence: observation?.confidence
+          confidence: observation?.confidence,
+          domainKnowledge
         });
 
         const llmResult = await this.llmClient.complete(system, user);
