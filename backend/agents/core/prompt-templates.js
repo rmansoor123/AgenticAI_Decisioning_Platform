@@ -71,9 +71,11 @@ export function formatKnowledgeForPrompt(results) {
  * Build the THINK phase prompt.
  * LLM returns: { understanding, key_risks, confidence, suggested_approach }
  */
-export function buildThinkPrompt({ agentName, agentRole, input, recentMemory, knowledgeResults, patternMatches, tools }) {
-  const system = `You are ${agentName}, a ${agentRole} agent in a fraud detection platform.
+export function buildThinkPrompt({ agentName, agentRole, input, recentMemory, knowledgeResults, patternMatches, tools, domainKnowledge }) {
+  const domainSection = domainKnowledge ? `\n\n## Domain Expertise\n${domainKnowledge}\n` : '';
 
+  const system = `You are ${agentName}, a ${agentRole} agent in a fraud detection platform.
+${domainSection}
 Your job is to analyze the input and provide a structured understanding of the situation.
 
 You MUST return valid JSON with this exact schema:
@@ -110,8 +112,11 @@ Analyze this input and return your structured understanding as JSON.`;
  * Build the PLAN phase prompt.
  * LLM returns: { goal, reasoning, actions: [{ tool, params, rationale }] }
  */
-export function buildPlanPrompt({ agentName, agentRole, thinkResult, longTermMemory, tools, input }) {
+export function buildPlanPrompt({ agentName, agentRole, thinkResult, longTermMemory, tools, input, domainKnowledge }) {
+  const domainSection = domainKnowledge ? `\n\n## Domain Expertise\n${domainKnowledge}\n` : '';
+
   const system = `You are ${agentName}, a ${agentRole} agent. Based on your analysis, decide which tools to use and in what order.
+${domainSection}
 
 You MUST return valid JSON with this exact schema:
 {
@@ -153,8 +158,11 @@ Create your action plan as JSON.`;
  * Build the OBSERVE phase prompt.
  * LLM returns: { summary, risk_score, recommendation, confidence, reasoning }
  */
-export function buildObservePrompt({ agentName, agentRole, actions, input }) {
+export function buildObservePrompt({ agentName, agentRole, actions, input, domainKnowledge }) {
+  const domainSection = domainKnowledge ? `\n\n## Domain Expertise\n${domainKnowledge}\n` : '';
+
   const system = `You are ${agentName}, a ${agentRole} agent. You have completed your investigation. Synthesize all evidence into a final assessment.
+${domainSection}
 
 You MUST return valid JSON with this exact schema:
 {
@@ -190,8 +198,11 @@ Synthesize all evidence and return your final assessment as JSON.`;
  * Build the REFLECT phase prompt.
  * LLM returns: { shouldRevise, revisedAction, revisedConfidence, concerns, contraArgument, reflectionConfidence }
  */
-export function buildReflectPrompt({ agentName, agentRole, input, evidence, proposedDecision, riskScore, confidence, chainOfThought }) {
+export function buildReflectPrompt({ agentName, agentRole, input, evidence, proposedDecision, riskScore, confidence, chainOfThought, domainKnowledge }) {
+  const domainSection = domainKnowledge ? `\n\n## Domain Expertise\n${domainKnowledge}\n` : '';
+
   const system = `You are a critical reviewer auditing a ${agentRole} agent's decision in a fraud detection platform.
+${domainSection}
 Your job is to find flaws, contradictions, and unjustified assumptions. Be adversarial — actively argue against the proposed decision.
 
 You MUST return valid JSON with this exact schema:
