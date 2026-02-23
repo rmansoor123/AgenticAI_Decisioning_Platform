@@ -10,12 +10,14 @@ import FraudInvestigationAgent from './specialized/fraud-investigation-agent.js'
 import RuleOptimizationAgent from './specialized/rule-optimization-agent.js';
 import AlertTriageAgent from './specialized/alert-triage-agent.js';
 import SellerOnboardingAgent from './specialized/seller-onboarding-agent.js';
+import { getEvalTracker } from './core/eval-tracker.js';
 
 // Initialize agents
 const fraudInvestigator = new FraudInvestigationAgent();
 const ruleOptimizer = new RuleOptimizationAgent();
 const alertTriage = new AlertTriageAgent();
 const sellerOnboarding = new SellerOnboardingAgent();
+const evalTracker = getEvalTracker();
 
 // Register agents with orchestrator
 orchestrator.registerAgent(fraudInvestigator);
@@ -113,12 +115,14 @@ export {
   fraudInvestigator,
   ruleOptimizer,
   alertTriage,
-  sellerOnboarding
+  sellerOnboarding,
+  evalTracker
 };
 
 export default {
   orchestrator,
   coordinator,
+  evalTracker,
   agents: {
     fraudInvestigator,
     ruleOptimizer,
