@@ -1,117 +1,170 @@
 /**
- * Graph-based Agent Tools
+ * Graph Tools for Agent Reasoning
  *
- * Provides graph analysis tools for agent reasoning, exposing
- * graph query functions as structured tool handlers.
+ * Provides graph-based tools that agents can use to explore network
+ * relationships, propagate risk scores, detect fraud rings, and
+ * identify communities around seller entities.
  */
 
-import {
-  shortestPath,
-  findClusters,
-  pageRank,
-  findRings,
-  riskPropagation,
-  communityDetection,
-  multiHopInvestigate,
-} from '../../graph/graph-queries.js';
+import { getGraphEngine } from '../../graph/graph-engine.js';
+import { findRings, riskPropagation, communityDetection } from '../../graph/graph-queries.js';
 
 /**
- * Create graph analysis tools for agent use.
- * @returns {Object} Map of tool name to { name, description, handler }
+ * Helper: Traverse the graph engine to find neighbors of a seller
+ * up to `depth` hops away.
+ *
+ * @param {string} sellerId - Starting node ID
+ * @param {number} depth - Maximum traversal depth
+ * @returns {{ nodes: Array, edges: Array }}
+ */
+function getNeighbors(sellerId, depth = 2) {
+  const engine = getGraphEngine();
+  return engine.getNeighbors(sellerId, depth);
+}
+
+/**
+ * Create the set of graph-based tools for agent registration.
+ *
+ * @returns {Object<string, { name: string, description: string, handler: function }>}
  */
 export function createGraphTools() {
   return {
-    graph_shortest_path: {
-      name: 'graph_shortest_path',
-      description: 'Find the shortest weighted path between two nodes in the entity graph',
-      handler: async ({ fromId, toId }) => {
+    graph_find_connections: {
+      name: 'graph_find_connections',
+      description: 'Find entities connected to a seller through shared attributes (email, phone, IP, etc.) up to N hops in the graph.',
+      handler: async ({ sellerId, depth = 2 }) => {
         try {
-          const result = shortestPath(fromId, toId);
-          return { success: true, data: result };
-        } catch (e) {
-          return { success: false, error: e.message, data: null };
-        }
-      },
-    },
-
-    graph_find_clusters: {
-      name: 'graph_find_clusters',
-      description: 'Find connected components (clusters) in the entity graph, sorted by average risk',
-      handler: async () => {
-        try {
-          const result = findClusters();
-          return { success: true, data: result };
-        } catch (e) {
-          return { success: false, error: e.message, data: [] };
-        }
-      },
-    },
-
-    graph_page_rank: {
-      name: 'graph_page_rank',
-      description: 'Compute PageRank scores for all nodes to identify influential entities',
-      handler: async ({ iterations = 20, dampingFactor = 0.85 } = {}) => {
-        try {
-          const result = pageRank(iterations, dampingFactor);
-          // Convert Map to plain object for serialization
-          const scores = Object.fromEntries(result);
-          return { success: true, data: scores };
-        } catch (e) {
-          return { success: false, error: e.message, data: {} };
-        }
-      },
-    },
-
-    graph_find_rings: {
-      name: 'graph_find_rings',
-      description: 'Detect cycles (rings) in the entity graph that may indicate fraud rings',
-      handler: async ({ maxLength = 6 } = {}) => {
-        try {
-          const result = findRings(maxLength);
-          return { success: true, data: result };
-        } catch (e) {
-          return { success: false, error: e.message, data: [] };
+          const { nodes, edges } = getNeighbors(sellerId, depth);
+          return {
+            success: true,
+            data: {
+              sellerId,
+              depth,
+              connectedNodes: nodes.map(n => ({
+                id: n.id,
+                type: n.type,
+                properties: n.properties,
+              })),
+              edges: edges.map(e => ({
+                id: e.id,
+                source: e.source,
+                target: e.target,
+                type: e.type,
+                weight: e.weight ?? e.properties?.weight ?? 1,
+              })),
+              totalNodes: nodes.length,
+              totalEdges: edges.length,
+            },
+          };
+        } catch (error) {
+          return { success: false, error: error.message };
         }
       },
     },
 
     graph_risk_propagation: {
       name: 'graph_risk_propagation',
-      description: 'Propagate risk scores from a fraud node through the graph with decay',
-      handler: async ({ fraudNodeId, decay = 0.5, maxDepth = 4 }) => {
+      description: 'Calculate propagated risk from fraud-flagged neighbors. Uses BFS with decaying risk scores to quantify exposure.',
+      handler: async ({ sellerId, depth = 2 }) => {
         try {
-          const result = riskPropagation(fraudNodeId, decay, maxDepth);
-          const scores = Object.fromEntries(result);
-          return { success: true, data: scores };
-        } catch (e) {
-          return { success: false, error: e.message, data: {} };
+          const propagated = riskPropagation(sellerId, 0.5, depth);
+          // Convert Map to plain object for serialization
+          const riskEntries = [];
+          for (const [nodeId, risk] of propagated) {
+            riskEntries.push({ nodeId, propagatedRisk: risk });
+          }
+          return {
+            success: true,
+            data: {
+              sellerId,
+              depth,
+              propagatedRisks: riskEntries,
+              totalAffected: riskEntries.length,
+              maxPropagatedRisk: riskEntries.length > 0
+                ? Math.max(...riskEntries.map(e => e.propagatedRisk))
+                : 0,
+            },
+          };
+        } catch (error) {
+          return { success: false, error: error.message };
         }
       },
     },
 
-    graph_community_detection: {
-      name: 'graph_community_detection',
-      description: 'Detect communities using label propagation to find entity groups',
-      handler: async ({ maxIterations = 10 } = {}) => {
+    graph_find_rings: {
+      name: 'graph_find_rings',
+      description: 'Detect cycles (fraud rings) involving the subject seller. Returns rings up to the specified maximum length.',
+      handler: async ({ sellerId, maxLength = 5 }) => {
         try {
-          const result = communityDetection(maxIterations);
-          const labels = Object.fromEntries(result);
-          return { success: true, data: labels };
-        } catch (e) {
-          return { success: false, error: e.message, data: {} };
+          const allRings = findRings(maxLength);
+          // Filter to only rings that include the seller
+          const sellerRings = allRings.filter(ring =>
+            ring.nodes.includes(sellerId)
+          );
+          return {
+            success: true,
+            data: {
+              sellerId,
+              maxLength,
+              rings: sellerRings,
+              ringCount: sellerRings.length,
+              totalRingsInGraph: allRings.length,
+            },
+          };
+        } catch (error) {
+          return { success: false, error: error.message };
         }
       },
     },
 
-    graph_multi_hop_investigate: {
-      name: 'graph_multi_hop_investigate',
-      description: 'Traverse up to 3 hops on high-weight edges, collecting risk signals for network-level risk assessment',
-      handler: async ({ sellerId, maxHops = 3, minWeight = 0.7 }) => {
+    graph_community: {
+      name: 'graph_community',
+      description: 'Identify the community (cluster) the seller belongs to and aggregate risk metrics for that community.',
+      handler: async ({ sellerId }) => {
         try {
-          const result = multiHopInvestigate(sellerId, maxHops, minWeight);
-          return { success: true, data: result };
-        } catch (e) {
-          return { success: false, error: e.message, data: { evidenceChain: [], totalRiskSignals: 0 } };
+          const labels = communityDetection();
+          const sellerLabel = labels.get(sellerId);
+
+          // Find all nodes in the same community
+          const communityMembers = [];
+          const engine = getGraphEngine();
+          const nodes = engine.getNodes();
+
+          let totalRisk = 0;
+          let maxRisk = 0;
+          let memberCount = 0;
+
+          for (const [nodeId, label] of labels) {
+            if (label === sellerLabel) {
+              const node = nodes.get(nodeId);
+              const riskScore = node?.properties?.riskScore ?? 0;
+              communityMembers.push({
+                id: nodeId,
+                type: node?.type,
+                riskScore,
+              });
+              totalRisk += riskScore;
+              if (riskScore > maxRisk) maxRisk = riskScore;
+              memberCount++;
+            }
+          }
+
+          const avgRisk = memberCount > 0 ? totalRisk / memberCount : 0;
+
+          return {
+            success: true,
+            data: {
+              sellerId,
+              communityLabel: sellerLabel ?? null,
+              members: communityMembers,
+              memberCount,
+              avgRisk,
+              maxRisk,
+              totalCommunities: new Set(labels.values()).size,
+            },
+          };
+        } catch (error) {
+          return { success: false, error: error.message };
         }
       },
     },
