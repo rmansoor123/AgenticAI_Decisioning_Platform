@@ -29,6 +29,7 @@ import StreamingPipeline from './pages/StreamingPipeline'
 import RAGEvaluation from './pages/RAGEvaluation'
 import PromptLibrary from './pages/PromptLibrary'
 import FeedbackReview from './pages/FeedbackReview'
+import AutonomousAgents from './pages/AutonomousAgents'
 
 const API_BASE = '/api'
 const WS_URL = ((window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host + '/ws')
@@ -185,6 +186,7 @@ function App() {
           <Route path="/rag-evaluation" element={<RAGEvaluation />} />
           <Route path="/prompt-library" element={<PromptLibrary />} />
           <Route path="/feedback-review" element={<FeedbackReview />} />
+          <Route path="/autonomous" element={<AutonomousAgents />} />
         </Routes>
       </Layout>
     </BrowserRouter>

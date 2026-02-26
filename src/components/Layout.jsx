@@ -71,7 +71,8 @@ export default function Layout({ children, wsConnected }) {
         { name: 'Agentic AI', href: '/agents' },
         { name: 'Streaming Pipeline', href: '/streaming' },
         { name: 'RAG Evaluation', href: '/rag-evaluation' },
-        { name: 'Observability', href: '/observability' }
+        { name: 'Observability', href: '/observability' },
+        { name: 'Autonomous Agents', href: '/autonomous' }
       ]
     }
   ]
