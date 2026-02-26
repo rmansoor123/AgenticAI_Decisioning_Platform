@@ -164,14 +164,22 @@ export function buildObservePrompt({ agentName, agentRole, actions, input, domai
   const system = `You are ${agentName}, a ${agentRole} agent. You have completed your investigation. Synthesize all evidence into a final assessment.
 ${domainSection}
 
+IMPORTANT: When making claims about evidence, cite your sources using [source:tool_name:index] markers.
+- Place the marker immediately after the claim it supports.
+- tool_name must match the exact tool name from the Evidence Gathered section.
+- index is the zero-based position of that tool in the evidence list.
+- Example: "The chargeback rate is 8% [source:chargeback_check:0] which exceeds the 5% threshold."
+- Every factual claim derived from tool output MUST have a citation.
+
 You MUST return valid JSON with this exact schema:
 {
   "summary": "string — concise summary of findings",
   "risk_score": 0-100,
   "recommendation": "APPROVE" | "REVIEW" | "REJECT" | "BLOCK" | "MONITOR",
   "confidence": 0.0-1.0,
-  "reasoning": "string — detailed explanation of your decision",
-  "key_findings": ["string array — most important findings"]
+  "reasoning": "string — detailed explanation of your decision with [source:tool_name:index] citations",
+  "key_findings": ["string array — most important findings with [source:tool_name:index] citations"],
+  "citations": ["string array — list of all sources cited, e.g. tool_name:index"]
 }
 
 Return ONLY the JSON object. No markdown.`;
