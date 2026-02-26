@@ -33,8 +33,8 @@ router.get('/detections', (req, res) => {
     }
     const { limit = 20, offset = 0 } = req.query;
     const all = agent.detections || [];
-    const start = parseInt(offset);
-    const end = start + parseInt(limit);
+    const start = parseInt(offset) || 0;
+    const end = start + (parseInt(limit) || 20);
     const detections = all.slice(start, end);
     res.json({
       success: true,

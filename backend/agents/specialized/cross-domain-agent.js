@@ -510,4 +510,4 @@ export function getCrossDomainAgent() {
   return instance;
 }
 
-export default { CrossDomainCorrelationAgent, getCrossDomainAgent };
+export default CrossDomainCorrelationAgent;

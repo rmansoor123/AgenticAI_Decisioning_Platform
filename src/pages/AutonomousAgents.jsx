@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Activity, Shield, RefreshCw, Clock, AlertTriangle, CheckCircle, XCircle, Zap, GitBranch, Eye } from 'lucide-react'
+import { Shield, RefreshCw, Clock, CheckCircle, XCircle, Zap, GitBranch } from 'lucide-react'
 
 const API_BASE = '/api'
 
@@ -168,18 +168,14 @@ export default function AutonomousAgents() {
                 <div className="flex items-center justify-between flex-wrap gap-4">
                   <div className="flex items-center gap-6 flex-wrap">
                     <div className="flex items-center gap-2">
-                      <div className={`w-2.5 h-2.5 rounded-full ${cdStatus?.running ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-                      <span className={`text-sm font-medium ${cdStatus?.running ? 'text-emerald-400' : 'text-amber-400'}`}>
-                        {cdStatus?.running ? 'Running' : 'Stopped'}
+                      <div className={`w-2.5 h-2.5 rounded-full ${cdStatus?.isRunning ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                      <span className={`text-sm font-medium ${cdStatus?.isRunning ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {cdStatus?.isRunning ? 'Running' : 'Stopped'}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 text-sm text-gray-400">
                       <Clock className="w-4 h-4" />
-                      <span>Last scan: {timeAgo(cdStatus?.lastScan)}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-gray-400">
-                      <RefreshCw className="w-4 h-4" />
-                      <span>Next: {cdStatus?.nextScan ? timeAgo(cdStatus.nextScan).replace('ago', 'from now') : 'N/A'}</span>
+                      <span>Last scan: {timeAgo(cdStatus?.lastRunAt)}</span>
                     </div>
                     <div className="text-sm text-gray-400">
                       <span className="text-white font-medium">{cdStatus?.eventsBuffered ?? 0}</span> events buffered
@@ -349,14 +345,14 @@ export default function AutonomousAgents() {
                 <div className="flex items-center justify-between flex-wrap gap-4">
                   <div className="flex items-center gap-6 flex-wrap">
                     <div className="flex items-center gap-2">
-                      <div className={`w-2.5 h-2.5 rounded-full ${peStatus?.running ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-                      <span className={`text-sm font-medium ${peStatus?.running ? 'text-emerald-400' : 'text-amber-400'}`}>
-                        {peStatus?.running ? 'Running' : 'Stopped'}
+                      <div className={`w-2.5 h-2.5 rounded-full ${peStatus?.isRunning ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                      <span className={`text-sm font-medium ${peStatus?.isRunning ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {peStatus?.isRunning ? 'Running' : 'Stopped'}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 text-sm text-gray-400">
                       <Clock className="w-4 h-4" />
-                      <span>Last scan: {timeAgo(peStatus?.lastScan)}</span>
+                      <span>Last scan: {timeAgo(peStatus?.lastRunAt)}</span>
                     </div>
                     <div className="text-sm text-gray-400">
                       <span className="text-white font-medium">{peStatus?.totalCycles ?? 0}</span> cycles

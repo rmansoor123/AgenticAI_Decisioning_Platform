@@ -9,11 +9,6 @@
  * before promotion to ACTIVE.
  */
 
-const VALID_CHECKPOINTS = [
-  'transaction', 'onboarding', 'ato', 'payout', 'listing', 'shipping'
-];
-
-const VALID_TYPES = ['behavioral', 'velocity', 'threshold', 'pattern'];
 const VALID_SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 const VALID_ACTIONS = ['BLOCK', 'REVIEW', 'CHALLENGE', 'FLAG'];
 

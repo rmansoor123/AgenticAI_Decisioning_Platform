@@ -43,8 +43,8 @@ router.get('/proposals', (req, res) => {
       proposals = proposals.filter(p => p.stage === stage);
     }
     const total = proposals.length;
-    const start = parseInt(offset);
-    const end = start + parseInt(limit);
+    const start = parseInt(offset) || 0;
+    const end = start + (parseInt(limit) || 20);
     res.json({
       success: true,
       data: {
@@ -124,11 +124,11 @@ router.post('/promote/:ruleId', async (req, res) => {
       return res.status(503).json({ success: false, error: 'Agent not initialized' });
     }
     const { ruleId } = req.params;
-    const promoteTool = agent.tools.find(t => t.name === 'promote_rule');
+    const promoteTool = agent.tools.get('promote_rule');
     if (!promoteTool) {
       return res.status(404).json({ success: false, error: 'promote_rule tool not found' });
     }
-    const result = await promoteTool.execute({ ruleId });
+    const result = await promoteTool.handler({ ruleId });
     res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
