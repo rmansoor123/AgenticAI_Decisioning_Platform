@@ -542,3 +542,117 @@ export function communityDetection(maxIterations = 10) {
 
   return labels;
 }
+
+/**
+ * Multi-hop BFS investigation from a starting node.
+ * Traverses edges with weight >= minWeight, collecting risk signals at each hop.
+ *
+ * Risk signals detected on each node:
+ * - 'high-risk-score' if riskScore > 50
+ * - 'fraud-history' if fraudHistory is truthy
+ * - 'watchlist-match' if watchlistMatch is truthy
+ * - 'rejected-entity' if status === 'REJECTED'
+ *
+ * The start node (hop 0) is excluded from the evidence chain.
+ *
+ * @param {string} startId - Starting node ID for investigation
+ * @param {number} maxHops - Maximum BFS depth (default 3)
+ * @param {number} minWeight - Minimum edge weight to traverse (default 0.7)
+ * @returns {{ evidenceChain: Array<{ entity: string, hop: number, relationship: string, riskSignals: string[], properties: object }>, totalRiskSignals: number }}
+ */
+export function multiHopInvestigate(startId, maxHops = 3, minWeight = 0.7) {
+  const engine = getGraphEngine();
+  const nodes = engine.getNodes();
+  const edges = engine.getEdges();
+
+  if (!nodes.has(startId)) {
+    return { evidenceChain: [], totalRiskSignals: 0 };
+  }
+
+  // Build adjacency list: nodeId -> [{ neighbor, weight, edgeType }]
+  // Only include edges with properties.weight >= minWeight
+  const adjacency = new Map();
+  for (const [nodeId] of nodes) {
+    adjacency.set(nodeId, []);
+  }
+
+  for (const [, edge] of edges) {
+    const weight = edge.properties?.weight ?? 0;
+    if (weight < minWeight) continue;
+
+    const source = edge.source;
+    const target = edge.target;
+
+    if (adjacency.has(source)) {
+      adjacency.get(source).push({ neighbor: target, weight, edgeType: edge.type });
+    }
+    if (adjacency.has(target)) {
+      adjacency.get(target).push({ neighbor: source, weight, edgeType: edge.type });
+    }
+  }
+
+  // Collect risk signals from a node's properties
+  function collectRiskSignals(node) {
+    const signals = [];
+    const props = node?.properties || {};
+
+    if (props.riskScore > 50) {
+      signals.push('high-risk-score');
+    }
+    if (props.fraudHistory) {
+      signals.push('fraud-history');
+    }
+    if (props.watchlistMatch) {
+      signals.push('watchlist-match');
+    }
+    if (props.status === 'REJECTED') {
+      signals.push('rejected-entity');
+    }
+
+    return signals;
+  }
+
+  // BFS traversal
+  const evidenceChain = [];
+  let totalRiskSignals = 0;
+  const visited = new Set([startId]);
+
+  // Queue entries: [nodeId, hop, edgeType]
+  // Seed with hop 0 for the start node (which we skip in output)
+  let currentLevel = [{ nodeId: startId, hop: 0, edgeType: '' }];
+
+  while (currentLevel.length > 0) {
+    const nextLevel = [];
+
+    for (const { nodeId: currentId, hop: currentHop } of currentLevel) {
+      if (currentHop >= maxHops) continue;
+
+      const neighbors = adjacency.get(currentId) || [];
+      for (const { neighbor, edgeType } of neighbors) {
+        if (visited.has(neighbor)) continue;
+
+        visited.add(neighbor);
+        const neighborNode = nodes.get(neighbor);
+        if (!neighborNode) continue;
+
+        const hop = currentHop + 1;
+        const riskSignals = collectRiskSignals(neighborNode);
+
+        evidenceChain.push({
+          entity: neighbor,
+          hop,
+          relationship: edgeType,
+          riskSignals,
+          properties: { ...neighborNode.properties },
+        });
+
+        totalRiskSignals += riskSignals.length;
+        nextLevel.push({ nodeId: neighbor, hop, edgeType });
+      }
+    }
+
+    currentLevel = nextLevel;
+  }
+
+  return { evidenceChain, totalRiskSignals };
+}
