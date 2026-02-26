@@ -9,6 +9,7 @@
 import { getMemoryStore } from './memory-store.js';
 import { getKnowledgeBase } from './knowledge-base.js';
 import { getPromptBuilder } from './prompt-builder.js';
+import { getContextRanker } from './context-ranker.js';
 
 const DEFAULT_TOKEN_BUDGET = 4000;
 
@@ -186,6 +187,55 @@ class ContextEngine {
       } catch (e) {
         // Domain context retrieval failed; skip gracefully
       }
+    }
+
+    // ── Global context reranking ──
+    // Build context items from non-system, non-task sections for reranking
+    const contextRanker = getContextRanker();
+    const rerankedSources = ['shortTermMemory', 'ragResults', 'longTermMemory', 'domainContext'];
+    const contextItems = rerankedSources
+      .filter(key => sections[key])
+      .map(key => ({
+        source: key,
+        text: sections[key],
+        tokens: this.promptBuilder.estimateTokens(sections[key])
+      }));
+
+    if (contextItems.length > 0) {
+      const ranked = contextRanker.rankItems(contextItems, queryText);
+      const guarantees = {
+        system: sourceMeta.system ? sourceMeta.system.tokens : 0,
+        task: sourceMeta.task ? sourceMeta.task.tokens : 0
+      };
+      const allocation = contextRanker.allocateBudget(ranked, tokenBudget, guarantees);
+
+      // Remove sections that were not allocated
+      const allocatedSources = new Set(allocation.items.map(i => i.source));
+      for (const key of rerankedSources) {
+        if (sections[key] && !allocatedSources.has(key)) {
+          delete sections[key];
+          if (sourceMeta[key]) {
+            sourceMeta[key].included = false;
+            sourceMeta[key].droppedByReranker = true;
+          }
+        }
+      }
+
+      // Recalculate totalTokens after reranking
+      totalTokens = 0;
+      for (const key of Object.keys(sections)) {
+        totalTokens += this.promptBuilder.estimateTokens(sections[key]);
+      }
+
+      // Log reranking info in sourceMeta
+      sourceMeta._reranking = {
+        itemsConsidered: contextItems.length,
+        itemsAllocated: allocation.items.length,
+        itemsDropped: allocation.droppedItems.length,
+        guaranteedTokens: allocation.guaranteedTokens,
+        totalAllocatedTokens: allocation.totalTokens,
+        remainingBudget: allocation.remainingBudget
+      };
     }
 
     // Build final prompt

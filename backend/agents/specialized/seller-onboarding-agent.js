@@ -28,6 +28,7 @@ import { getContextEngine } from '../core/context-engine.js';
 import { createSelfCorrection } from '../core/self-correction.js';
 import { createToolExecutor } from '../core/tool-executor.js';
 import { getThresholdManager } from '../core/threshold-manager.js';
+import { createGraphTools } from '../tools/graph-tools.js';
 
 // Use environment variable to switch between real and simulated
 const USE_REAL_APIS = process.env.USE_REAL_APIS === 'true';
@@ -446,6 +447,15 @@ export class SellerOnboardingAgent extends BaseAgent {
       const memories = this.memoryStore.queryLongTerm(this.agentId, context, 5);
       return { success: true, data: { memories, count: memories.length } };
     });
+
+    // ============================================================================
+    // GRAPH NETWORK TOOLS
+    // ============================================================================
+
+    const graphTools = createGraphTools();
+    for (const [name, tool] of Object.entries(graphTools)) {
+      this.registerTool(name, tool.description, tool.handler);
+    }
   }
 
   // Override think — LLM-first, strategy fallback
