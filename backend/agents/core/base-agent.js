@@ -121,6 +121,9 @@ export class BaseAgent {
 
   // Core reasoning loop - "Think, Act, Observe"
   async reason(input, context = {}) {
+    // Reset re-plan counter for each reasoning session
+    this._replanCount = 0;
+
     // Create chain of thought for this reasoning session
     this.currentChain = createChainOfThought({
       agentId: this.agentId,
@@ -215,6 +218,61 @@ export class BaseAgent {
             1.0
           );
         }
+      }
+
+      // Step 4.5: RE-PLAN — if majority of actions failed, attempt a revised plan
+      if (this.shouldRePlan(thought.actions)) {
+        this._replanCount++;
+        const successes = thought.actions.filter(a => a.result?.success !== false);
+        const failures = thought.actions.filter(a => a.result?.success === false);
+
+        const originalGoal = plan.goal || thought.reasoning[0]?.understanding || JSON.stringify(input).slice(0, 200);
+        const rePlanPrompt = this.buildRePlanPrompt(originalGoal, successes, failures);
+
+        let revisedActions = [];
+
+        if (this.llmClient?.enabled) {
+          try {
+            const parsed = await this.llmClient.completeWithJsonRetry(
+              rePlanPrompt.system,
+              rePlanPrompt.user,
+              null,
+              { actions: [] }
+            );
+            if (parsed?.actions?.length > 0) {
+              revisedActions = parsed.actions
+                .filter(a => this.tools.has(a.tool))
+                .slice(0, 5)
+                .map(a => ({ type: a.tool, params: a.params || {}, rationale: a.rationale }));
+            }
+          } catch (e) {
+            // LLM re-plan failed, skip
+          }
+        }
+
+        // Execute revised actions
+        for (const action of revisedActions) {
+          this.traceCollector.startSpan(traceId, `replan:${action.type}`, action.params);
+          const actionResult = await this.act(action);
+          thought.actions.push({ action, result: actionResult, replanned: true });
+          this.traceCollector.endSpan(traceId, `replan:${action.type}`, { success: actionResult?.success !== false });
+
+          if (actionResult?.data) {
+            this.currentChain.recordEvidence(
+              `Re-plan action ${action.type} result`,
+              [],
+              [],
+              1.0
+            );
+          }
+        }
+
+        // Record chain-of-thought step about the re-plan
+        this.currentChain.addStep({
+          type: 'analysis',
+          content: `Re-planned after ${failures.length}/${thought.actions.length - revisedActions.length} actions failed. Executed ${revisedActions.length} revised action(s).`,
+          confidence: CONFIDENCE.POSSIBLE
+        });
       }
 
       // Step 5: OBSERVE - Evaluate results
@@ -510,6 +568,63 @@ export class BaseAgent {
       return await tool.handler(action.params);
     }
     return { executed: false, reason: 'Unknown action type' };
+  }
+
+  /**
+   * Determine whether the agent should re-plan after the ACT phase.
+   * Returns true if more than 50% of action results failed and we haven't
+   * already re-planned (max 1 re-plan cycle per reason() call).
+   */
+  shouldRePlan(actionResults) {
+    if (this._replanCount >= 1) return false;
+    if (!actionResults || actionResults.length === 0) return false;
+    const failCount = actionResults.filter(a => a.result?.success === false).length;
+    return failCount / actionResults.length > 0.5;
+  }
+
+  /**
+   * Build a prompt pair for the LLM to generate a revised plan after failures.
+   * @param {string} originalGoal - The original task/goal description
+   * @param {Array} successes - Actions that succeeded
+   * @param {Array} failures - Actions that failed
+   * @returns {{ system: string, user: string }}
+   */
+  buildRePlanPrompt(originalGoal, successes, failures) {
+    const toolList = Array.from(this.tools.entries())
+      .map(([name, t]) => `- ${name}: ${t.description}`)
+      .join('\n');
+
+    const system = [
+      `You are ${this.name}, a ${this.role} agent.`,
+      'Your previous plan had a high failure rate. You must create a revised plan.',
+      'Respond in JSON with: { "actions": [{ "tool": "<tool_name>", "params": {}, "rationale": "..." }], "reasoning": "..." }'
+    ].join('\n');
+
+    const successSummary = successes.length > 0
+      ? successes.map(s => `  - ${s.action?.type}: ${JSON.stringify(s.result?.data || {}).slice(0, 200)}`).join('\n')
+      : '  (none)';
+
+    const failureSummary = failures.length > 0
+      ? failures.map(f => `  - ${f.action?.type}: ${f.result?.error || 'failed'}`).join('\n')
+      : '  (none)';
+
+    const user = [
+      `Original goal: ${originalGoal}`,
+      '',
+      'Successful actions:',
+      successSummary,
+      '',
+      'Failed actions:',
+      failureSummary,
+      '',
+      'Available tools:',
+      toolList || '  (none)',
+      '',
+      'Create a revised plan that avoids the failed approaches and tries alternative tools or parameters.',
+      'Return at most 5 actions.'
+    ].join('\n');
+
+    return { system, user };
   }
 
   // Evaluate results — LLM synthesizes findings into risk assessment
