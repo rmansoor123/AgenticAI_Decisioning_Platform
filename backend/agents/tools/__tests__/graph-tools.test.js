@@ -15,6 +15,7 @@ const EXPECTED_TOOLS = [
   'graph_risk_propagation',
   'graph_find_rings',
   'graph_community',
+  'graph_multi_hop_investigate',
 ];
 
 let passed = 0;
@@ -41,7 +42,7 @@ async function runTests() {
   assert(typeof tools === 'object' && tools !== null, 'createGraphTools() returns an object');
 
   const toolNames = Object.keys(tools);
-  assert(toolNames.length === 4, `Returns exactly 4 tools (got ${toolNames.length})`);
+  assert(toolNames.length === 5, `Returns exactly 5 tools (got ${toolNames.length})`);
 
   for (const name of EXPECTED_TOOLS) {
     assert(toolNames.includes(name), `Contains tool "${name}"`);
