@@ -41,6 +41,7 @@ const memoryStore = {
   agent_metrics: new Map(),
   agent_traces: new Map(),
   agent_decisions: new Map(),
+  agent_feedback: new Map(),
   agent_evaluations: new Map(),
   agent_eval_history: new Map(),
   cases: new Map()
@@ -175,6 +176,7 @@ function getIdField(table) {
     agent_metrics: 'metric_id',
     agent_traces: 'trace_id',
     agent_decisions: 'decision_id',
+    agent_feedback: 'feedback_id',
     agent_evaluations: 'evaluation_id',
     agent_eval_history: 'history_id',
     cases: 'case_id'

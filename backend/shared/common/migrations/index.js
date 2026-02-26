@@ -11,6 +11,7 @@ import agentMemory from './005-agent-memory.js';
 import orchestration from './006-orchestration.js';
 import observability from './007-observability.js';
 import caseQueue from './008-case-queue.js';
+import agentFeedback from './009-agent-feedback.js';
 
 const migrations = [
   { version: '001', name: 'initial-schema', migration: initialSchema },
@@ -20,7 +21,8 @@ const migrations = [
   { version: '005', name: 'agent-memory', migration: agentMemory },
   { version: '006', name: 'orchestration', migration: orchestration },
   { version: '007', name: 'observability', migration: observability },
-  { version: '008', name: 'case-queue', migration: caseQueue }
+  { version: '008', name: 'case-queue', migration: caseQueue },
+  { version: '009', name: 'agent-feedback', migration: agentFeedback }
 ];
 
 /**

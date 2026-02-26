@@ -339,6 +339,7 @@ import abTestingRouter from '../services/experimentation/ab-testing/index.js';
 import simulationRouter from '../services/experimentation/simulation/index.js';
 import agentsRouter from '../services/agents/index.js';
 import promptsRouter from '../services/prompts/index.js';
+import feedbackRouter from '../services/feedback/index.js';
 import { getEvalTracker } from '../agents/core/eval-tracker.js';
 import riskProfileRouter from '../services/risk-profile/index.js';
 import observabilityRouter from '../services/observability/index.js';
@@ -536,6 +537,9 @@ app.use('/api/agents', agentsRouter);
 // Prompt Library
 app.use('/api/prompts', promptsRouter);
 
+// Human Feedback
+app.use('/api/feedback', feedbackRouter);
+
 // ── Eval Tracking API ──────────────────────────────────────────────────────
 
 app.get('/api/agents/evals/stats', (req, res) => {
@@ -563,6 +567,45 @@ app.get('/api/agents/:agentId/evals/stats', (req, res) => {
     res.json(evalTracker.getAgentEvalStats(req.params.agentId));
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Adversarial Testing API ──────────────────────────────────────────────
+
+const adversarialResults = new Map();
+
+app.post('/api/agents/adversarial/run', async (req, res) => {
+  try {
+    const { getAdversarialTester } = await import('../agents/core/adversarial-tester.js');
+    const { agentType = 'onboarding', count = 10 } = req.body || {};
+    const tester = getAdversarialTester();
+    const scenarios = tester.generateScenarios(agentType, Math.min(count, 50));
+    const executionId = `ADVEXEC-${Date.now().toString(36)}`;
+
+    adversarialResults.set(executionId, {
+      executionId,
+      status: 'running',
+      agentType,
+      scenarioCount: scenarios.length,
+      startedAt: new Date().toISOString(),
+      results: null
+    });
+
+    res.json({ success: true, data: { executionId, scenarioCount: scenarios.length, status: 'running' } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/agents/adversarial/:executionId', (req, res) => {
+  try {
+    const entry = adversarialResults.get(req.params.executionId);
+    if (!entry) {
+      return res.status(404).json({ success: false, error: 'Execution not found' });
+    }
+    res.json({ success: true, data: entry });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
