@@ -218,6 +218,15 @@ class Chunker {
   }
 
   /**
+   * Check if text is long enough to need chunking.
+   * @param {string} text
+   * @returns {boolean}
+   */
+  needsChunking(text) {
+    return typeof text === 'string' && text.length > TARGET_CHARS;
+  }
+
+  /**
    * Get chunking statistics.
    * @returns {Object}
    */

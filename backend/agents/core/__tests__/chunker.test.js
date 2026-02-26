@@ -141,6 +141,14 @@ function runTests() {
   assert(stats.totalChunkOperations > 0, `totalChunkOperations > 0 (got ${stats.totalChunkOperations})`);
   assert(stats.totalChunksProduced > 0, `totalChunksProduced > 0 (got ${stats.totalChunksProduced})`);
 
+  // ── 13. needsChunking utility ──
+  console.log('\n13. needsChunking utility');
+  assert(chunker.needsChunking('Short text.') === false, 'short text does not need chunking');
+  assert(chunker.needsChunking('') === false, 'empty string does not need chunking');
+  assert(chunker.needsChunking(null) === false, 'null does not need chunking');
+  const longText2 = 'A'.repeat(1025);
+  assert(chunker.needsChunking(longText2) === true, 'text > 1024 chars needs chunking');
+
   // ── Summary ──
   console.log(`\n${'='.repeat(40)}`);
   console.log(`Results: ${passed} passed, ${failed} failed`);
