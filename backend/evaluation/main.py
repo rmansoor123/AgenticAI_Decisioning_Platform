@@ -10,6 +10,7 @@ from routers.ingest import router as ingest_router
 from routers.search import router as search_router
 from routers.evaluate import router as evaluate_router
 from routers.dashboard import router as dashboard_router
+from routers.retrieval_eval import router as retrieval_eval_router
 
 
 @asynccontextmanager
@@ -41,6 +42,7 @@ app.include_router(ingest_router)
 app.include_router(search_router)
 app.include_router(evaluate_router)
 app.include_router(dashboard_router)
+app.include_router(retrieval_eval_router)
 
 
 @app.get("/health")

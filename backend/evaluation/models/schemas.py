@@ -109,3 +109,19 @@ class MetricsHistoryPoint(BaseModel):
     context_precision: float
     groundedness: float
     faithfulness: float
+
+
+# ── Retrieval Evaluation ─────────────────────────────────────────────────────
+
+class RetrievalEvalRequest(BaseModel):
+    retrieved_ids: list[str]
+    relevant_ids: list[str]
+    query: str | None = None
+    k: int = 5
+
+
+class RetrievalEvalResponse(BaseModel):
+    hit_rate: float
+    mrr: float
+    ndcg_at_k: float
+    k: int
