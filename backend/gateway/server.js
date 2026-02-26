@@ -351,6 +351,8 @@ import itemSetupRouter from '../services/business/item-setup/index.js';
 import pricingRouter from '../services/business/pricing/index.js';
 import profileUpdatesRouter from '../services/business/profile-updates/index.js';
 import returnsRouter from '../services/business/returns/index.js';
+import crossDomainRouter, { setCrossDomainAgent } from '../services/autonomous/cross-domain-router.js';
+import policyEvolutionRouter, { setPolicyEvolutionAgent } from '../services/autonomous/policy-evolution-router.js';
 
 const app = express();
 const server = createServer(app);
@@ -402,6 +404,21 @@ import { buildFromSellers } from '../graph/relationship-builder.js';
 const graphEngine = getGraphEngine();
 buildFromSellers();
 console.log(`Graph built: ${graphEngine.nodes.size} nodes, ${graphEngine.edges.size} edges`);
+
+// Initialize Autonomous Agents
+import { getCrossDomainAgent } from '../agents/specialized/cross-domain-agent.js';
+import { getPolicyEvolutionAgent } from '../agents/specialized/policy-evolution-agent.js';
+import { orchestrator } from '../agents/core/agent-orchestrator.js';
+
+const crossDomainAgent = getCrossDomainAgent();
+const policyEvolutionAgent = getPolicyEvolutionAgent();
+orchestrator.registerAgent(crossDomainAgent);
+orchestrator.registerAgent(policyEvolutionAgent);
+setCrossDomainAgent(crossDomainAgent);
+setPolicyEvolutionAgent(policyEvolutionAgent);
+crossDomainAgent.start();
+policyEvolutionAgent.start();
+console.log('Autonomous agents started: Cross-Domain Correlation, Policy Evolution');
 
 // ============================================================================
 // API ROUTES
@@ -624,6 +641,10 @@ app.use('/api/streaming', streamingRouter);
 // Graph Database
 app.use('/api/graph', graphRouter);
 
+// Autonomous Agents
+app.use('/api/agents/cross-domain', crossDomainRouter);
+app.use('/api/agents/policy-evolution', policyEvolutionRouter);
+
 // ============================================================================
 // METRICS & DASHBOARD ENDPOINTS
 // ============================================================================
@@ -823,6 +844,14 @@ app.use((err, req, res, next) => {
 // START SERVER
 // ============================================================================
 
+// Graceful shutdown for autonomous agents
+process.on('SIGTERM', () => {
+  console.log('Shutting down autonomous agents...');
+  crossDomainAgent.stop();
+  policyEvolutionAgent.stop();
+  server.close(() => process.exit(0));
+});
+
 server.listen(PORT, () => {
   console.log(`
 ╔═══════════════════════════════════════════════════════════════╗
@@ -858,6 +887,8 @@ server.listen(PORT, () => {
 ║   • Returns            /api/returns                      ║
 ║   • Streaming Engine   /api/streaming                    ║
 ║   • Graph Database     /api/graph                        ║
+║   • Cross-Domain Agent /api/agents/cross-domain          ║
+║   • Policy Evolution   /api/agents/policy-evolution      ║
 ║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
   `);

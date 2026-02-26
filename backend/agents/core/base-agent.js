@@ -52,7 +52,9 @@ const AGENT_PROMPT_MAP = {
   'SELLER_ONBOARDING': 'seller-onboarding',
   'FRAUD_INVESTIGATOR': 'fraud-investigation',
   'ALERT_TRIAGE': 'alert-triage',
-  'RULE_OPTIMIZER': 'rule-optimization'
+  'RULE_OPTIMIZER': 'rule-optimization',
+  'CROSS_DOMAIN_CORRELATION': 'cross-domain',
+  'POLICY_EVOLUTION': 'policy-evolution'
 };
 
 export class BaseAgent {
