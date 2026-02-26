@@ -9,6 +9,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { db_ops } from '../../shared/common/database.js';
+import { getChunker } from './chunker.js';
 
 // ── Valid namespaces ─────────────────────────────────────────────────────────
 const VALID_NAMESPACES = new Set([
@@ -135,7 +136,11 @@ class KnowledgeBase {
         riskScore: record.riskScore !== undefined ? record.riskScore : null,
         timestamp: record.timestamp || now,
         source: record.source || null,
-        tokens
+        tokens,
+        // Parent document retrieval fields (set when entry is a chunk)
+        parentDocumentId: record.parentDocumentId || null,
+        chunkIndex: record.chunkIndex !== undefined ? record.chunkIndex : null,
+        totalChunks: record.totalChunks !== undefined ? record.totalChunks : null
       };
 
       db_ops.insert('knowledge_entries', 'knowledge_id', knowledgeId, entry);
@@ -229,6 +234,85 @@ class KnowledgeBase {
       .filter(e => e.sellerId === sellerId)
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
       .slice(0, limit);
+  }
+
+  /**
+   * Store a full document AND its chunks for parent document retrieval.
+   * The full document is stored in 'knowledge_documents' so it can be retrieved
+   * when any of its chunks match a search query.
+   *
+   * @param {string} namespace - One of the valid namespaces
+   * @param {Object} record - Record with at least a 'text' field
+   * @returns {{ documentId: string, chunkIds: string[] }}
+   */
+  addDocumentWithChunks(namespace, record) {
+    if (!VALID_NAMESPACES.has(namespace)) {
+      throw new Error(`Invalid namespace: "${namespace}". Must be one of: ${[...VALID_NAMESPACES].join(', ')}`);
+    }
+
+    const documentId = `DOC-${uuidv4()}`;
+    const now = new Date().toISOString();
+    const text = record.text || '';
+
+    // Store the full document in knowledge_documents
+    const docEntry = {
+      documentId,
+      namespace,
+      text,
+      category: record.category || null,
+      sellerId: record.sellerId || null,
+      domain: record.domain || null,
+      source: record.source || null,
+      timestamp: record.timestamp || now,
+      chunkCount: 0 // updated below
+    };
+
+    // Chunk the text using the adaptive chunker
+    const chunker = getChunker();
+    const chunks = chunker.chunk(text, {
+      parentId: documentId,
+      namespace,
+      sellerId: record.sellerId,
+      domain: record.domain,
+      category: record.category
+    });
+
+    docEntry.chunkCount = chunks.length;
+
+    // Persist the full document
+    db_ops.insert('knowledge_documents', 'document_id', documentId, docEntry);
+
+    // Store each chunk as a knowledge entry via the existing addKnowledge method
+    const chunkIds = [];
+    for (const chunk of chunks) {
+      const chunkRecords = [{
+        text: chunk.text,
+        category: record.category || null,
+        sellerId: record.sellerId || null,
+        domain: record.domain || null,
+        source: record.source || null,
+        timestamp: record.timestamp || now,
+        parentDocumentId: documentId,
+        chunkIndex: chunk.chunkIndex,
+        totalChunks: chunk.totalChunks
+      }];
+      const ids = this.addKnowledge(namespace, chunkRecords);
+      chunkIds.push(...ids);
+    }
+
+    return { documentId, chunkIds };
+  }
+
+  /**
+   * Retrieve a full parent document by its documentId.
+   *
+   * @param {string} documentId - The DOC-{uuid} identifier
+   * @returns {Object|null} The document object, or null if not found
+   */
+  getParentDocument(documentId) {
+    const row = db_ops.getById('knowledge_documents', 'document_id', documentId);
+    if (!row) return null;
+    return row.data || row;
   }
 
   /**
