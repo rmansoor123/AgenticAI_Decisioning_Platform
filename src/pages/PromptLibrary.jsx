@@ -43,7 +43,7 @@ const PHASE_COLORS = {
 function renderMarkdown(text) {
   if (!text) return '';
   return text
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
     .replace(/^### (.+)$/gm, '<h3 class="text-lg font-semibold text-white mt-4 mb-2">$1</h3>')
     .replace(/^## (.+)$/gm, '<h2 class="text-xl font-bold text-white mt-6 mb-3">$1</h2>')
     .replace(/^# (.+)$/gm, '<h1 class="text-2xl font-bold text-white mt-6 mb-4">$1</h1>')
@@ -94,18 +94,20 @@ export default function PromptLibrary() {
       setSelectedPrompt(null);
       return;
     }
+    let cancelled = false;
     const fetchPrompt = async () => {
       try {
         const res = await fetch(`${API_BASE}/prompts/${selectedId}`);
         const data = await res.json();
-        if (data.success) {
+        if (!cancelled && data.success) {
           setSelectedPrompt(data.data);
         }
       } catch (error) {
-        console.error('Error fetching prompt:', error);
+        if (!cancelled) console.error('Error fetching prompt:', error);
       }
     };
     fetchPrompt();
+    return () => { cancelled = true; };
   }, [selectedId]);
 
   const filteredPrompts = prompts.filter(p => {
@@ -171,7 +173,7 @@ export default function PromptLibrary() {
   const handleSaveConfirm = async () => {
     try {
       if (creating) {
-        await fetch(`${API_BASE}/prompts`, {
+        const res = await fetch(`${API_BASE}/prompts`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -182,11 +184,17 @@ export default function PromptLibrary() {
             content: editContent,
           }),
         });
+        const result = await res.json();
+        if (!result.success) {
+          console.error('Save failed:', result.error);
+          setModal(null);
+          return;
+        }
         await fetchPrompts();
         setSelectedId(newId);
         setCreating(false);
       } else {
-        await fetch(`${API_BASE}/prompts/${selectedId}`, {
+        const res = await fetch(`${API_BASE}/prompts/${selectedId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -196,11 +204,16 @@ export default function PromptLibrary() {
             content: editContent,
           }),
         });
+        const result = await res.json();
+        if (!result.success) {
+          console.error('Update failed:', result.error);
+          setModal(null);
+          return;
+        }
         await fetchPrompts();
-        setSelectedId(selectedId);
         // Refetch the selected prompt to get updated data
-        const res = await fetch(`${API_BASE}/prompts/${selectedId}`);
-        const data = await res.json();
+        const detailRes = await fetch(`${API_BASE}/prompts/${selectedId}`);
+        const data = await detailRes.json();
         if (data.success) {
           setSelectedPrompt(data.data);
         }
@@ -214,7 +227,13 @@ export default function PromptLibrary() {
 
   const handleDeleteConfirm = async () => {
     try {
-      await fetch(`${API_BASE}/prompts/${selectedId}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/prompts/${selectedId}`, { method: 'DELETE' });
+      const result = await res.json();
+      if (!result.success) {
+        console.error('Delete failed:', result.error);
+        setModal(null);
+        return;
+      }
       await fetchPrompts();
       setSelectedId(null);
       setSelectedPrompt(null);
@@ -461,8 +480,9 @@ export default function PromptLibrary() {
                   Cancel
                 </button>
                 <button
-                  onClick={() => setModal('save')}
-                  className="px-4 py-2 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg text-sm font-medium hover:bg-emerald-500/30 transition-all"
+                  onClick={() => { if (newId.trim() && editContent.trim()) setModal('save'); }}
+                  disabled={!newId.trim() || !editContent.trim()}
+                  className={`px-4 py-2 border rounded-lg text-sm font-medium transition-all ${newId.trim() && editContent.trim() ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/30' : 'bg-gray-700/30 text-gray-500 border-gray-600 cursor-not-allowed'}`}
                 >
                   Save
                 </button>
@@ -662,7 +682,7 @@ export default function PromptLibrary() {
               </button>
               <button
                 onClick={handleDeleteConfirm}
-                className="px-4 py-2 bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg text-sm font-medium hover:bg-red-500/20 transition-all"
+                className="px-4 py-2 bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg text-sm font-medium hover:bg-red-500/30 transition-all"
               >
                 Delete
               </button>
