@@ -7,7 +7,7 @@
  */
 
 import { getGraphEngine } from '../../graph/graph-engine.js';
-import { findRings, riskPropagation, communityDetection } from '../../graph/graph-queries.js';
+import { findRings, riskPropagation, communityDetection, multiHopInvestigate } from '../../graph/graph-queries.js';
 
 /**
  * Helper: Traverse the graph engine to find neighbors of a seller
@@ -165,6 +165,19 @@ export function createGraphTools() {
           };
         } catch (error) {
           return { success: false, error: error.message };
+        }
+      },
+    },
+
+    graph_multi_hop_investigate: {
+      name: 'graph_multi_hop_investigate',
+      description: 'Traverse up to 3 hops on high-weight edges, collecting risk signals for network-level risk assessment',
+      handler: async ({ sellerId, maxHops = 3, minWeight = 0.7 }) => {
+        try {
+          const result = multiHopInvestigate(sellerId, maxHops, minWeight);
+          return { success: true, data: result };
+        } catch (e) {
+          return { success: false, error: e.message, data: { evidenceChain: [], totalRiskSignals: 0 } };
         }
       },
     },
