@@ -6,7 +6,7 @@
  */
 
 import express from 'express';
-import { readFileSync, writeFileSync, unlinkSync, mkdirSync, existsSync } from 'fs';
+import { writeFileSync, unlinkSync, mkdirSync, existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getPromptRegistry } from '../../agents/core/prompt-registry.js';
@@ -94,6 +94,9 @@ router.post('/', (req, res) => {
     if (!id) {
       return res.status(400).json({ success: false, error: 'id is required' });
     }
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) {
+      return res.status(400).json({ success: false, error: 'id must contain only lowercase letters, numbers, and hyphens' });
+    }
     if (!agent) {
       return res.status(400).json({ success: false, error: 'agent is required' });
     }
@@ -149,6 +152,9 @@ router.post('/', (req, res) => {
 
     // Return the created prompt
     const created = registry.getPromptById(id);
+    if (!created) {
+      return res.status(500).json({ success: false, error: 'Prompt was written but failed to load into registry' });
+    }
     res.status(201).json({ success: true, data: created });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -224,6 +230,9 @@ router.put('/:id', (req, res) => {
 
     // Return the updated prompt
     const updated = registry.getPromptById(req.params.id);
+    if (!updated) {
+      return res.status(500).json({ success: false, error: 'Prompt was written but failed to load into registry' });
+    }
     res.json({ success: true, data: updated });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
