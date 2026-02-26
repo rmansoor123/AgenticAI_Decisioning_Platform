@@ -338,6 +338,7 @@ import executionRouter from '../services/decision-engine/execution/index.js';
 import abTestingRouter from '../services/experimentation/ab-testing/index.js';
 import simulationRouter from '../services/experimentation/simulation/index.js';
 import agentsRouter from '../services/agents/index.js';
+import promptsRouter from '../services/prompts/index.js';
 import { getEvalTracker } from '../agents/core/eval-tracker.js';
 import riskProfileRouter from '../services/risk-profile/index.js';
 import observabilityRouter from '../services/observability/index.js';
@@ -531,6 +532,9 @@ app.use('/api/simulation', simulationRouter);
 
 // Agentic AI
 app.use('/api/agents', agentsRouter);
+
+// Prompt Library
+app.use('/api/prompts', promptsRouter);
 
 // ── Eval Tracking API ──────────────────────────────────────────────────────
 
