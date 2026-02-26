@@ -32,6 +32,7 @@ class LLMClient {
       errors: 0,
       totalLatencyMs: 0
     };
+    this.repairStats = { attempts: 0, successes: 0 };
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
     const useLLM = process.env.USE_LLM === 'true';
@@ -139,6 +140,96 @@ class LLMClient {
     }
 
     return steps;
+  }
+
+  /**
+   * Attempt to parse JSON from LLM text output.
+   * Handles plain JSON, markdown ```json blocks, and plain ``` blocks.
+   * @param {string} text - Raw LLM output
+   * @returns {Object|Array|null} Parsed JSON or null on failure
+   */
+  _tryParseJson(text) {
+    if (!text) return null;
+
+    // Try extracting from markdown code blocks first (```json ... ``` or ``` ... ```)
+    const codeBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+    if (codeBlockMatch) {
+      try {
+        return JSON.parse(codeBlockMatch[1].trim());
+      } catch (e) {
+        // Fall through to general extraction
+      }
+    }
+
+    // Try to extract a JSON object { ... }
+    const objMatch = text.match(/\{[\s\S]*\}/);
+    if (objMatch) {
+      try {
+        return JSON.parse(objMatch[0]);
+      } catch (e) {
+        // Fall through
+      }
+    }
+
+    // Try to extract a JSON array [ ... ]
+    const arrMatch = text.match(/\[[\s\S]*\]/);
+    if (arrMatch) {
+      try {
+        return JSON.parse(arrMatch[0]);
+      } catch (e) {
+        // Fall through
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Call LLM and parse JSON from the response, with one repair retry on parse failure.
+   *
+   * Flow:
+   *   1. If LLM not enabled, return fallback immediately.
+   *   2. Call this.complete() and try to parse JSON from the response.
+   *   3. If parse fails, build a repair prompt with the raw output + expected schema,
+   *      call complete() again (max 1 repair = 2 total LLM calls).
+   *   4. Track repair success rate in this.repairStats.
+   *   5. If both fail, return fallback.
+   *
+   * @param {string} systemPrompt - System prompt for LLM
+   * @param {string} userPrompt - User prompt for LLM
+   * @param {Object} schema - Expected JSON schema (used in repair prompt)
+   * @param {*} fallback - Value to return if all parsing fails
+   * @returns {Promise<Object>} Parsed JSON or fallback
+   */
+  async completeWithJsonRetry(systemPrompt, userPrompt, schema, fallback) {
+    if (!this.enabled) return fallback;
+
+    // First attempt
+    const firstResponse = await this.complete(systemPrompt, userPrompt);
+    if (!firstResponse) return fallback;
+
+    const firstParsed = this._tryParseJson(firstResponse.content);
+    if (firstParsed !== null) return firstParsed;
+
+    // First parse failed — attempt repair
+    this.repairStats.attempts++;
+
+    const repairPrompt =
+      `The previous response could not be parsed as valid JSON.\n\n` +
+      `Raw output:\n${firstResponse.content}\n\n` +
+      `Expected JSON schema:\n${JSON.stringify(schema, null, 2)}\n\n` +
+      `Please respond with ONLY valid JSON matching the schema above. No explanation, no markdown.`;
+
+    const repairResponse = await this.complete(systemPrompt, repairPrompt);
+    if (!repairResponse) return fallback;
+
+    const repairParsed = this._tryParseJson(repairResponse.content);
+    if (repairParsed !== null) {
+      this.repairStats.successes++;
+      return repairParsed;
+    }
+
+    return fallback;
   }
 
   /**
