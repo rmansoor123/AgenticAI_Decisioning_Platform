@@ -27,6 +27,7 @@ import ProfileUpdates from './pages/ProfileUpdates'
 import Returns from './pages/Returns'
 import StreamingPipeline from './pages/StreamingPipeline'
 import RAGEvaluation from './pages/RAGEvaluation'
+import PromptLibrary from './pages/PromptLibrary'
 
 const API_BASE = '/api'
 const WS_URL = ((window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host + '/ws')
@@ -181,6 +182,7 @@ function App() {
           <Route path="/returns" element={<Returns />} />
           <Route path="/streaming" element={<StreamingPipeline />} />
           <Route path="/rag-evaluation" element={<RAGEvaluation />} />
+          <Route path="/prompt-library" element={<PromptLibrary />} />
         </Routes>
       </Layout>
     </BrowserRouter>
