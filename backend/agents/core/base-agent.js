@@ -35,6 +35,8 @@ import { getThresholdManager } from './threshold-manager.js';
 import { getPolicyEngine } from './policy-engine.js';
 import { getEvalTracker } from './eval-tracker.js';
 import { getPromptRegistry } from './prompt-registry.js';
+import { getConfidenceCalibrator } from './confidence-calibrator.js';
+import { getCitationTracker } from './citation-tracker.js';
 
 // Import event bus (only if running in context with WebSocket)
 let eventBus = null;
@@ -100,6 +102,9 @@ export class BaseAgent {
 
     // Chain of thought for current reasoning
     this.currentChain = null;
+
+    // Re-planning: max 1 re-plan cycle per reason() call
+    this._replanCount = 0;
   }
 
   /**
@@ -214,6 +219,24 @@ export class BaseAgent {
 
       // Step 5: OBSERVE - Evaluate results
       thought.result = await this.observe(thought.actions, context);
+
+      // Calibrate confidence
+      if (thought.result?.confidence) {
+        const calibrator = getConfidenceCalibrator();
+        const rawConfidence = thought.result.confidence;
+        thought.result.confidence = calibrator.getCalibratedConfidence(rawConfidence);
+        thought.result._rawConfidence = rawConfidence;
+      }
+
+      // Extract citations from reasoning
+      if (thought.result?.reasoning) {
+        const citationTracker = getCitationTracker();
+        const citations = citationTracker.parseCitations(thought.result.reasoning);
+        if (citations.length > 0) {
+          thought.result.citations = citationTracker.enrichCitations(citations, thought.actions);
+          thought.result.reasoning = citationTracker.stripCitations(thought.result.reasoning);
+        }
+      }
 
       // Step 5.1: REFLECT — critique proposed decision before policy check
       this.traceCollector.startSpan(traceId, 'reflection', {
@@ -881,6 +904,18 @@ export class BaseAgent {
       outcome,
       wasCorrect
     });
+
+    // 5. Record in confidence calibrator
+    try {
+      const calibrator = getConfidenceCalibrator();
+      calibrator.recordPrediction(
+        decisionId,
+        originalDecision?.confidence || 0.5,
+        wasCorrect
+      );
+    } catch (e) {
+      // Calibrator not available
+    }
   }
 
   extractKeyFacts(thought) {
