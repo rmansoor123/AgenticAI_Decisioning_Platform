@@ -6,7 +6,12 @@
  * - Graceful fallback when API key absent
  * - Retry with exponential backoff
  * - Usage/latency stats tracking
+ * - Response caching (hash-based, TTL-aware)
+ * - Cost tracking with per-agent attribution
  */
+
+import { getLLMCache } from './llm-cache.js';
+import { getCostTracker } from './cost-tracker.js';
 
 let Anthropic = null;
 try {
@@ -55,11 +60,32 @@ class LLMClient {
   }
 
   /**
-   * Call Claude with system + user prompts
-   * Returns { content, usage, latencyMs, toolUse } or null on failure
+   * Call Claude with system + user prompts.
+   * Returns { content, usage, latencyMs, toolUse, cached? } or null on failure.
+   *
+   * Options:
+   *   - model: override model
+   *   - maxTokens: override max tokens
+   *   - temperature: override temperature
+   *   - agentId: caller agent ID for cost attribution
+   *   - skipCache: if true, bypass response cache
    */
   async complete(systemPrompt, userPrompt, options = {}) {
     if (!this.enabled) return null;
+
+    const model = options.model || MODEL;
+    const temperature = options.temperature ?? TEMPERATURE;
+    const agentId = options.agentId || 'SYSTEM';
+
+    // Check cache first (unless explicitly skipped)
+    if (!options.skipCache) {
+      const cache = getLLMCache();
+      const cached = cache.get(model, temperature, systemPrompt, userPrompt);
+      if (cached) {
+        this.stats.calls++;
+        return cached;
+      }
+    }
 
     const startTime = Date.now();
     let lastError = null;
@@ -67,9 +93,9 @@ class LLMClient {
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
         const response = await this.client.messages.create({
-          model: options.model || MODEL,
+          model,
           max_tokens: options.maxTokens || MAX_TOKENS,
-          temperature: options.temperature ?? TEMPERATURE,
+          temperature,
           system: systemPrompt,
           messages: [{ role: 'user', content: userPrompt }]
         });
@@ -82,6 +108,10 @@ class LLMClient {
         this.stats.totalTokens += inputTokens + outputTokens;
         this.stats.totalLatencyMs += latencyMs;
 
+        // Record cost
+        const costTracker = getCostTracker();
+        costTracker.recordCost(agentId, model, inputTokens, outputTokens, latencyMs);
+
         const content = response.content
           .filter(b => b.type === 'text')
           .map(b => b.text)
@@ -89,12 +119,20 @@ class LLMClient {
 
         const toolUse = response.content.find(b => b.type === 'tool_use') || null;
 
-        return {
+        const result = {
           content,
           usage: { inputTokens, outputTokens },
           latencyMs,
           toolUse
         };
+
+        // Store in cache
+        if (!options.skipCache) {
+          const cache = getLLMCache();
+          cache.set(model, temperature, systemPrompt, userPrompt, result);
+        }
+
+        return result;
       } catch (error) {
         lastError = error;
         const status = error?.status || error?.statusCode;
@@ -242,7 +280,9 @@ class LLMClient {
       ...this.stats,
       avgLatencyMs: this.stats.calls > 0
         ? Math.round(this.stats.totalLatencyMs / this.stats.calls)
-        : 0
+        : 0,
+      cache: getLLMCache().getStats(),
+      cost: getCostTracker().getSystemCost()
     };
   }
 }
