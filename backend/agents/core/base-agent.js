@@ -26,6 +26,7 @@ import {
   buildPlanPrompt,
   buildObservePrompt,
   buildReflectPrompt,
+  buildRePlanPrompt,
   parseLLMJson,
   formatToolCatalog
 } from './prompt-templates.js';
@@ -233,7 +234,17 @@ export class BaseAgent {
         const failures = thought.actions.filter(a => a.result?.success === false);
 
         const originalGoal = plan.goal || thought.reasoning[0]?.understanding || JSON.stringify(input).slice(0, 200);
-        const rePlanPrompt = this.buildRePlanPrompt(originalGoal, successes, failures);
+        const domainKnowledge = this.promptRegistry.getPrompts(this.getPromptKey(), 'think');
+        const toolList = formatToolCatalog(this.tools);
+        const rePlanPrompt = buildRePlanPrompt({
+          agentName: this.name,
+          agentRole: this.role,
+          originalGoal,
+          successes,
+          failures,
+          tools: toolList,
+          domainKnowledge
+        });
 
         let revisedActions = [];
 
@@ -595,42 +606,22 @@ export class BaseAgent {
    * @param {Array} failures - Actions that failed
    * @returns {{ system: string, user: string }}
    */
+  /**
+   * @deprecated Use centralized buildRePlanPrompt from prompt-templates.js instead.
+   * Kept for backward compatibility with any subclass overrides.
+   */
   buildRePlanPrompt(originalGoal, successes, failures) {
-    const toolList = Array.from(this.tools.entries())
-      .map(([name, t]) => `- ${name}: ${t.description}`)
-      .join('\n');
-
-    const system = [
-      `You are ${this.name}, a ${this.role} agent.`,
-      'Your previous plan had a high failure rate. You must create a revised plan.',
-      'Respond in JSON with: { "actions": [{ "tool": "<tool_name>", "params": {}, "rationale": "..." }], "reasoning": "..." }'
-    ].join('\n');
-
-    const successSummary = successes.length > 0
-      ? successes.map(s => `  - ${s.action?.type}: ${JSON.stringify(s.result?.data || {}).slice(0, 200)}`).join('\n')
-      : '  (none)';
-
-    const failureSummary = failures.length > 0
-      ? failures.map(f => `  - ${f.action?.type}: ${f.result?.error || 'failed'}`).join('\n')
-      : '  (none)';
-
-    const user = [
-      `Original goal: ${originalGoal}`,
-      '',
-      'Successful actions:',
-      successSummary,
-      '',
-      'Failed actions:',
-      failureSummary,
-      '',
-      'Available tools:',
-      toolList || '  (none)',
-      '',
-      'Create a revised plan that avoids the failed approaches and tries alternative tools or parameters.',
-      'Return at most 5 actions.'
-    ].join('\n');
-
-    return { system, user };
+    const domainKnowledge = this.promptRegistry.getPrompts(this.getPromptKey(), 'think');
+    const toolList = formatToolCatalog(this.tools);
+    return buildRePlanPrompt({
+      agentName: this.name,
+      agentRole: this.role,
+      originalGoal,
+      successes,
+      failures,
+      tools: toolList,
+      domainKnowledge
+    });
   }
 
   // Evaluate results — LLM synthesizes findings into risk assessment

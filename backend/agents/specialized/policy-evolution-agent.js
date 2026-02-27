@@ -173,7 +173,15 @@ export class PolicyEvolutionAgent extends AutonomousAgent {
         // Try LLM-based clustering if available
         if (this.llmClient?.enabled && items.length > 0) {
           try {
-            const systemPrompt = 'You are a fraud pattern analyst. Cluster the given transactions by common features. Return ONLY valid JSON: {"clusters": [{"features": [{"field": "...", "values": [...], "operator": "GT|LT|IN|EQ"}], "count": N, "reason": "..."}]}';
+            // Load decision prompt from registry (editable via Prompt Library)
+            let decisionContent = '';
+            try {
+              const { getPromptRegistry } = await import('../core/prompt-registry.js');
+              const registry = getPromptRegistry();
+              const decisionPrompt = registry.getPromptById('policy-evolution-decision');
+              decisionContent = decisionPrompt?.content || '';
+            } catch { /* fallback to empty */ }
+            const systemPrompt = decisionContent || `You are a fraud pattern analyst. Return ONLY valid JSON: {"clusters": [{"features": [{"field": "...", "values": [...], "operator": "GT|LT|IN|EQ"}], "count": N, "reason": "..."}]}`;
             const userPrompt = `Cluster these transactions by common fraud patterns:\n${JSON.stringify(items.slice(0, 20))}`;
             const result = await this.llmClient.complete(systemPrompt, userPrompt);
             if (result?.content) {

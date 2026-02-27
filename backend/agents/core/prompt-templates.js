@@ -3,7 +3,14 @@
  *
  * Converts registered tools into LLM-readable descriptions.
  * Defines output schemas so LLM responses are JSON-parseable.
+ *
+ * Phase instructions are loaded from .md files in the prompt registry
+ * (shared/think-phase.md, shared/plan-phase.md, etc.) and injected into
+ * the structural templates here. This makes all prompt content visible
+ * and editable from the Prompt Library UI.
  */
+
+import { getPromptRegistry } from './prompt-registry.js';
 
 /**
  * Format a tool Map into an LLM-readable catalog string.
@@ -69,39 +76,48 @@ export function formatKnowledgeForPrompt(results) {
 
 /**
  * Build the THINK phase prompt.
- * LLM returns: { understanding, key_risks, confidence, suggested_approach }
+ * Phase instructions loaded from shared/think-phase.md in the prompt registry.
+ * LLM returns: { understanding, evidence_based_risks, speculative_risks, missing_information, confidence, suggested_approach }
  */
 export function buildThinkPrompt({ agentName, agentRole, input, recentMemory, knowledgeResults, patternMatches, tools, domainKnowledge }) {
-  const domainSection = domainKnowledge ? `\n\n## Domain Expertise\n${domainKnowledge}\n` : '';
+  const domainSection = domainKnowledge
+    ? `\n<domain_expertise>\n${domainKnowledge}\n</domain_expertise>\n`
+    : '';
 
-  const system = `You are ${agentName}, a ${agentRole} agent in a fraud detection platform.
+  // Load phase instructions from registry (editable via Prompt Library)
+  let phaseInstructions;
+  try {
+    const registry = getPromptRegistry();
+    const phasePrompt = registry.getPromptById('think-phase');
+    phaseInstructions = phasePrompt?.content || '';
+  } catch { phaseInstructions = ''; }
+
+  const system = `<agent_identity>
+You are ${agentName}, a ${agentRole} in an autonomous fraud detection platform.
+You make high-stakes decisions that protect sellers, buyers, and the marketplace.
+</agent_identity>
 ${domainSection}
-Your job is to analyze the input and provide a structured understanding of the situation.
+${phaseInstructions}`;
 
-You MUST return valid JSON with this exact schema:
-{
-  "understanding": "string — your analysis of the situation",
-  "key_risks": ["string array — identified risk factors"],
-  "confidence": 0.0-1.0,
-  "suggested_approach": "string — how you would investigate this"
-}
-
-Return ONLY the JSON object. No markdown, no explanation.`;
-
-  const user = `## Task Input
+  const user = `<task_input>
 ${JSON.stringify(input, null, 2).slice(0, 1500)}
+</task_input>
 
-## Recent Activity in This Session
+<recent_activity>
 ${formatMemoryForPrompt(recentMemory)}
+</recent_activity>
 
-## Similar Patterns from History
+<historical_patterns>
 ${formatPatternsForPrompt(patternMatches)}
+</historical_patterns>
 
-## Relevant Institutional Knowledge
+<institutional_knowledge>
 ${formatKnowledgeForPrompt(knowledgeResults)}
+</institutional_knowledge>
 
-## Available Tools
+<available_tools>
 ${formatToolCatalog(tools)}
+</available_tools>
 
 Analyze this input and return your structured understanding as JSON.`;
 
@@ -110,44 +126,43 @@ Analyze this input and return your structured understanding as JSON.`;
 
 /**
  * Build the PLAN phase prompt.
+ * Phase instructions loaded from shared/plan-phase.md in the prompt registry.
  * LLM returns: { goal, reasoning, actions: [{ tool, params, rationale }] }
  */
 export function buildPlanPrompt({ agentName, agentRole, thinkResult, longTermMemory, tools, input, domainKnowledge }) {
-  const domainSection = domainKnowledge ? `\n\n## Domain Expertise\n${domainKnowledge}\n` : '';
+  const domainSection = domainKnowledge
+    ? `\n<domain_expertise>\n${domainKnowledge}\n</domain_expertise>\n`
+    : '';
 
-  const system = `You are ${agentName}, a ${agentRole} agent. Based on your analysis, decide which tools to use and in what order.
+  // Load phase instructions from registry (editable via Prompt Library)
+  let phaseInstructions;
+  try {
+    const registry = getPromptRegistry();
+    const phasePrompt = registry.getPromptById('plan-phase');
+    phaseInstructions = phasePrompt?.content || '';
+  } catch { phaseInstructions = ''; }
+
+  const system = `<agent_identity>
+You are ${agentName}, a ${agentRole}. Based on your analysis, decide which tools to use and in what order.
+</agent_identity>
 ${domainSection}
+${phaseInstructions}`;
 
-You MUST return valid JSON with this exact schema:
-{
-  "goal": "string — what you are trying to accomplish",
-  "reasoning": "string — why you chose these tools",
-  "actions": [
-    {
-      "tool": "exact_tool_name",
-      "params": { "key": "value" },
-      "rationale": "string — why this tool"
-    }
-  ]
-}
-
-RULES:
-- Only use tools from the Available Tools list below.
-- Maximum 10 actions.
-- Include relevant parameters from the input data.
-- Return ONLY the JSON object. No markdown.`;
-
-  const user = `## Your Analysis
+  const user = `<analysis>
 ${JSON.stringify(thinkResult, null, 2).slice(0, 1000)}
+</analysis>
 
-## Lessons from Past Experience
+<past_experience>
 ${formatMemoryForPrompt(longTermMemory)}
+</past_experience>
 
-## Original Input
+<original_input>
 ${JSON.stringify(input, null, 2).slice(0, 800)}
+</original_input>
 
-## Available Tools
+<available_tools>
 ${formatToolCatalog(tools)}
+</available_tools>
 
 Create your action plan as JSON.`;
 
@@ -156,33 +171,27 @@ Create your action plan as JSON.`;
 
 /**
  * Build the OBSERVE phase prompt.
- * LLM returns: { summary, risk_score, recommendation, confidence, reasoning }
+ * Phase instructions loaded from shared/observe-phase.md in the prompt registry.
+ * LLM returns: { summary, risk_score, recommendation, confidence, reasoning, key_findings, citations }
  */
 export function buildObservePrompt({ agentName, agentRole, actions, input, domainKnowledge }) {
-  const domainSection = domainKnowledge ? `\n\n## Domain Expertise\n${domainKnowledge}\n` : '';
+  const domainSection = domainKnowledge
+    ? `\n<domain_expertise>\n${domainKnowledge}\n</domain_expertise>\n`
+    : '';
 
-  const system = `You are ${agentName}, a ${agentRole} agent. You have completed your investigation. Synthesize all evidence into a final assessment.
+  // Load phase instructions from registry (editable via Prompt Library)
+  let phaseInstructions;
+  try {
+    const registry = getPromptRegistry();
+    const phasePrompt = registry.getPromptById('observe-phase');
+    phaseInstructions = phasePrompt?.content || '';
+  } catch { phaseInstructions = ''; }
+
+  const system = `<agent_identity>
+You are ${agentName}, a ${agentRole}. You have completed your investigation. Synthesize all evidence into a final assessment.
+</agent_identity>
 ${domainSection}
-
-IMPORTANT: When making claims about evidence, cite your sources using [source:tool_name:index] markers.
-- Place the marker immediately after the claim it supports.
-- tool_name must match the exact tool name from the Evidence Gathered section.
-- index is the zero-based position of that tool in the evidence list.
-- Example: "The chargeback rate is 8% [source:chargeback_check:0] which exceeds the 5% threshold."
-- Every factual claim derived from tool output MUST have a citation.
-
-You MUST return valid JSON with this exact schema:
-{
-  "summary": "string — concise summary of findings",
-  "risk_score": 0-100,
-  "recommendation": "APPROVE" | "REVIEW" | "REJECT" | "BLOCK" | "MONITOR",
-  "confidence": 0.0-1.0,
-  "reasoning": "string — detailed explanation of your decision with [source:tool_name:index] citations",
-  "key_findings": ["string array — most important findings with [source:tool_name:index] citations"],
-  "citations": ["string array — list of all sources cited, e.g. tool_name:index"]
-}
-
-Return ONLY the JSON object. No markdown.`;
+${phaseInstructions}`;
 
   const evidenceSummary = actions.map(a => {
     const toolName = a.action?.type || 'unknown';
@@ -191,11 +200,13 @@ Return ONLY the JSON object. No markdown.`;
     return `- ${toolName}: ${success ? 'SUCCESS' : 'FAILED'} — ${data}`;
   }).join('\n');
 
-  const user = `## Original Task
+  const user = `<original_task>
 ${JSON.stringify(input, null, 2).slice(0, 500)}
+</original_task>
 
-## Evidence Gathered
+<evidence_gathered>
 ${evidenceSummary}
+</evidence_gathered>
 
 Synthesize all evidence and return your final assessment as JSON.`;
 
@@ -204,29 +215,28 @@ Synthesize all evidence and return your final assessment as JSON.`;
 
 /**
  * Build the REFLECT phase prompt.
- * LLM returns: { shouldRevise, revisedAction, revisedConfidence, concerns, contraArgument, reflectionConfidence }
+ * Phase instructions loaded from shared/reflect-phase.md in the prompt registry.
+ * LLM returns: { shouldRevise, revisedAction, revisedConfidence, concerns, contraArgument, biasCheck, premortem, reflectionConfidence }
  */
 export function buildReflectPrompt({ agentName, agentRole, input, evidence, proposedDecision, riskScore, confidence, chainOfThought, domainKnowledge }) {
-  const domainSection = domainKnowledge ? `\n\n## Domain Expertise\n${domainKnowledge}\n` : '';
+  const domainSection = domainKnowledge
+    ? `\n<domain_expertise>\n${domainKnowledge}\n</domain_expertise>\n`
+    : '';
 
-  const system = `You are a critical reviewer auditing a ${agentRole} agent's decision in a fraud detection platform.
+  // Load phase instructions from registry (editable via Prompt Library)
+  let phaseInstructions;
+  try {
+    const registry = getPromptRegistry();
+    const phasePrompt = registry.getPromptById('reflect-phase');
+    phaseInstructions = phasePrompt?.content || '';
+  } catch { phaseInstructions = ''; }
+
+  const system = `<agent_identity>
+You are a critical reviewer auditing a ${agentRole} agent's decision in a fraud detection platform.
+You are NOT the agent's ally — you are an independent auditor hired to find mistakes.
+</agent_identity>
 ${domainSection}
-Your job is to find flaws, contradictions, and unjustified assumptions. Be adversarial — actively argue against the proposed decision.
-
-You MUST return valid JSON with this exact schema:
-{
-  "shouldRevise": boolean,
-  "revisedAction": "APPROVE" | "REVIEW" | "REJECT" | "BLOCK" | "MONITOR" | null,
-  "revisedConfidence": 0.0-1.0 or null,
-  "concerns": ["string array of specific concerns"],
-  "contraArgument": "string — strongest case against the current decision",
-  "reflectionConfidence": 0.0-1.0
-}
-
-RULES:
-- Only set shouldRevise to true if there is a clear error or contradiction.
-- Minor concerns are NOT grounds for revision — list them but keep shouldRevise false.
-- Return ONLY the JSON object. No markdown.`;
+${phaseInstructions}`;
 
   const evidenceSummary = (evidence || []).map(a => {
     const toolName = a.action?.type || 'unknown';
@@ -235,19 +245,77 @@ RULES:
     return `- ${toolName}: ${success ? 'OK' : 'FAILED'} — ${data}`;
   }).join('\n');
 
-  const user = `## Original Input
+  const user = `<original_input>
 ${JSON.stringify(input, null, 2).slice(0, 500)}
+</original_input>
 
-## Evidence Gathered
+<evidence_gathered>
 ${evidenceSummary || 'No evidence collected.'}
+</evidence_gathered>
 
-## Proposed Decision
+<proposed_decision>
 - Action: ${proposedDecision?.action || 'UNKNOWN'}
 - Risk Score: ${riskScore ?? 'N/A'}
 - Confidence: ${confidence ?? 'N/A'}
 - Reasoning: ${proposedDecision?.reason || proposedDecision?.reasoning || 'none provided'}
+</proposed_decision>
 
-Critically evaluate this decision. What could go wrong? Should it be revised?`;
+Critically evaluate this decision using the adversarial review framework above.`;
+
+  return { system, user };
+}
+
+/**
+ * Build the RE-PLAN phase prompt.
+ * Phase instructions loaded from shared/replan-phase.md in the prompt registry.
+ * Called when >50% of actions fail. LLM returns: { actions, reasoning, avoidance_notes }
+ */
+export function buildRePlanPrompt({ agentName, agentRole, originalGoal, successes, failures, tools, domainKnowledge }) {
+  const domainSection = domainKnowledge
+    ? `\n<domain_expertise>\n${domainKnowledge}\n</domain_expertise>\n`
+    : '';
+
+  const toolList = tools || 'No tools available.';
+
+  // Load phase instructions from registry (editable via Prompt Library)
+  let phaseInstructions;
+  try {
+    const registry = getPromptRegistry();
+    const phasePrompt = registry.getPromptById('replan-phase');
+    phaseInstructions = phasePrompt?.content || '';
+  } catch { phaseInstructions = ''; }
+
+  const system = `<agent_identity>
+You are ${agentName}, a ${agentRole}. Your previous plan had a high failure rate. You must create a revised plan.
+</agent_identity>
+${domainSection}
+${phaseInstructions}`;
+
+  const successSummary = successes.length > 0
+    ? successes.map(s => `  - ${s.action?.type}: ${JSON.stringify(s.result?.data || {}).slice(0, 200)}`).join('\n')
+    : '  (none)';
+
+  const failureSummary = failures.length > 0
+    ? failures.map(f => `  - ${f.action?.type}: ${f.result?.error || 'failed'}`).join('\n')
+    : '  (none)';
+
+  const user = `<original_goal>
+${originalGoal}
+</original_goal>
+
+<successful_actions>
+${successSummary}
+</successful_actions>
+
+<failed_actions>
+${failureSummary}
+</failed_actions>
+
+<available_tools>
+${toolList}
+</available_tools>
+
+Create a revised plan that avoids the failed approaches. Return at most 5 actions.`;
 
   return { system, user };
 }

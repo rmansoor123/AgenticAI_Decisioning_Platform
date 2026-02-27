@@ -333,7 +333,15 @@ export class CrossDomainCorrelationAgent extends AutonomousAgent {
           // Try LLM prediction if available
           if (this.llmClient?.enabled) {
             try {
-              const systemPrompt = 'You are a fraud analyst. Predict the next likely action in this attack sequence. Return ONLY valid JSON: {"predictedDomain":"...", "predictedEventTypes":["..."], "confidence":0.0-1.0}';
+              // Load decision prompt from registry (editable via Prompt Library)
+              let decisionContent = '';
+              try {
+                const { getPromptRegistry } = await import('../core/prompt-registry.js');
+                const registry = getPromptRegistry();
+                const decisionPrompt = registry.getPromptById('cross-domain-decision');
+                decisionContent = decisionPrompt?.content || '';
+              } catch { /* fallback to empty */ }
+              const systemPrompt = decisionContent || `You are a cross-domain fraud analyst. Return ONLY valid JSON: {"predictedDomain":"...", "predictedEventTypes":["..."], "confidence":0.0-1.0}`;
               const userPrompt = `Pattern: ${pattern.name}. Steps completed: ${completed}/${pattern.sequence.length}. Next expected step: domain=${nextStep.domain}, events=${nextStep.eventTypes.join(',')}. Seller: ${sellerId}`;
 
               const result = await this.llmClient.complete(systemPrompt, userPrompt);

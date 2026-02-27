@@ -6,12 +6,12 @@
  */
 
 const SECTION_TEMPLATES = {
-  system: (content) => `## System Instructions\n${content}`,
-  task: (content) => `## Current Task\n${content}`,
-  shortTermMemory: (content) => `## Recent Context\n${content}`,
-  ragResults: (content) => `## Similar Historical Cases\n${content}`,
-  longTermMemory: (content) => `## Learned Patterns & Insights\n${content}`,
-  domainContext: (content) => `## Domain Context\n${content}`
+  system: (content) => `<system_instructions>\n${content}\n</system_instructions>`,
+  task: (content) => `<current_task>\n${content}\n</current_task>`,
+  shortTermMemory: (content) => `<recent_context>\n${content}\n</recent_context>`,
+  ragResults: (content) => `<historical_cases>\n${content}\n</historical_cases>`,
+  longTermMemory: (content) => `<learned_patterns>\n${content}\n</learned_patterns>`,
+  domainContext: (content) => `<domain_context>\n${content}\n</domain_context>`
 };
 
 export class PromptBuilder {
@@ -34,7 +34,7 @@ export class PromptBuilder {
       }
     }
 
-    return parts.join('\n\n---\n\n');
+    return parts.join('\n\n');
   }
 
   /**

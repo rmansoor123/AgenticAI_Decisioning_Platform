@@ -9,6 +9,12 @@ const AGENT_LABELS = {
   'fraud-investigation': 'Fraud Investigation',
   'alert-triage': 'Alert Triage',
   'rule-optimization': 'Rule Optimization',
+  'cross-domain': 'Cross-Domain Correlation',
+  'policy-evolution': 'Policy Evolution',
+  'payout-risk': 'Payout Risk',
+  'listing-intelligence': 'Listing Intelligence',
+  'profile-mutation': 'Profile Mutation',
+  'returns-abuse': 'Returns Abuse',
 };
 
 const AGENT_COLORS = {
@@ -17,6 +23,12 @@ const AGENT_COLORS = {
   'fraud-investigation': 'text-red-400',
   'alert-triage': 'text-amber-400',
   'rule-optimization': 'text-purple-400',
+  'cross-domain': 'text-cyan-400',
+  'policy-evolution': 'text-pink-400',
+  'payout-risk': 'text-orange-400',
+  'listing-intelligence': 'text-indigo-400',
+  'profile-mutation': 'text-teal-400',
+  'returns-abuse': 'text-rose-400',
 };
 
 const AGENT_BG_COLORS = {
@@ -25,6 +37,12 @@ const AGENT_BG_COLORS = {
   'fraud-investigation': 'bg-red-500/20 text-red-400 border-red-500/30',
   'alert-triage': 'bg-amber-500/20 text-amber-400 border-amber-500/30',
   'rule-optimization': 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+  'cross-domain': 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
+  'policy-evolution': 'bg-pink-500/20 text-pink-400 border-pink-500/30',
+  'payout-risk': 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+  'listing-intelligence': 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30',
+  'profile-mutation': 'bg-teal-500/20 text-teal-400 border-teal-500/30',
+  'returns-abuse': 'bg-rose-500/20 text-rose-400 border-rose-500/30',
 };
 
 const PRIORITY_COLORS = {
@@ -38,6 +56,8 @@ const PHASE_COLORS = {
   plan: 'bg-purple-500/20 text-purple-400',
   observe: 'bg-emerald-500/20 text-emerald-400',
   reflect: 'bg-amber-500/20 text-amber-400',
+  decide: 'bg-red-500/20 text-red-400',
+  replan: 'bg-orange-500/20 text-orange-400',
 };
 
 function renderMarkdown(text) {

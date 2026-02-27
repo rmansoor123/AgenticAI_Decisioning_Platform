@@ -21,8 +21,8 @@ const router = express.Router();
 // VALIDATION CONSTANTS
 // ============================================================================
 
-const VALID_AGENTS = ['shared', 'seller-onboarding', 'fraud-investigation', 'alert-triage', 'rule-optimization'];
-const VALID_PHASES = ['think', 'plan', 'observe', 'reflect'];
+const VALID_AGENTS = ['shared', 'seller-onboarding', 'fraud-investigation', 'alert-triage', 'rule-optimization', 'cross-domain', 'policy-evolution', 'payout-risk', 'listing-intelligence', 'profile-mutation', 'returns-abuse'];
+const VALID_PHASES = ['think', 'plan', 'observe', 'reflect', 'decide', 'replan'];
 const VALID_PRIORITIES = ['high', 'medium', 'low'];
 
 // ============================================================================

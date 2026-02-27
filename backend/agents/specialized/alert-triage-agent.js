@@ -246,7 +246,15 @@ export class AlertTriageAgent extends BaseAgent {
     // Try LLM-enhanced routing
     if (this.llmClient?.enabled && alerts.length > 0 && analysts.length > 0) {
       try {
-        const systemPrompt = 'You are an alert triage agent. Route alerts to the best analysts. Return ONLY valid JSON array: [{"alertId":"...", "analystId":"...", "analystName":"...", "team":"...", "priority":"...", "reason":"..."}]';
+        // Load decision prompt from registry (editable via Prompt Library)
+        let decisionContent = '';
+        try {
+          const { getPromptRegistry } = await import('../core/prompt-registry.js');
+          const registry = getPromptRegistry();
+          const decisionPrompt = registry.getPromptById('triage-decision');
+          decisionContent = decisionPrompt?.content || '';
+        } catch { /* fallback to empty */ }
+        const systemPrompt = decisionContent || `You are the alert triage agent. Return ONLY valid JSON array: [{"alertId":"...", "analystId":"...", "analystName":"...", "team":"...", "priority":"...", "reason":"..."}]`;
         const userPrompt = `Alerts (top 5): ${JSON.stringify(alerts.slice(0, 5).map(a => ({ alertId: a.alertId || a.groupId, alertType: a.alertType, priorityLevel: a.priorityLevel })))}\nAnalysts: ${JSON.stringify(analysts.map(a => ({ id: a.id, name: a.name, team: a.team, currentLoad: a.currentLoad, maxLoad: a.maxLoad })))}`;
 
         const result = await this.llmClient.complete(systemPrompt, userPrompt);

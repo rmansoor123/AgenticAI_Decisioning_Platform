@@ -605,7 +605,15 @@ export class FraudInvestigationAgent extends BaseAgent {
     // Try LLM-enhanced recommendation
     if (this.llmClient?.enabled) {
       try {
-        const systemPrompt = 'You are a fraud investigation agent. Given risk factors, recommend BLOCK, REVIEW, MONITOR, or APPROVE. Return ONLY valid JSON: {"action":"...", "confidence":0.0-1.0, "reason":"..."}';
+        // Load decision prompt from registry (editable via Prompt Library)
+        let decisionContent = '';
+        try {
+          const { getPromptRegistry } = await import('../core/prompt-registry.js');
+          const registry = getPromptRegistry();
+          const decisionPrompt = registry.getPromptById('investigation-decision');
+          decisionContent = decisionPrompt?.content || '';
+        } catch { /* fallback to empty */ }
+        const systemPrompt = decisionContent || `You are the fraud investigation agent. Return ONLY valid JSON: {"action":"BLOCK|REVIEW|MONITOR|APPROVE", "confidence":0.0-1.0, "reason":"..."}`;
         const userPrompt = `Risk score: ${risk.score}/100, Critical factors: ${risk.criticalFactors}, High factors: ${risk.highFactors}\nFactors: ${factors.map(f => `${f.factor} (${f.severity})`).join(', ')}`;
 
         const result = await this.llmClient.complete(systemPrompt, userPrompt);

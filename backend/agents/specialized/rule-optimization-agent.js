@@ -207,7 +207,15 @@ export class RuleOptimizationAgent extends BaseAgent {
           type: a.action.type,
           data: a.result?.data ? JSON.stringify(a.result.data).slice(0, 500) : null
         }));
-        const systemPrompt = 'You are a rule optimization agent. Synthesize the data into insights and recommendations. Return ONLY valid JSON: {"insights":[{"type":"string","description":"string"}], "recommendations":[{"type":"string","priority":"HIGH|MEDIUM|LOW","description":"string"}]}';
+        // Load decision prompt from registry (editable via Prompt Library)
+        let decisionContent = '';
+        try {
+          const { getPromptRegistry } = await import('../core/prompt-registry.js');
+          const registry = getPromptRegistry();
+          const decisionPrompt = registry.getPromptById('optimization-decision');
+          decisionContent = decisionPrompt?.content || '';
+        } catch { /* fallback to empty */ }
+        const systemPrompt = decisionContent || `You are the rule optimization agent. Return ONLY valid JSON: {"insights":[{"type":"string","description":"string"}], "recommendations":[{"type":"string","priority":"HIGH|MEDIUM|LOW","description":"string"}]}`;
         const userPrompt = `Optimization data:\n${JSON.stringify(actionsData)}`;
 
         const result = await this.llmClient.complete(systemPrompt, userPrompt);

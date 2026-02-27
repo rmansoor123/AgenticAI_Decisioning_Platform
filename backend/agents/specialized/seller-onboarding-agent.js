@@ -818,7 +818,15 @@ export class SellerOnboardingAgent extends BaseAgent {
     // Try LLM-enhanced decision
     if (this.llmClient?.enabled) {
       try {
-        const systemPrompt = 'You are a seller onboarding agent. Weigh the verification evidence and decide APPROVE, REVIEW, or REJECT. Return ONLY valid JSON: {"action":"...", "confidence":0.0-1.0, "reason":"..."}';
+        // Load decision prompt from registry (editable via Prompt Library)
+        let decisionContent = '';
+        try {
+          const { getPromptRegistry } = await import('../core/prompt-registry.js');
+          const registry = getPromptRegistry();
+          const decisionPrompt = registry.getPromptById('onboarding-decision');
+          decisionContent = decisionPrompt?.content || '';
+        } catch { /* fallback to empty */ }
+        const systemPrompt = decisionContent || `You are the final decision authority for seller onboarding. Return ONLY valid JSON: {"action":"APPROVE|REVIEW|REJECT", "confidence":0.0-1.0, "reason":"..."}`;
         const userPrompt = `Risk score: ${risk.score}/100, Critical: ${risk.criticalFactors}, High: ${risk.highFactors}, Positive: ${risk.positiveFactors || 0}\nFactors: ${factors.map(f => `${f.factor} (${f.severity}, score:${f.score})`).join(', ')}`;
 
         const result = await this.llmClient.complete(systemPrompt, userPrompt);

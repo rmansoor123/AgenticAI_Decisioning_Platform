@@ -3,26 +3,57 @@ id: consortium-signals
 agent: fraud-investigation
 phases: [think, observe]
 priority: medium
-version: 1
+version: 2
 ---
 
 # Consortium and Shared Intelligence
 
-## What Consortium Data Means
-Consortium data is shared fraud intelligence across multiple merchants/platforms. It provides signals you cannot generate from your own data alone.
+## What Consortium Data Is
 
-## Interpreting Consortium Signals
-- **Consortium velocity:** Number of applications or transactions across ALL participating platforms. High consortium velocity means the identity/payment method is being used aggressively across the ecosystem — strong fraud signal.
-- **Shared negative data:** Chargebacks, fraud confirmations, account closures from other platforms. Any confirmed fraud at another platform is a strong signal but not definitive (false positives happen).
-- **Consortium fraud score:** Aggregate risk score across platforms. Treat as HIGH confidence signal — it represents collective intelligence.
+Consortium data is shared fraud intelligence across multiple merchants and platforms. It provides signals you cannot generate from your own data alone — the collective view of an identity, payment method, or device across the entire ecosystem.
 
-## Freshness and Confidence
-- **Data within 24 hours:** Very high confidence. The signal is current and actionable.
-- **Data 1-7 days old:** High confidence. Still very relevant.
-- **Data 7-30 days old:** Medium confidence. May reflect resolved issues.
-- **Data older than 30 days:** Low confidence. Use as context, not as primary decision factor.
+## Signal Interpretation Matrix
+
+<signal_reference>
+| Consortium Signal | Freshness: < 24h | Freshness: 1-7 days | Freshness: 7-30 days | Freshness: > 30 days |
+|---|---|---|---|---|
+| Confirmed fraud at another platform | CRITICAL — act immediately | HIGH — very relevant | MEDIUM — may be resolved | LOW — context only |
+| High velocity across platforms | HIGH — active attack | HIGH — ongoing campaign | MEDIUM — may have stopped | LOW |
+| Chargeback at another merchant | HIGH — pattern indicator | MEDIUM-HIGH | MEDIUM | LOW — single old chargeback is common |
+| Account closure at another platform | MEDIUM — investigate reason | MEDIUM | LOW-MEDIUM | LOW |
+| Consortium fraud score > 80 | CRITICAL | HIGH | MEDIUM-HIGH | MEDIUM |
+| Consortium fraud score 50-79 | HIGH | MEDIUM | MEDIUM | LOW |
+| Consortium fraud score < 50 | LOW | LOW | LOW | Ignore |
+</signal_reference>
 
 ## Cross-Merchant Pattern Detection
-- **Same identity, multiple merchants:** If the same identity is onboarding at 3+ platforms simultaneously, this is a strong synthetic identity or fraud ring indicator.
-- **Same payment method, different identities:** Different people using the same payment method across platforms — indicates shared fraudulent payment instruments.
-- **Velocity across merchants:** Even if each merchant sees low individual velocity, the aggregate velocity across the consortium reveals the true activity level.
+
+<detection_rules>
+SAME IDENTITY, MULTIPLE MERCHANTS:
+- Same name + DOB + SSN at 3+ platforms within 30 days → CRITICAL. Synthetic identity or fraud ring.
+- Same name at 2 platforms → LOW alone. People sell on multiple platforms legitimately.
+- Key differentiator: timing. Simultaneous applications (same week) are suspicious. Staggered over months is normal.
+
+SAME PAYMENT METHOD, DIFFERENT IDENTITIES:
+- Same card/bank account used by 2+ different identities → HIGH. Shared fraudulent payment instruments.
+- Exception: business accounts where multiple authorized users share a corporate card — check if identities are from the same business.
+
+SAME DEVICE, DIFFERENT IDENTITIES:
+- Same device fingerprint across 3+ identities → HIGH. Fraud operation using one machine.
+- Same device across 2 identities → MEDIUM. Could be shared household device.
+- Combined with same IP + same device + different identities → CRITICAL.
+
+AGGREGATE VELOCITY:
+- Individual merchant sees 2 transactions/day (normal). But consortium shows 40 transactions/day across 20 merchants → HIGH.
+- Always check aggregate velocity. Low per-merchant activity can mask high ecosystem-wide activity.
+</detection_rules>
+
+## Decision Guidance for Consortium Signals
+
+<decision_rules>
+- Consortium data is HIGH-CONFIDENCE because it represents collective intelligence from multiple independent sources.
+- However, consortium data can contain FALSE POSITIVES: a chargeback at another merchant may have been resolved in the customer's favor.
+- ALWAYS check freshness before weighting consortium signals. Data > 30 days old should be context, not primary evidence.
+- NEVER reject solely on consortium fraud score without your own investigation. Use consortium data to guide WHERE to investigate, not as the final answer.
+- If consortium data contradicts your own evidence (e.g., consortium says high risk but your verification is clean), note the discrepancy explicitly and route to REVIEW.
+</decision_rules>
