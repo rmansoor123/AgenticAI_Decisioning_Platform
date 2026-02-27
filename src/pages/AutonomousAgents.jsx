@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Shield, RefreshCw, Clock, CheckCircle, XCircle, Zap, GitBranch } from 'lucide-react'
+import { Shield, RefreshCw, Clock, CheckCircle, XCircle, Zap, GitBranch, CreditCard, ShoppingBag, UserCog, RotateCcw } from 'lucide-react'
 
 const API_BASE = '/api'
 
@@ -19,6 +19,138 @@ function formatDuration(ms) {
   return `${(ms / 60000).toFixed(1)}m`
 }
 
+// Reusable status bar for checkpoint agents (status + detections + history)
+function CheckpointAgentStatusBar({ status, scanning, onScan }) {
+  return (
+    <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4">
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div className="flex items-center gap-6 flex-wrap">
+          <div className="flex items-center gap-2">
+            <div className={`w-2.5 h-2.5 rounded-full ${status?.isRunning ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+            <span className={`text-sm font-medium ${status?.isRunning ? 'text-emerald-400' : 'text-amber-400'}`}>
+              {status?.isRunning ? 'Running' : 'Stopped'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-sm text-gray-400">
+            <Clock className="w-4 h-4" />
+            <span>Last scan: {timeAgo(status?.lastRunAt)}</span>
+          </div>
+          <div className="text-sm text-gray-400">
+            <span className="text-white font-medium">{status?.eventsBuffered ?? 0}</span> events buffered
+          </div>
+          <div className="text-sm text-gray-400">
+            <span className="text-white font-medium">{status?.totalCycles ?? 0}</span> cycles
+          </div>
+          <div className="text-sm text-gray-400">
+            <span className="text-white font-medium">{status?.detectionCount ?? 0}</span> detections
+          </div>
+        </div>
+        <button
+          onClick={onScan}
+          disabled={scanning}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            scanning
+              ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+              : 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 hover:bg-indigo-500/30'
+          }`}
+        >
+          <Zap className={`w-4 h-4 ${scanning ? 'animate-spin' : ''}`} />
+          {scanning ? 'Scanning...' : 'Run Scan Now'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function CheckpointDetectionsTable({ detections, severityBadge }) {
+  return (
+    <div className="bg-gray-900/50 border border-gray-800 rounded-xl overflow-hidden">
+      <div className="p-4 border-b border-gray-800">
+        <h3 className="text-sm font-semibold text-white">Detections</h3>
+      </div>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-gray-500 text-xs uppercase border-b border-gray-800">
+            <th className="text-left p-3">Seller ID</th>
+            <th className="text-left p-3">Type</th>
+            <th className="text-left p-3">Severity</th>
+            <th className="text-left p-3">Details</th>
+            <th className="text-left p-3">Detected At</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-800">
+          {detections.length === 0 ? (
+            <tr>
+              <td colSpan={5} className="p-8 text-center text-gray-500">
+                No detections yet. Agent is scanning autonomously.
+              </td>
+            </tr>
+          ) : detections.map((d, i) => (
+            <tr key={i} className="hover:bg-gray-800/30">
+              <td className="p-3 text-indigo-400 font-mono text-xs">{d.sellerId || 'N/A'}</td>
+              <td className="p-3 text-white text-xs">{d.type || 'Unknown'}</td>
+              <td className="p-3">
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${severityBadge(d.severity)}`}>
+                  {(d.severity || 'UNKNOWN').toUpperCase()}
+                </span>
+              </td>
+              <td className="p-3 text-xs text-gray-400 max-w-xs truncate">
+                {d.riskScore ? `Risk: ${d.riskScore}` : ''}
+                {d.reason ? ` — ${d.reason}` : ''}
+              </td>
+              <td className="p-3 text-xs text-gray-500">{d.detectedAt ? timeAgo(d.detectedAt) : 'N/A'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function CheckpointCycleHistory({ history }) {
+  return (
+    <div className="bg-gray-900/50 border border-gray-800 rounded-xl overflow-hidden">
+      <div className="p-4 border-b border-gray-800">
+        <h3 className="text-sm font-semibold text-white">Cycle History</h3>
+      </div>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-gray-500 text-xs uppercase border-b border-gray-800">
+            <th className="text-left p-3">Cycle ID</th>
+            <th className="text-left p-3">Started At</th>
+            <th className="text-left p-3">Duration</th>
+            <th className="text-left p-3">Events Processed</th>
+            <th className="text-left p-3">Findings</th>
+            <th className="text-left p-3">Status</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-800">
+          {history.length === 0 ? (
+            <tr>
+              <td colSpan={6} className="p-8 text-center text-gray-500">No cycle history yet.</td>
+            </tr>
+          ) : history.map((h, i) => (
+            <tr key={h.cycleId || i} className="hover:bg-gray-800/30">
+              <td className="p-3 text-indigo-400 font-mono text-xs">{(h.cycleId || '').slice(0, 12)}...</td>
+              <td className="p-3 text-xs text-gray-400">{h.startedAt ? new Date(h.startedAt).toLocaleString() : 'N/A'}</td>
+              <td className="p-3 text-xs text-gray-300">{formatDuration(h.duration)}</td>
+              <td className="p-3 text-xs text-gray-300">{h.eventsProcessed ?? 0}</td>
+              <td className="p-3 text-xs text-white font-medium">{h.findings ?? 0}</td>
+              <td className="p-3">
+                {h.status === 'success' || h.status === 'completed' ? (
+                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                ) : (
+                  <XCircle className="w-4 h-4 text-red-400" />
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export default function AutonomousAgents() {
   const [activeTab, setActiveTab] = useState('cross-domain')
   const [cdStatus, setCdStatus] = useState(null)
@@ -29,8 +161,14 @@ export default function AutonomousAgents() {
   const [peProposals, setPeProposals] = useState([])
   const [pePipeline, setPePipeline] = useState([])
   const [peHistory, setPeHistory] = useState([])
+  // Checkpoint agent state
+  const [cpStatus, setCpStatus] = useState(null)
+  const [cpDetections, setCpDetections] = useState([])
+  const [cpHistory, setCpHistory] = useState([])
   const [loading, setLoading] = useState(false)
   const [scanning, setScanning] = useState(false)
+
+  const checkpointAgents = ['payout-risk', 'listing-intelligence', 'profile-mutation', 'returns-abuse']
 
   const fetchCrossDomainData = useCallback(async () => {
     try {
@@ -66,13 +204,30 @@ export default function AutonomousAgents() {
     }
   }, [])
 
+  const fetchCheckpointAgentData = useCallback(async (agentSlug) => {
+    try {
+      const [statusRes, detectionsRes, historyRes] = await Promise.all([
+        fetch(`${API_BASE}/agents/${agentSlug}/status`).then(r => r.json()),
+        fetch(`${API_BASE}/agents/${agentSlug}/detections?limit=50`).then(r => r.json()),
+        fetch(`${API_BASE}/agents/${agentSlug}/history?limit=20`).then(r => r.json())
+      ])
+      if (statusRes.success) setCpStatus(statusRes.data)
+      if (detectionsRes.success) setCpDetections(detectionsRes.data?.detections || [])
+      if (historyRes.success) setCpHistory(historyRes.data?.cycles || [])
+    } catch (err) {
+      console.error(`Failed to fetch ${agentSlug} data:`, err)
+    }
+  }, [])
+
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true)
       if (activeTab === 'cross-domain') {
         await fetchCrossDomainData()
-      } else {
+      } else if (activeTab === 'policy-evolution') {
         await fetchPolicyEvolutionData()
+      } else if (checkpointAgents.includes(activeTab)) {
+        await fetchCheckpointAgentData(activeTab)
       }
       setLoading(false)
     }
@@ -80,20 +235,27 @@ export default function AutonomousAgents() {
     fetchData()
     const interval = setInterval(fetchData, 15000)
     return () => clearInterval(interval)
-  }, [activeTab, fetchCrossDomainData, fetchPolicyEvolutionData])
+  }, [activeTab, fetchCrossDomainData, fetchPolicyEvolutionData, fetchCheckpointAgentData])
 
   const handleScan = async () => {
     setScanning(true)
     try {
-      const endpoint = activeTab === 'cross-domain'
-        ? `${API_BASE}/agents/cross-domain/scan`
-        : `${API_BASE}/agents/policy-evolution/scan`
+      let endpoint
+      if (activeTab === 'cross-domain') {
+        endpoint = `${API_BASE}/agents/cross-domain/scan`
+      } else if (activeTab === 'policy-evolution') {
+        endpoint = `${API_BASE}/agents/policy-evolution/scan`
+      } else {
+        endpoint = `${API_BASE}/agents/${activeTab}/scan`
+      }
       await fetch(endpoint, { method: 'POST' })
       // Re-fetch data after scan
       if (activeTab === 'cross-domain') {
         await fetchCrossDomainData()
-      } else {
+      } else if (activeTab === 'policy-evolution') {
         await fetchPolicyEvolutionData()
+      } else if (checkpointAgents.includes(activeTab)) {
+        await fetchCheckpointAgentData(activeTab)
       }
     } catch (err) {
       console.error('Scan failed:', err)
@@ -103,7 +265,11 @@ export default function AutonomousAgents() {
 
   const tabs = [
     { id: 'cross-domain', label: 'Cross-Domain Correlation', icon: GitBranch },
-    { id: 'policy-evolution', label: 'Policy Evolution', icon: Shield }
+    { id: 'policy-evolution', label: 'Policy Evolution', icon: Shield },
+    { id: 'payout-risk', label: 'Payout Risk', icon: CreditCard },
+    { id: 'listing-intelligence', label: 'Listing Intelligence', icon: ShoppingBag },
+    { id: 'profile-mutation', label: 'Profile Mutation', icon: UserCog },
+    { id: 'returns-abuse', label: 'Returns Abuse', icon: RotateCcw }
   ]
 
   const severityBadge = (severity) => {
@@ -130,7 +296,7 @@ export default function AutonomousAgents() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Autonomous Agents</h1>
-          <p className="text-gray-400 text-sm mt-1">Cross-domain correlation and policy evolution agents</p>
+          <p className="text-gray-400 text-sm mt-1">6 autonomous agents monitoring seller lifecycle domains</p>
         </div>
         <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">
           <div className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
@@ -139,7 +305,7 @@ export default function AutonomousAgents() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-gray-900/50 p-1 rounded-lg border border-gray-800 w-fit">
+      <div className="flex gap-1 bg-gray-900/50 p-1 rounded-lg border border-gray-800 w-fit flex-wrap">
         {tabs.map(tab => (
           <button
             key={tab.id}
@@ -156,7 +322,7 @@ export default function AutonomousAgents() {
         ))}
       </div>
 
-      {loading && !cdStatus && !peStatus ? (
+      {loading && !cdStatus && !peStatus && !cpStatus ? (
         <div className="text-center py-12 text-gray-400">Loading agent data...</div>
       ) : (
         <>
@@ -486,6 +652,15 @@ export default function AutonomousAgents() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {/* ============ Checkpoint Agent Tabs (Payout Risk, Listing Intelligence, Profile Mutation, Returns Abuse) ============ */}
+          {checkpointAgents.includes(activeTab) && (
+            <div className="space-y-6">
+              <CheckpointAgentStatusBar status={cpStatus} scanning={scanning} onScan={handleScan} />
+              <CheckpointDetectionsTable detections={cpDetections} severityBadge={severityBadge} />
+              <CheckpointCycleHistory history={cpHistory} />
             </div>
           )}
         </>

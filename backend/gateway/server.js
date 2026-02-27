@@ -353,6 +353,10 @@ import profileUpdatesRouter from '../services/business/profile-updates/index.js'
 import returnsRouter from '../services/business/returns/index.js';
 import crossDomainRouter, { setCrossDomainAgent } from '../services/autonomous/cross-domain-router.js';
 import policyEvolutionRouter, { setPolicyEvolutionAgent } from '../services/autonomous/policy-evolution-router.js';
+import payoutRiskRouter, { setPayoutRiskAgent } from '../services/autonomous/payout-risk-router.js';
+import listingIntelligenceRouter, { setListingIntelligenceAgent } from '../services/autonomous/listing-intelligence-router.js';
+import profileMutationRouter, { setProfileMutationAgent } from '../services/autonomous/profile-mutation-router.js';
+import returnsAbuseRouter, { setReturnsAbuseAgent } from '../services/autonomous/returns-abuse-router.js';
 
 const app = express();
 const server = createServer(app);
@@ -408,17 +412,37 @@ console.log(`Graph built: ${graphEngine.nodes.size} nodes, ${graphEngine.edges.s
 // Initialize Autonomous Agents
 import { getCrossDomainAgent } from '../agents/specialized/cross-domain-agent.js';
 import { getPolicyEvolutionAgent } from '../agents/specialized/policy-evolution-agent.js';
+import { getPayoutRiskAgent } from '../agents/specialized/payout-risk-agent.js';
+import { getListingIntelligenceAgent } from '../agents/specialized/listing-intelligence-agent.js';
+import { getProfileMutationAgent } from '../agents/specialized/profile-mutation-agent.js';
+import { getReturnsAbuseAgent } from '../agents/specialized/returns-abuse-agent.js';
 import { orchestrator } from '../agents/core/agent-orchestrator.js';
 
 const crossDomainAgent = getCrossDomainAgent();
 const policyEvolutionAgent = getPolicyEvolutionAgent();
+const payoutRiskAgent = getPayoutRiskAgent();
+const listingIntelligenceAgent = getListingIntelligenceAgent();
+const profileMutationAgent = getProfileMutationAgent();
+const returnsAbuseAgent = getReturnsAbuseAgent();
 orchestrator.registerAgent(crossDomainAgent);
 orchestrator.registerAgent(policyEvolutionAgent);
+orchestrator.registerAgent(payoutRiskAgent);
+orchestrator.registerAgent(listingIntelligenceAgent);
+orchestrator.registerAgent(profileMutationAgent);
+orchestrator.registerAgent(returnsAbuseAgent);
 setCrossDomainAgent(crossDomainAgent);
 setPolicyEvolutionAgent(policyEvolutionAgent);
+setPayoutRiskAgent(payoutRiskAgent);
+setListingIntelligenceAgent(listingIntelligenceAgent);
+setProfileMutationAgent(profileMutationAgent);
+setReturnsAbuseAgent(returnsAbuseAgent);
 crossDomainAgent.start();
 policyEvolutionAgent.start();
-console.log('Autonomous agents started: Cross-Domain Correlation, Policy Evolution');
+payoutRiskAgent.start();
+listingIntelligenceAgent.start();
+profileMutationAgent.start();
+returnsAbuseAgent.start();
+console.log('Autonomous agents started: Cross-Domain Correlation, Policy Evolution, Payout Risk, Listing Intelligence, Profile Mutation, Returns Abuse');
 
 // ============================================================================
 // API ROUTES
@@ -644,6 +668,10 @@ app.use('/api/graph', graphRouter);
 // Autonomous Agents
 app.use('/api/agents/cross-domain', crossDomainRouter);
 app.use('/api/agents/policy-evolution', policyEvolutionRouter);
+app.use('/api/agents/payout-risk', payoutRiskRouter);
+app.use('/api/agents/listing-intelligence', listingIntelligenceRouter);
+app.use('/api/agents/profile-mutation', profileMutationRouter);
+app.use('/api/agents/returns-abuse', returnsAbuseRouter);
 
 // ============================================================================
 // METRICS & DASHBOARD ENDPOINTS
@@ -849,6 +877,10 @@ process.on('SIGTERM', () => {
   console.log('Shutting down autonomous agents...');
   crossDomainAgent.stop();
   policyEvolutionAgent.stop();
+  payoutRiskAgent.stop();
+  listingIntelligenceAgent.stop();
+  profileMutationAgent.stop();
+  returnsAbuseAgent.stop();
   server.close(() => process.exit(0));
 });
 

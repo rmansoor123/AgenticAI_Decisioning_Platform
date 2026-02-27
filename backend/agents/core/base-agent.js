@@ -54,7 +54,11 @@ const AGENT_PROMPT_MAP = {
   'ALERT_TRIAGE': 'alert-triage',
   'RULE_OPTIMIZER': 'rule-optimization',
   'CROSS_DOMAIN_CORRELATION': 'cross-domain',
-  'POLICY_EVOLUTION': 'policy-evolution'
+  'POLICY_EVOLUTION': 'policy-evolution',
+  'PAYOUT_RISK': 'payout-risk',
+  'LISTING_INTELLIGENCE': 'listing-intelligence',
+  'PROFILE_MUTATION': 'profile-mutation',
+  'RETURNS_ABUSE': 'returns-abuse'
 };
 
 export class BaseAgent {
