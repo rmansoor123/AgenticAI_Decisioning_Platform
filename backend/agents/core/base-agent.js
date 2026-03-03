@@ -38,6 +38,13 @@ import { getEvalTracker } from './eval-tracker.js';
 import { getPromptRegistry } from './prompt-registry.js';
 import { getConfidenceCalibrator } from './confidence-calibrator.js';
 import { getCitationTracker } from './citation-tracker.js';
+import { getAgentJudge } from './agent-judge.js';
+import { getToolDiscovery } from './tool-discovery.js';
+import { buildDefaultGraph } from './reasoning-graph.js';
+import { getInputSanitizer } from './input-sanitizer.js';
+import { getOutputValidator } from './output-validator.js';
+import { getAgentRateLimiter } from './agent-rate-limiter.js';
+import { getReasoningCheckpoint } from './reasoning-checkpoint.js';
 
 // Import event bus (only if running in context with WebSocket)
 let eventBus = null;
@@ -112,6 +119,21 @@ export class BaseAgent {
 
     // Re-planning: max 1 re-plan cycle per reason() call
     this._replanCount = 0;
+
+    // Graph-based reasoning (opt-in via subclass setting this.useReasoningGraph = true)
+    this.useReasoningGraph = false;
+    this._reasoningGraph = null;
+  }
+
+  /**
+   * Get or build the reasoning graph for this agent.
+   * Subclasses can override to customize the graph.
+   */
+  getReasoningGraph() {
+    if (!this._reasoningGraph) {
+      this._reasoningGraph = buildDefaultGraph(this);
+    }
+    return this._reasoningGraph;
   }
 
   /**
@@ -127,9 +149,31 @@ export class BaseAgent {
   }
 
   // Core reasoning loop - "Think, Act, Observe"
+  // Supports both linear TPAOR flow and graph-based routing.
   async reason(input, context = {}) {
-    // Reset re-plan counter for each reasoning session
+    // Reset re-plan counter and investigation round for each reasoning session
     this._replanCount = 0;
+    this._investigationRound = 0;
+
+    // Rate limit check
+    const rateLimiter = getAgentRateLimiter();
+    const rateCheck = rateLimiter.checkLimit(this.agentId, 'decision');
+    if (!rateCheck.allowed) {
+      return {
+        timestamp: new Date().toISOString(),
+        input,
+        context,
+        reasoning: [],
+        actions: [],
+        result: { success: false, error: rateCheck.reason, _rateLimited: true, retryAfterMs: rateCheck.retryAfterMs },
+        chainOfThought: null
+      };
+    }
+
+    // Graph-based reasoning (opt-in): delegates to configurable state graph
+    if (this.useReasoningGraph) {
+      return this._reasonWithGraph(input, context);
+    }
 
     // Create chain of thought for this reasoning session
     this.currentChain = createChainOfThought({
@@ -148,6 +192,30 @@ export class BaseAgent {
       result: null,
       chainOfThought: null
     };
+
+      // Scan input for prompt injection
+      const sanitizer = getInputSanitizer();
+      const inputText = typeof input === 'string' ? input : JSON.stringify(input);
+      const scanResult = sanitizer.scan(inputText);
+      if (!scanResult.safe) {
+        thought._injectionScan = scanResult;
+        if (scanResult.riskLevel === 'HIGH') {
+          // Block high-risk injection attempts entirely
+          thought.result = {
+            success: false,
+            error: 'Input blocked: potential prompt injection detected',
+            _injectionBlocked: true,
+            _threats: scanResult.threats
+          };
+          this.emitEvent('agent:injection:blocked', {
+            agentId: this.agentId,
+            threats: scanResult.threats,
+            riskLevel: scanResult.riskLevel
+          });
+          this.thoughtLog.push(thought);
+          return thought;
+        }
+      }
 
     // Start trace for this reasoning session
     const traceId = `TRACE-${this.agentId}-${Date.now().toString(36)}`;
@@ -190,10 +258,16 @@ export class BaseAgent {
       this.currentChain.observe('Received input for analysis', input);
       thought.reasoning.push(await this.think(input, context));
 
+      // Checkpoint after think
+      try { getReasoningCheckpoint().save(traceId, this.agentId, 'think', { input, thinkResult: thought.reasoning }); } catch (e) { /* non-critical */ }
+
       // Step 3: PLAN - Determine actions needed
       const plan = await this.plan(thought.reasoning[0], context);
       this.currentChain.analyze(`Created plan with ${plan.actions.length} actions`);
       thought.reasoning.push({ plan });
+
+      // Checkpoint after plan
+      try { getReasoningCheckpoint().save(traceId, this.agentId, 'plan', { plan: { actions: plan.actions?.map(a => a.type) } }); } catch (e) { /* non-critical */ }
 
       // Step 4: ACT - Execute the plan
       for (const action of plan.actions) {
@@ -226,6 +300,9 @@ export class BaseAgent {
           );
         }
       }
+
+      // Checkpoint after act
+      try { getReasoningCheckpoint().save(traceId, this.agentId, 'act', { actionsCompleted: thought.actions.length }); } catch (e) { /* non-critical */ }
 
       // Step 4.5: RE-PLAN — if majority of actions failed, attempt a revised plan
       if (this.shouldRePlan(thought.actions)) {
@@ -295,6 +372,14 @@ export class BaseAgent {
       // Step 5: OBSERVE - Evaluate results
       thought.result = await this.observe(thought.actions, context);
 
+      // Validate observation output schema
+      const outputValidator = getOutputValidator();
+      const obsValidation = outputValidator.validateAndCoerce(thought.result, 'observation');
+      if (obsValidation.wasCoerced) {
+        thought.result = obsValidation.data;
+        thought.result._outputCoerced = true;
+      }
+
       // Calibrate confidence
       if (thought.result?.confidence) {
         const calibrator = getConfidenceCalibrator();
@@ -310,15 +395,44 @@ export class BaseAgent {
         if (citations.length > 0) {
           thought.result.citations = citationTracker.enrichCitations(citations, thought.actions);
           thought.result.reasoning = citationTracker.stripCitations(thought.result.reasoning);
+
+          // Citation validation gate: enforce minimum citation quality for high-stakes decisions
+          const decision = thought.result?.recommendation?.action || thought.result?.decision;
+          if (decision) {
+            const validation = citationTracker.validateCitations(thought.result.citations, decision, thought.actions.length);
+            if (!validation.valid) {
+              thought.result._citationValidation = validation;
+            }
+            if (validation.shouldDowngrade) {
+              const originalDecision = decision;
+              if (thought.result.recommendation) {
+                thought.result.recommendation.action = 'REVIEW';
+                thought.result.recommendation.originalAction = originalDecision;
+                thought.result.recommendation.citationDowngrade = true;
+              }
+              thought.result.decision = 'REVIEW';
+              thought.result._citationDowngrade = true;
+              thought.result._citationIssues = validation.issues;
+              this.emitEvent('agent:citation:downgrade', {
+                agentId: this.agentId,
+                originalDecision,
+                downgradedTo: 'REVIEW',
+                issues: validation.issues
+              });
+            }
+          }
         }
       }
+
+      // Checkpoint after observe
+      try { getReasoningCheckpoint().save(traceId, this.agentId, 'observe', { decision: thought.result?.decision || thought.result?.recommendation?.action, riskScore: thought.result?.riskScore, confidence: thought.result?.confidence }); } catch (e) { /* non-critical */ }
 
       // Step 5.1: REFLECT — critique proposed decision before policy check
       this.traceCollector.startSpan(traceId, 'reflection', {
         proposedDecision: thought.result?.recommendation?.action || thought.result?.decision
       });
 
-      const reflection = await this.reflect(thought.result, thought.actions, input, context);
+      let reflection = await this.reflect(thought.result, thought.actions, input, context);
       thought.reflection = reflection;
 
       if (reflection.concerns.length > 0) {
@@ -353,6 +467,53 @@ export class BaseAgent {
         concerns: reflection.concerns.length
       });
 
+      // Step 5.15: MULTI-TURN INVESTIGATION — deepen analysis if findings are uncertain
+      if (this._shouldDeepenInvestigation(thought, reflection) && (this._investigationRound || 0) < 2) {
+        this._investigationRound = (this._investigationRound || 0) + 1;
+        this.traceCollector.startSpan(traceId, 'investigation-round-2', {});
+
+        // Generate follow-up plan based on round 1 findings
+        const followUpPlan = await this._planFollowUp(thought, reflection, context);
+
+        // Execute follow-up actions
+        for (const action of followUpPlan.actions) {
+          this.traceCollector.startSpan(traceId, `followup:${action.type}`, action.params);
+          const result = await this.act(action);
+          thought.actions.push({ action, result, investigationRound: this._investigationRound });
+          this.traceCollector.endSpan(traceId, `followup:${action.type}`, { success: result?.success !== false });
+
+          if (result?.data) {
+            this.currentChain.recordEvidence(`Follow-up action ${action.type} result`, [], [], 1.0);
+          }
+        }
+
+        // Re-observe with all evidence (round 1 + round 2)
+        thought.result = await this.observe(thought.actions, context);
+
+        // Re-calibrate confidence
+        if (thought.result?.confidence) {
+          const calibrator = getConfidenceCalibrator();
+          const rawConfidence = thought.result.confidence;
+          thought.result.confidence = calibrator.getCalibratedConfidence(rawConfidence);
+          thought.result._rawConfidence = rawConfidence;
+        }
+
+        // Re-reflect on updated findings
+        reflection = await this.reflect(thought.result, thought.actions, input, context);
+        thought.reflection = reflection;
+        thought.result._investigationRounds = this._investigationRound;
+
+        this.currentChain.addStep({
+          type: 'analysis',
+          content: `Investigation round ${this._investigationRound}: executed ${followUpPlan.actions.length} follow-up actions`,
+          confidence: CONFIDENCE.LIKELY
+        });
+
+        this.traceCollector.endSpan(traceId, 'investigation-round-2', {
+          actionsExecuted: followUpPlan.actions.length
+        });
+      }
+
       // Step 5.25: POLICY CHECK — enforce hard/soft policies on the proposed decision
       const proposedDecision = thought.result?.recommendation || { action: thought.result?.decision, confidence: thought.result?.confidence };
       if (proposedDecision?.action) {
@@ -384,6 +545,36 @@ export class BaseAgent {
         }
       }
 
+      // Step 5.4: AGENT JUDGE — cross-agent review for high-stakes decisions
+      const judgeDecision = thought.result?.recommendation?.action || thought.result?.decision;
+      if (['REJECT', 'BLOCK'].includes(judgeDecision) && (thought.result?.confidence || 0) >= 0.7) {
+        try {
+          const judge = getAgentJudge();
+          const review = await judge.evaluate(thought, this.agentId);
+          thought.result._judgeReview = review;
+
+          if (review.recommendation === 'overturn') {
+            const originalAction = judgeDecision;
+            if (thought.result.recommendation) {
+              thought.result.recommendation.action = 'REVIEW';
+              thought.result.recommendation.originalAction = originalAction;
+              thought.result.recommendation.judgeOverturned = true;
+            }
+            thought.result.decision = 'REVIEW';
+            thought.result._judgeOverturned = true;
+            this.emitEvent('agent:judge:overturn', {
+              agentId: this.agentId,
+              originalDecision: originalAction,
+              judgeRecommendation: review.recommendation,
+              judgeQuality: review.quality,
+              issues: review.issues
+            });
+          }
+        } catch (e) {
+          // Judge evaluation is non-blocking; skip on failure
+        }
+      }
+
       // Step 5.5: Write decision back to knowledge base
       await this.writeBackKnowledge(input, thought.result);
 
@@ -397,16 +588,47 @@ export class BaseAgent {
       this.updateMemory(thought);
       this.learnFromResult(input, thought.result);
 
+      // Save investigation episode for replay
+      try {
+        const episodeDecision = thought.result?.recommendation?.action || thought.result?.decision;
+        this.memoryStore.saveEpisode(this.agentId, {
+          input: this.sanitizeInput(input),
+          decision: episodeDecision,
+          riskScore: thought.result?.riskScore || thought.result?.overallRisk?.score || null,
+          confidence: thought.result?.confidence || null,
+          outcome: null, // Will be updated when outcome arrives
+          steps: thought.actions.map(a => ({
+            phase: 'act',
+            summary: a.action?.type || 'unknown',
+            toolResults: [{ tool: a.action?.type, success: a.result?.success !== false, data: a.result?.data }],
+          })),
+          reflection: thought.reflection || null,
+          chainOfThought: thought.chainOfThought,
+        });
+      } catch (e) {
+        // Episodic memory save is non-fatal
+      }
+
       // Step 7.5: Schedule simulated outcome for feedback loop
       const decision = thought.result?.recommendation?.action || thought.result?.decision;
       if (decision) {
         const decisionId = `DEC-${this.agentId}-${Date.now().toString(36)}`;
+        const decisionConfidence = thought.result?.confidence || 0.5;
         this.outcomeSimulator.scheduleOutcome({
           agentId: this.agentId,
           decisionId,
           action: decision,
           riskScore: thought.result?.riskScore || thought.result?.overallRisk?.score || 50,
-          confidence: thought.result?.confidence || 0.5
+          confidence: decisionConfidence,
+          callback: (outcome) => {
+            // Record outcome in confidence calibrator for calibration tracking
+            try {
+              const calibrator = getConfidenceCalibrator();
+              calibrator.recordPrediction(decisionId, decisionConfidence, outcome.wasCorrect);
+            } catch (e) {
+              // Non-fatal: calibration recording failed
+            }
+          }
         });
 
         // Save pattern IDs for feedback later
@@ -429,7 +651,10 @@ export class BaseAgent {
       // Record metrics and end trace
       const reasonDuration = Date.now() - reasonStartTime;
       this.metricsCollector.recordExecution(this.agentId, reasonDuration, thought.result?.success !== false);
-      this.traceCollector.endTrace(traceId, { success: thought.result?.success !== false, summary: thought.result?.summary });
+      await this.traceCollector.endTrace(traceId, { success: thought.result?.success !== false, summary: thought.result?.summary });
+
+      // Clear checkpoints on successful completion
+      try { getReasoningCheckpoint().clear(traceId); } catch (e) { /* non-critical */ }
 
       // Log decision
       if (thought.result?.recommendation || thought.result?.decision) {
@@ -459,8 +684,75 @@ export class BaseAgent {
       thought.chainOfThought = this.currentChain.generateTrace();
       const reasonDuration = Date.now() - reasonStartTime;
       this.metricsCollector.recordExecution(this.agentId, reasonDuration, false);
-      this.traceCollector.endTrace(traceId, { success: false, error: error.message });
+      await this.traceCollector.endTrace(traceId, { success: false, error: error.message });
     }
+
+    this.thoughtLog.push(thought);
+    this.currentChain = null;
+    return thought;
+  }
+
+  /**
+   * Graph-based reasoning — executes the configurable state graph.
+   * Provides the same result structure as the linear reason() method
+   * but routes through nodes and conditional edges.
+   */
+  async _reasonWithGraph(input, context) {
+    const graph = this.getReasoningGraph();
+    const traceId = `TRACE-${this.agentId}-${Date.now().toString(36)}`;
+    this.traceCollector.startTrace(traceId, this.agentId, input);
+    const reasonStartTime = Date.now();
+
+    this.currentChain = createChainOfThought({
+      agentId: this.agentId,
+      agentName: this.name,
+      input,
+      context
+    });
+
+    const thought = {
+      timestamp: new Date().toISOString(),
+      input,
+      context,
+      reasoning: [],
+      actions: [],
+      result: null,
+      chainOfThought: null,
+      _graphBased: true,
+    };
+
+    try {
+      const graphContext = {
+        input,
+        context,
+        _investigationRound: 0,
+      };
+
+      const result = await graph.execute('think', graphContext);
+
+      // Map graph results back to thought structure
+      thought.reasoning.push(result.think);
+      thought.actions = result.act || [];
+      thought.result = result.observe || { success: true, summary: 'Graph-based analysis complete' };
+      thought.reflection = result.reflect || {};
+      thought.result._judgeReview = result.judge || null;
+      thought.result._graphTrace = result._graphTrace;
+      thought.result._visitedNodes = result._visitedNodes;
+
+      this.currentChain.conclude(
+        thought.result?.summary || 'Graph-based analysis complete',
+        CONFIDENCE.LIKELY
+      );
+    } catch (error) {
+      thought.error = error.message;
+      thought.result = { success: false, error: error.message };
+      this.currentChain.conclude(`Error: ${error.message}`, CONFIDENCE.CERTAIN);
+    }
+
+    thought.chainOfThought = this.currentChain.generateTrace();
+    const reasonDuration = Date.now() - reasonStartTime;
+    this.metricsCollector.recordExecution(this.agentId, reasonDuration, thought.result?.success !== false);
+    await this.traceCollector.endTrace(traceId, { success: thought.result?.success !== false });
 
     this.thoughtLog.push(thought);
     this.currentChain = null;
@@ -550,6 +842,21 @@ export class BaseAgent {
         const parsed = parseLLMJson(llmResult?.content, null);
 
         if (parsed?.actions?.length > 0) {
+          // Dynamic tool discovery: try to find unknown tools via MCP
+          for (const action of parsed.actions) {
+            if (!this.tools.has(action.tool)) {
+              try {
+                const toolDiscovery = getToolDiscovery();
+                const discovered = await toolDiscovery.discoverTools(action.tool);
+                if (discovered.length > 0) {
+                  this.registerTool(discovered[0].name, discovered[0].description, discovered[0].handler);
+                }
+              } catch (e) {
+                // Discovery failed; tool will be filtered out below
+              }
+            }
+          }
+
           // Validate tool names — only allow tools the agent actually has
           const validActions = parsed.actions
             .filter(a => this.tools.has(a.tool))
@@ -780,6 +1087,88 @@ export class BaseAgent {
       reflectionConfidence: 0.7,
       llmEnhanced: false
     };
+  }
+
+  /**
+   * Determine if the investigation should go deeper with a follow-up round.
+   * Returns true when evidence is thin and uncertainty is high.
+   */
+  _shouldDeepenInvestigation(thought, reflection) {
+    const confidence = thought.result?.confidence || 0;
+    const riskScore = thought.result?.riskScore || thought.result?.overallRisk?.score || 0;
+    const toolResults = thought.actions.filter(a => a.result?.data);
+    const concerns = reflection?.concerns?.length || 0;
+
+    // Genuinely uncertain (low confidence)
+    if (confidence < 0.5 && toolResults.length > 0) return true;
+
+    // Many unresolved concerns from reflection
+    if (concerns >= 3) return true;
+
+    // High risk but thin evidence
+    if (riskScore > 70 && toolResults.length < 3) return true;
+
+    // Reflection explicitly mentions missing evidence
+    if (reflection?.contraArgument && /missing|incomplete|insufficient/i.test(reflection.contraArgument)) return true;
+
+    return false;
+  }
+
+  /**
+   * Generate a follow-up plan based on round 1 findings and reflection concerns.
+   * Uses LLM if available, otherwise picks tools not yet used.
+   */
+  async _planFollowUp(thought, reflection, context) {
+    // Identify tools already used
+    const usedTools = new Set(thought.actions.map(a => a.action?.type).filter(Boolean));
+    const availableTools = Array.from(this.tools.keys()).filter(t => !usedTools.has(t));
+
+    // Try LLM-enhanced follow-up planning
+    if (this.llmClient?.enabled && availableTools.length > 0) {
+      try {
+        const toolList = availableTools.map(t => {
+          const tool = this.tools.get(t);
+          return `- ${t}: ${tool.description || 'No description'}`;
+        }).join('\n');
+
+        const system = `You are a fraud investigation agent planning a follow-up investigation round.
+Round 1 raised concerns that need deeper analysis. Select 1-3 additional tools to gather more evidence.
+Return ONLY valid JSON: {"actions": [{"tool": "tool_name", "params": {}, "rationale": "why"}]}`;
+
+        const user = `Round 1 findings: ${thought.result?.summary || 'No summary'}
+Concerns: ${(reflection?.concerns || []).join('; ')}
+Risk score: ${thought.result?.riskScore || 'unknown'}
+Confidence: ${thought.result?.confidence || 'unknown'}
+
+Available tools (not yet used):
+${toolList}
+
+Select follow-up tools to investigate the concerns.`;
+
+        const llmResult = await this.llmClient.complete(system, user);
+        const parsed = parseLLMJson(llmResult?.content, null);
+        if (parsed?.actions?.length > 0) {
+          const validActions = parsed.actions
+            .filter(a => this.tools.has(a.tool))
+            .slice(0, 3)
+            .map(a => ({ type: a.tool, params: a.params || {}, rationale: a.rationale }));
+          if (validActions.length > 0) {
+            return { actions: validActions };
+          }
+        }
+      } catch (e) {
+        // Fall through to heuristic
+      }
+    }
+
+    // Heuristic fallback: pick up to 2 unused tools
+    const fallbackActions = availableTools.slice(0, 2).map(t => ({
+      type: t,
+      params: {},
+      rationale: 'Follow-up investigation with unused tool'
+    }));
+
+    return { actions: fallbackActions };
   }
 
   // Memory management — enhanced with long-term insights
@@ -1401,6 +1790,48 @@ export class BaseAgent {
       message,
       timestamp: new Date().toISOString()
     };
+  }
+
+  /**
+   * Interrupt reasoning mid-flight (human-in-the-loop).
+   * Saves current state and returns a resumption token.
+   */
+  async interruptReasoning(traceId, reason = 'human_review') {
+    const checkpoint = getReasoningCheckpoint();
+    const current = checkpoint.load(traceId);
+    if (!current) return { success: false, error: 'No active reasoning session found' };
+
+    checkpoint.save(traceId, this.agentId, `interrupted_at_${current.phase}`, {
+      ...current.state,
+      interruptedAt: new Date().toISOString(),
+      interruptReason: reason,
+    });
+
+    return {
+      success: true,
+      resumeToken: traceId,
+      interruptedPhase: current.phase,
+      savedAt: current.savedAt,
+    };
+  }
+
+  /**
+   * Resume reasoning from a checkpoint (human-in-the-loop).
+   * Loads saved state and continues from where it left off.
+   */
+  async resumeReasoning(resumeToken, humanFeedback = null) {
+    const checkpoint = getReasoningCheckpoint();
+    const saved = checkpoint.load(resumeToken);
+    if (!saved) return { success: false, error: 'No checkpoint found for resume token' };
+
+    checkpoint.clear(resumeToken);
+
+    return this.reason(saved.state.input || {}, {
+      resumed: true,
+      resumeToken,
+      humanFeedback,
+      previousPhase: saved.phase,
+    });
   }
 }
 

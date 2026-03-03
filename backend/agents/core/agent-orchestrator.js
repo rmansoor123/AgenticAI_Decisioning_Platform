@@ -547,6 +547,119 @@ class AgentOrchestrator {
       availableCapabilities: this._getAllCapabilities()
     };
   }
+
+  /**
+   * Dynamically spawn a new agent instance.
+   * @param {string} agentType - The type of agent to spawn (maps to agent class)
+   * @param {Object} config - Configuration overrides for the agent
+   * @returns {Object} The spawned agent
+   */
+  async spawnAgent(agentType, config = {}) {
+    const agentId = config.agentId || `${agentType.toUpperCase()}-SPAWN-${Date.now().toString(36)}`;
+
+    // Agent type registry
+    const AGENT_TYPES = {
+      'seller_onboarding': '../specialized/seller-onboarding-agent.js',
+      'fraud_investigation': '../specialized/fraud-investigation-agent.js',
+      'alert_triage': '../specialized/alert-triage-agent.js',
+      'rule_optimization': '../specialized/rule-optimization-agent.js',
+      'payout_risk': '../specialized/payout-risk-agent.js',
+      'listing_intelligence': '../specialized/listing-intelligence-agent.js',
+      'profile_mutation': '../specialized/profile-mutation-agent.js',
+      'returns_abuse': '../specialized/returns-abuse-agent.js',
+      'cross_domain': '../specialized/cross-domain-agent.js',
+      'policy_evolution': '../specialized/policy-evolution-agent.js',
+    };
+
+    const modulePath = AGENT_TYPES[agentType];
+    if (!modulePath) {
+      throw new Error(`Unknown agent type: ${agentType}. Available: ${Object.keys(AGENT_TYPES).join(', ')}`);
+    }
+
+    try {
+      const module = await import(modulePath);
+      // Find the agent class (first exported class)
+      const AgentClass = Object.values(module).find(v => typeof v === 'function' && v.prototype?.reason);
+      if (!AgentClass) {
+        throw new Error(`No agent class found in module for type: ${agentType}`);
+      }
+
+      const agent = new AgentClass(config);
+
+      // Override agentId if specified
+      if (config.agentId) {
+        agent.agentId = config.agentId;
+      }
+
+      // Register with orchestrator
+      this.registerAgent(agent);
+
+      this.log('AGENT_SPAWNED', {
+        agentId: agent.agentId,
+        agentType,
+        spawnedAt: new Date().toISOString(),
+      });
+
+      return agent;
+    } catch (error) {
+      this.log('AGENT_SPAWN_FAILED', {
+        agentType,
+        error: error.message,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Spawn multiple agents in parallel.
+   */
+  async spawnAgents(specs) {
+    const results = await Promise.allSettled(
+      specs.map(({ type, config }) => this.spawnAgent(type, config))
+    );
+
+    return results.map((r, i) => ({
+      type: specs[i].type,
+      status: r.status,
+      agent: r.status === 'fulfilled' ? r.value : null,
+      error: r.status === 'rejected' ? r.reason.message : null,
+    }));
+  }
+
+  /**
+   * Despawn (unregister and clean up) an agent.
+   */
+  async despawnAgent(agentId) {
+    const agent = this.agents.get(agentId);
+    if (!agent) return { success: false, error: 'Agent not found' };
+
+    this.unregisterAgent(agentId);
+
+    this.log('AGENT_DESPAWNED', {
+      agentId,
+      despawnedAt: new Date().toISOString(),
+    });
+
+    return { success: true, agentId };
+  }
+
+  /**
+   * Get list of available agent types for spawning.
+   */
+  getSpawnableTypes() {
+    return [
+      { type: 'seller_onboarding', description: 'KYC + risk evaluation for new sellers' },
+      { type: 'fraud_investigation', description: 'Transaction deep-dive investigation' },
+      { type: 'alert_triage', description: 'Alert prioritization and routing' },
+      { type: 'rule_optimization', description: 'Rule performance analysis' },
+      { type: 'payout_risk', description: 'Payout fraud risk assessment' },
+      { type: 'listing_intelligence', description: 'Product listing analysis' },
+      { type: 'profile_mutation', description: 'Profile change monitoring' },
+      { type: 'returns_abuse', description: 'Return fraud detection' },
+      { type: 'cross_domain', description: 'Cross-domain correlation' },
+      { type: 'policy_evolution', description: 'Policy rule evolution' },
+    ];
+  }
 }
 
 // Singleton instance

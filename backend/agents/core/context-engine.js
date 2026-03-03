@@ -10,6 +10,9 @@ import { getMemoryStore } from './memory-store.js';
 import { getKnowledgeBase } from './knowledge-base.js';
 import { getPromptBuilder } from './prompt-builder.js';
 import { getContextRanker } from './context-ranker.js';
+import { getSelfQueryEngine } from './self-query.js';
+import { getQueryDecomposer } from './query-decomposer.js';
+import { getNeuralReranker } from './neural-reranker.js';
 
 const DEFAULT_TOKEN_BUDGET = 4000;
 
@@ -109,45 +112,157 @@ class ContextEngine {
       }
     }
 
-    // 4. RAG results — try vector search via Python eval service, fallback to TF-IDF
+    // 4. RAG results — advanced retrieval pipeline
+    //    Self-query → Multi-query decomposition → Vector/TF-IDF search → Parent document enrichment
     const queryText = typeof task === 'string' ? task : (task.type || task.eventType || JSON.stringify(task).slice(0, 200));
     const namespace = domain ? (DOMAIN_TO_NAMESPACE[domain] || null) : null;
     if (namespace) {
       let ragResults = [];
 
-      // Try Python eval service (Pinecone vector search)
-      const evalServiceUrl = process.env.EVAL_SERVICE_URL || 'http://localhost:8000';
+      // 4a. Self-query: generate metadata filters from natural language
+      const selfQuery = getSelfQueryEngine();
+      let searchQuery = queryText;
+      let selfQueryFilters = sellerId ? { sellerId } : {};
       try {
-        const vectorResponse = await fetch(`${evalServiceUrl}/search`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            query: queryText,
-            namespace: namespace === 'onboarding' ? 'onboarding-knowledge' : namespace === 'risk-events' ? 'fraud-cases' : namespace,
-            top_k: 5,
-            filters: sellerId ? { sellerId } : null,
-          }),
-          signal: AbortSignal.timeout(3000),
-        });
-        if (vectorResponse.ok) {
-          const vectorData = await vectorResponse.json();
-          ragResults = (vectorData.results || []).map(r => ({
-            text: r.text,
-            relevanceScore: r.score,
-            outcome: r.metadata?.outcome || null,
-            ...r.metadata,
-          }));
+        const searchParams = await selfQuery.applyToSearch(queryText, namespace);
+        searchQuery = searchParams.query || queryText;
+        if (searchParams.filter) {
+          selfQueryFilters = { ...selfQueryFilters, ...searchParams.filter };
         }
       } catch (e) {
-        // Vector search unavailable — fall through to TF-IDF
+        // Self-query failed; use original query and basic filters
       }
 
-      // Fallback to TF-IDF if vector search returned nothing
-      if (ragResults.length === 0) {
+      // 4b. Multi-query decomposition: break complex queries into sub-queries
+      const queryDecomposer = getQueryDecomposer();
+      let subQueries;
+      try {
+        subQueries = await queryDecomposer.decompose(searchQuery);
+      } catch (e) {
+        subQueries = [searchQuery];
+      }
+
+      // 4c. Execute hybrid search for each sub-query (dense + sparse in parallel, fused via RRF)
+      const evalServiceUrl = process.env.EVAL_SERVICE_URL || 'http://localhost:8000';
+      const vectorNamespace = namespace === 'onboarding' ? 'onboarding-knowledge' : namespace === 'risk-events' ? 'fraud-cases' : namespace;
+      const RRF_K = 60; // Reciprocal Rank Fusion constant
+
+      for (const sq of subQueries) {
+        const topK = subQueries.length > 1 ? 3 : 5;
+
+        // Run dense (vector) and sparse (TF-IDF) searches in parallel
+        const [denseResults, sparseResults] = await Promise.all([
+          // Dense: Pinecone vector search via eval service
+          (async () => {
+            try {
+              const vectorResponse = await fetch(`${evalServiceUrl}/search`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  query: sq,
+                  namespace: vectorNamespace,
+                  top_k: topK * 2, // fetch more for fusion
+                  filters: Object.keys(selfQueryFilters).length > 0 ? selfQueryFilters : null,
+                }),
+                signal: AbortSignal.timeout(3000),
+              });
+              if (vectorResponse.ok) {
+                const vectorData = await vectorResponse.json();
+                return (vectorData.results || []).map((r, i) => ({
+                  text: r.text,
+                  relevanceScore: r.score,
+                  outcome: r.metadata?.outcome || null,
+                  parentDocumentId: r.metadata?.parentDocumentId || null,
+                  ...r.metadata,
+                  _rank: i + 1,
+                  _source: 'dense',
+                }));
+              }
+            } catch (e) { /* vector search unavailable */ }
+            return [];
+          })(),
+          // Sparse: local TF-IDF search
+          (async () => {
+            try {
+              const results = this.knowledgeBase.searchKnowledge(namespace, sq, selfQueryFilters, topK * 2);
+              return results.map((r, i) => ({
+                ...r,
+                _rank: i + 1,
+                _source: 'sparse',
+              }));
+            } catch (e) { /* TF-IDF failed */ }
+            return [];
+          })(),
+        ]);
+
+        // Reciprocal Rank Fusion: merge dense + sparse results
+        const scoreMap = new Map();
+        for (const result of denseResults) {
+          const key = (result.text || '').slice(0, 80);
+          const rrfScore = 1 / (RRF_K + result._rank);
+          const existing = scoreMap.get(key);
+          if (existing) {
+            existing.rrfScore += rrfScore;
+            existing._fusedSources = ['dense', 'sparse'];
+          } else {
+            scoreMap.set(key, { ...result, rrfScore, _fusedSources: ['dense'] });
+          }
+        }
+        for (const result of sparseResults) {
+          const key = (result.text || '').slice(0, 80);
+          const rrfScore = 1 / (RRF_K + result._rank);
+          const existing = scoreMap.get(key);
+          if (existing) {
+            existing.rrfScore += rrfScore;
+            existing._fusedSources = [...new Set([...(existing._fusedSources || []), 'sparse'])];
+          } else {
+            scoreMap.set(key, { ...result, rrfScore, _fusedSources: ['sparse'] });
+          }
+        }
+
+        // Sort by fused score, take top K
+        const fused = Array.from(scoreMap.values())
+          .sort((a, b) => b.rrfScore - a.rrfScore)
+          .slice(0, topK);
+        ragResults.push(...fused);
+      }
+
+      // 4d. Deduplicate by text content, keep highest-scored
+      if (ragResults.length > 1) {
+        const seen = new Map();
+        for (const r of ragResults) {
+          const key = (r.text || '').slice(0, 80);
+          const existing = seen.get(key);
+          if (!existing || (r.relevanceScore || 0) > (existing.relevanceScore || 0)) {
+            seen.set(key, r);
+          }
+        }
+        ragResults = Array.from(seen.values())
+          .sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0))
+          .slice(0, 5);
+      }
+
+      // 4d-bis. Neural reranking of fused results
+      if (ragResults.length > 1) {
         try {
-          ragResults = this.knowledgeBase.searchKnowledge(namespace, queryText, sellerId ? { sellerId } : {}, 5);
+          const reranker = getNeuralReranker();
+          ragResults = await reranker.rerank(queryText, ragResults, 5);
         } catch (e) {
-          // TF-IDF also failed; skip
+          // Reranking failed; continue with existing order
+        }
+      }
+
+      // 4e. Parent document retrieval: enrich chunks with full parent context
+      for (const result of ragResults) {
+        if (result.parentDocumentId) {
+          try {
+            const parent = this.knowledgeBase.getParentDocument(result.parentDocumentId);
+            if (parent) {
+              result._parentContext = (parent.text || '').slice(0, 1000);
+            }
+          } catch (e) {
+            // Parent document retrieval failed; skip
+          }
         }
       }
 
@@ -155,7 +270,16 @@ class ContextEngine {
         const ragText = this.promptBuilder.formatRAGResults(ragResults, 5);
         sections.ragResults = this.promptBuilder.truncateToTokenBudget(ragText, SOURCE_BUDGETS.ragResults.maxTokens);
         totalTokens += this.promptBuilder.estimateTokens(sections.ragResults);
-        sourceMeta.ragResults = { included: true, results: ragResults.length, source: ragResults[0].relevanceScore ? 'vector' : 'tfidf', tokens: this.promptBuilder.estimateTokens(sections.ragResults) };
+        sourceMeta.ragResults = {
+          included: true,
+          results: ragResults.length,
+          searchStrategy: ragResults.some(r => r._fusedSources?.length > 1) ? 'hybrid_rrf' : (ragResults.some(r => r._source === 'dense') ? 'dense' : 'sparse'),
+          reranked: ragResults.some(r => r._rerankScore != null),
+          tokens: this.promptBuilder.estimateTokens(sections.ragResults),
+          selfQueryFilters: Object.keys(selfQueryFilters).length > 0 ? selfQueryFilters : null,
+          subQueryCount: subQueries.length,
+          parentDocsEnriched: ragResults.filter(r => r._parentContext).length
+        };
       }
     }
 

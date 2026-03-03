@@ -268,11 +268,237 @@ class EvalTracker {
       agents: agentIds.map(id => this.getAgentEvalStats(id))
     };
   }
+
+  // ── A/B Testing ──
+
+  /**
+   * Register an experiment comparing two agent strategies.
+   */
+  registerExperiment(experimentId, config) {
+    if (!this.experiments) this.experiments = new Map();
+    this.experiments.set(experimentId, {
+      experimentId,
+      name: config.name,
+      controlStrategy: config.controlStrategy,
+      treatmentStrategy: config.treatmentStrategy,
+      splitRatio: config.splitRatio || 0.5,
+      metrics: [],
+      startedAt: new Date().toISOString(),
+      status: 'active',
+    });
+    return experimentId;
+  }
+
+  /**
+   * Assign a decision to an experiment group.
+   */
+  assignGroup(experimentId, decisionId) {
+    const experiment = this.experiments?.get(experimentId);
+    if (!experiment || experiment.status !== 'active') return 'control';
+    const hash = decisionId.split('').reduce((h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0, 0);
+    return Math.abs(hash) % 100 < experiment.splitRatio * 100 ? 'treatment' : 'control';
+  }
+
+  /**
+   * Record an experiment metric.
+   */
+  recordExperimentMetric(experimentId, group, metric) {
+    const experiment = this.experiments?.get(experimentId);
+    if (!experiment) return;
+    experiment.metrics.push({ group, ...metric, recordedAt: new Date().toISOString() });
+    if (experiment.metrics.length > 1000) {
+      experiment.metrics = experiment.metrics.slice(-500);
+    }
+  }
+
+  /**
+   * Get experiment results with statistical comparison.
+   */
+  getExperimentResults(experimentId) {
+    const experiment = this.experiments?.get(experimentId);
+    if (!experiment) return null;
+
+    const control = experiment.metrics.filter(m => m.group === 'control');
+    const treatment = experiment.metrics.filter(m => m.group === 'treatment');
+    const avgScore = (arr) => {
+      const scores = arr.map(m => m.score).filter(s => typeof s === 'number');
+      return scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
+    };
+
+    return {
+      experimentId: experiment.experimentId,
+      name: experiment.name,
+      status: experiment.status,
+      startedAt: experiment.startedAt,
+      control: { count: control.length, avgScore: avgScore(control) ? Math.round(avgScore(control) * 100) / 100 : null },
+      treatment: { count: treatment.length, avgScore: avgScore(treatment) ? Math.round(avgScore(treatment) * 100) / 100 : null },
+      winner: (() => {
+        const cAvg = avgScore(control);
+        const tAvg = avgScore(treatment);
+        if (cAvg == null || tAvg == null) return 'insufficient_data';
+        if (control.length < 10 || treatment.length < 10) return 'insufficient_data';
+        if (tAvg > cAvg * 1.05) return 'treatment';
+        if (cAvg > tAvg * 1.05) return 'control';
+        return 'no_significant_difference';
+      })(),
+    };
+  }
+
+  /**
+   * End an experiment.
+   */
+  endExperiment(experimentId) {
+    const experiment = this.experiments?.get(experimentId);
+    if (experiment) {
+      experiment.status = 'completed';
+      experiment.completedAt = new Date().toISOString();
+    }
+  }
+}
+
+/**
+ * Online Evaluator - Continuous live monitoring of agent decisions.
+ */
+class OnlineEvaluator {
+  constructor() {
+    this.windows = new Map();
+    this.alerts = [];
+    this.maxAlerts = 100;
+    this.stats = { decisionsTracked: 0, alertsRaised: 0 };
+  }
+
+  recordDecision(agentId, decision) {
+    const entry = {
+      timestamp: Date.now(),
+      decision: decision.action || decision.recommendation?.action || 'UNKNOWN',
+      confidence: decision.confidence || 0,
+      riskScore: decision.riskScore || 0,
+      toolsUsed: decision._toolsUsed || [],
+      toolFailures: decision._toolFailures || 0,
+    };
+
+    if (!this.windows.has(agentId)) {
+      this.windows.set(agentId, { entries: [] });
+    }
+    const agentWindow = this.windows.get(agentId);
+    agentWindow.entries.push(entry);
+
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    agentWindow.entries = agentWindow.entries.filter(e => e.timestamp > oneHourAgo);
+    this.stats.decisionsTracked++;
+    this._checkAnomalies(agentId, agentWindow);
+  }
+
+  _checkAnomalies(agentId, agentWindow) {
+    const now = Date.now();
+    const fiveMinEntries = agentWindow.entries.filter(e => e.timestamp > now - 5 * 60 * 1000);
+    const hourEntries = agentWindow.entries;
+    if (fiveMinEntries.length < 5 || hourEntries.length < 10) return;
+
+    const fiveMinDist = this._getDistribution(fiveMinEntries);
+    const hourDist = this._getDistribution(hourEntries);
+
+    for (const action of ['REJECT', 'BLOCK']) {
+      const recentRate = fiveMinDist[action] || 0;
+      const baselineRate = hourDist[action] || 0;
+      if (recentRate > 0.5 && baselineRate < 0.3) {
+        this._raiseAlert(agentId, 'decision_shift', {
+          action,
+          recentRate: Math.round(recentRate * 100),
+          baselineRate: Math.round(baselineRate * 100),
+          message: `${action} rate spiked to ${Math.round(recentRate * 100)}% (baseline: ${Math.round(baselineRate * 100)}%)`,
+        });
+      }
+    }
+
+    const recentAvgConf = fiveMinEntries.reduce((s, e) => s + e.confidence, 0) / fiveMinEntries.length;
+    const baselineAvgConf = hourEntries.reduce((s, e) => s + e.confidence, 0) / hourEntries.length;
+    if (baselineAvgConf > 0.5 && recentAvgConf < baselineAvgConf * 0.7) {
+      this._raiseAlert(agentId, 'confidence_drop', {
+        recentAvg: Math.round(recentAvgConf * 100) / 100,
+        baselineAvg: Math.round(baselineAvgConf * 100) / 100,
+        message: `Confidence dropped to ${recentAvgConf.toFixed(2)} (baseline: ${baselineAvgConf.toFixed(2)})`,
+      });
+    }
+
+    const recentFailures = fiveMinEntries.filter(e => e.toolFailures > 0).length;
+    const recentFailureRate = recentFailures / fiveMinEntries.length;
+    if (recentFailureRate > 0.3) {
+      this._raiseAlert(agentId, 'tool_failure_spike', {
+        failureRate: Math.round(recentFailureRate * 100),
+        message: `Tool failure rate at ${Math.round(recentFailureRate * 100)}% in last 5 minutes`,
+      });
+    }
+  }
+
+  _getDistribution(entries) {
+    const counts = {};
+    for (const e of entries) counts[e.decision] = (counts[e.decision] || 0) + 1;
+    const total = entries.length;
+    const dist = {};
+    for (const [k, v] of Object.entries(counts)) dist[k] = v / total;
+    return dist;
+  }
+
+  _raiseAlert(agentId, type, details) {
+    const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+    if (this.alerts.find(a => a.agentId === agentId && a.type === type && a.timestamp > fiveMinAgo)) return;
+
+    const alert = {
+      alertId: `OALERT-${agentId.slice(0, 8)}-${Date.now().toString(36)}`,
+      agentId, type, details,
+      timestamp: Date.now(),
+      createdAt: new Date().toISOString(),
+    };
+    this.alerts.push(alert);
+    if (this.alerts.length > this.maxAlerts) this.alerts = this.alerts.slice(-this.maxAlerts);
+    this.stats.alertsRaised++;
+
+    if (eventBus) eventBus.publish('agent:online:alert', alert);
+    console.warn(`[OnlineEval] Alert for ${agentId}: ${details.message}`);
+  }
+
+  getSnapshot(agentId) {
+    const agentWindow = this.windows.get(agentId);
+    if (!agentWindow || agentWindow.entries.length === 0) return { agentId, hasData: false };
+
+    const now = Date.now();
+    const minuteEntries = agentWindow.entries.filter(e => e.timestamp > now - 60 * 1000);
+    const fiveMinEntries = agentWindow.entries.filter(e => e.timestamp > now - 5 * 60 * 1000);
+    const hourEntries = agentWindow.entries;
+
+    return {
+      agentId, hasData: true,
+      windows: {
+        minute: { count: minuteEntries.length, distribution: this._getDistribution(minuteEntries) },
+        fiveMin: { count: fiveMinEntries.length, distribution: this._getDistribution(fiveMinEntries) },
+        hour: { count: hourEntries.length, distribution: this._getDistribution(hourEntries) },
+      },
+      avgConfidence: Math.round((hourEntries.reduce((s, e) => s + e.confidence, 0) / hourEntries.length) * 100) / 100,
+      avgRiskScore: Math.round((hourEntries.reduce((s, e) => s + e.riskScore, 0) / hourEntries.length) * 100) / 100,
+      recentAlerts: this.alerts.filter(a => a.agentId === agentId).slice(-5),
+    };
+  }
+
+  getRecentAlerts(limit = 20) {
+    return this.alerts.slice(-limit);
+  }
+
+  getStats() {
+    return { ...this.stats, activeAgents: this.windows.size, totalAlerts: this.alerts.length };
+  }
 }
 
 // Singleton
 let instance = null;
 export function getEvalTracker() {
-  if (!instance) instance = new EvalTracker();
+  if (!instance) {
+    instance = new EvalTracker();
+    instance.onlineEvaluator = new OnlineEvaluator();
+  }
   return instance;
+}
+
+export function getOnlineEvaluator() {
+  return getEvalTracker().onlineEvaluator;
 }

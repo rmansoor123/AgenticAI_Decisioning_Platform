@@ -75,6 +75,32 @@ class CircuitBreaker {
     const cutoff = Date.now() - FAILURE_WINDOW_MS;
     this.failures = this.failures.filter(f => f > cutoff);
   }
+
+  /**
+   * Record a decision for potential rollback if this agent's circuit opens.
+   */
+  recordDecision(agentId, decisionId, decision) {
+    if (!this._recentDecisions) this._recentDecisions = new Map();
+    if (!this._recentDecisions.has(agentId)) this._recentDecisions.set(agentId, []);
+    const decisions = this._recentDecisions.get(agentId);
+    decisions.push({ decisionId, decision, timestamp: Date.now() });
+    // Keep only last 20
+    if (decisions.length > 20) decisions.shift();
+  }
+
+  /**
+   * Get decisions that should be reviewed/rolled back when circuit opens.
+   * Returns decisions made in the last `windowMs` that may be unreliable.
+   */
+  getDecisionsForRollback(agentId) {
+    if (!this._recentDecisions) return [];
+    const decisions = this._recentDecisions.get(agentId) || [];
+    const state = this.states.get(agentId);
+    if (!state || state.state !== 'OPEN') return [];
+    // Return decisions made during the failure window
+    const cutoff = Date.now() - (this.windowMs || 60000);
+    return decisions.filter(d => d.timestamp >= cutoff);
+  }
 }
 
 const breakers = new Map();

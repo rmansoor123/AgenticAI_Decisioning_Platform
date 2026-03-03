@@ -355,13 +355,225 @@ class MemoryStore {
    * Get memory store statistics.
    * @returns {Object} Statistics object
    */
+  // ============================================================================
+  // SHARED MEMORY (cross-agent knowledge pool)
+  // ============================================================================
+
+  /**
+   * Save to shared memory accessible by all agents.
+   * @param {string} sourceAgentId - Agent that created this knowledge
+   * @param {string} topic - Knowledge topic/category
+   * @param {Object|string} content - The shared knowledge
+   * @param {number} importance - Importance weight 0-1
+   * @returns {string} memoryId
+   */
+  saveShared(sourceAgentId, topic, content, importance = 0.5) {
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).slice(2, 8);
+    const memoryId = `SHARED-${topic}-${timestamp}-${random}`;
+
+    const record = {
+      memoryId,
+      sourceAgentId,
+      topic,
+      content,
+      importance: Math.max(0, Math.min(1, importance)),
+      accessCount: 0,
+      lastAccessed: null,
+      createdAt: new Date(timestamp).toISOString()
+    };
+
+    db_ops.insert('agent_shared_memory', 'memory_id', memoryId, record);
+    this.stats.writes++;
+    return memoryId;
+  }
+
+  /**
+   * Query shared memory across all agents by keyword + importance.
+   * @param {string} query - Search query
+   * @param {string} [topic] - Optional topic filter
+   * @param {number} [limit=5] - Max results
+   * @returns {Array<Object>}
+   */
+  queryShared(query, topic = null, limit = 5) {
+    this.stats.retrievals++;
+    const allRecords = db_ops.getAll('agent_shared_memory', 10000, 0);
+    let records = allRecords.map(r => r.data);
+
+    if (topic) {
+      records = records.filter(r => r.topic === topic);
+    }
+
+    if (!query || records.length === 0) return records.slice(0, limit);
+
+    const queryLower = query.toLowerCase();
+    const queryTokens = queryLower.split(/\s+/).filter(t => t.length > 1);
+
+    const scored = records.map(record => {
+      const contentStr = JSON.stringify(record.content).toLowerCase();
+      let matchCount = 0;
+      for (const token of queryTokens) {
+        if (contentStr.includes(token)) matchCount++;
+      }
+      const keywordScore = queryTokens.length > 0 ? matchCount / queryTokens.length : 0;
+      const totalScore = (keywordScore * 0.6) + ((record.importance || 0) * 0.4);
+      return { record, totalScore };
+    });
+
+    return scored
+      .filter(s => s.totalScore > 0)
+      .sort((a, b) => b.totalScore - a.totalScore)
+      .slice(0, limit)
+      .map(({ record }) => ({
+        ...(typeof record.content === 'object' ? record.content : { value: record.content }),
+        _memoryId: record.memoryId,
+        _sourceAgent: record.sourceAgentId,
+        _topic: record.topic,
+        _importance: record.importance,
+      }));
+  }
+
+  // ============================================================================
+  // LONG-TERM MEMORY PRUNING
+  // ============================================================================
+
+  /**
+   * Prune low-value long-term memories to prevent unbounded growth.
+   * Keeps memories based on importance, access frequency, and recency.
+   * @param {string} agentId - The agent ID
+   * @param {number} [maxEntries=500] - Maximum entries to keep per agent
+   * @returns {{ pruned: number, kept: number }}
+   */
+  pruneLongTerm(agentId, maxEntries = 500) {
+    const allRecords = db_ops.getAll('agent_long_term_memory', 10000, 0);
+    const agentRecords = allRecords
+      .map(r => r.data)
+      .filter(r => r.agentId === agentId);
+
+    if (agentRecords.length <= maxEntries) {
+      return { pruned: 0, kept: agentRecords.length };
+    }
+
+    const now = Date.now();
+    // Score each memory for retention priority
+    const scored = agentRecords.map(record => {
+      const importanceScore = record.importance || 0;
+      const accessScore = Math.min((record.accessCount || 0) / 10, 1);
+      const ageMs = now - new Date(record.createdAt || 0).getTime();
+      const ageDays = ageMs / (1000 * 60 * 60 * 24);
+      const recencyScore = Math.pow(0.5, ageDays / 30); // 30-day half-life
+      // Validated knowledge gets a boost
+      const typeBoost = record.type === 'validated_knowledge' ? 0.3 : record.type === 'correction' ? 0.2 : 0;
+      const retentionScore = (importanceScore * 0.35) + (accessScore * 0.25) + (recencyScore * 0.25) + (typeBoost * 0.15);
+      return { record, retentionScore };
+    });
+
+    // Sort by retention score descending, keep top `maxEntries`
+    scored.sort((a, b) => b.retentionScore - a.retentionScore);
+    const toKeep = new Set(scored.slice(0, maxEntries).map(s => s.record.memoryId));
+    let pruned = 0;
+
+    for (const { record } of scored) {
+      if (!toKeep.has(record.memoryId)) {
+        db_ops.delete('agent_long_term_memory', 'memory_id', record.memoryId);
+        pruned++;
+      }
+    }
+
+    return { pruned, kept: maxEntries };
+  }
+
+  // ============================================================================
+  // EPISODIC MEMORY (full case replay)
+  // ============================================================================
+
+  /**
+   * Save a complete investigation episode for later replay.
+   * Stores the full narrative: input, each reasoning step, tool results,
+   * reflection, decision, and outcome.
+   * @param {string} agentId - The agent ID
+   * @param {Object} episode - Full investigation record
+   * @returns {string} episodeId
+   */
+  saveEpisode(agentId, episode) {
+    const timestamp = Date.now();
+    const episodeId = `EP-${agentId}-${timestamp.toString(36)}`;
+
+    const record = {
+      episodeId,
+      agentId,
+      input: episode.input,
+      decision: episode.decision,
+      riskScore: episode.riskScore,
+      confidence: episode.confidence,
+      outcome: episode.outcome || null,
+      steps: (episode.steps || []).map(s => ({
+        phase: s.phase,
+        summary: typeof s.summary === 'string' ? s.summary.slice(0, 500) : JSON.stringify(s.summary).slice(0, 500),
+        toolResults: (s.toolResults || []).map(t => ({
+          tool: t.tool,
+          success: t.success,
+          snippet: JSON.stringify(t.data || {}).slice(0, 200),
+        })),
+        timestamp: s.timestamp || new Date().toISOString(),
+      })),
+      reflection: episode.reflection || null,
+      chainOfThought: episode.chainOfThought ? JSON.stringify(episode.chainOfThought).slice(0, 2000) : null,
+      createdAt: new Date(timestamp).toISOString(),
+    };
+
+    db_ops.insert('agent_episodes', 'episode_id', episodeId, record);
+    this.stats.writes++;
+    return episodeId;
+  }
+
+  /**
+   * Query episodes for replay or pattern analysis.
+   * @param {string} agentId - Agent ID (or null for all agents)
+   * @param {Object} [filters] - { decision, minRiskScore, maxRiskScore, outcome }
+   * @param {number} [limit=10] - Max results
+   * @returns {Array<Object>}
+   */
+  queryEpisodes(agentId = null, filters = {}, limit = 10) {
+    this.stats.retrievals++;
+    const allRecords = db_ops.getAll('agent_episodes', 10000, 0);
+    let episodes = allRecords.map(r => r.data);
+
+    if (agentId) episodes = episodes.filter(e => e.agentId === agentId);
+    if (filters.decision) episodes = episodes.filter(e => e.decision === filters.decision);
+    if (filters.outcome) episodes = episodes.filter(e => e.outcome === filters.outcome);
+    if (filters.minRiskScore !== undefined) episodes = episodes.filter(e => (e.riskScore || 0) >= filters.minRiskScore);
+    if (filters.maxRiskScore !== undefined) episodes = episodes.filter(e => (e.riskScore || 0) <= filters.maxRiskScore);
+
+    return episodes
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+      .slice(0, limit);
+  }
+
+  /**
+   * Get a single episode by ID for full replay.
+   * @param {string} episodeId
+   * @returns {Object|null}
+   */
+  getEpisode(episodeId) {
+    this.stats.retrievals++;
+    const row = db_ops.getById('agent_episodes', 'episode_id', episodeId);
+    return row?.data || null;
+  }
+
   getStats() {
     const stmCount = db_ops.count('agent_short_term_memory');
     const ltmCount = db_ops.count('agent_long_term_memory');
+    let sharedCount = 0;
+    let episodeCount = 0;
+    try { sharedCount = db_ops.count('agent_shared_memory'); } catch (e) { /* table may not exist */ }
+    try { episodeCount = db_ops.count('agent_episodes'); } catch (e) { /* table may not exist */ }
 
     return {
       shortTermEntries: stmCount,
       longTermEntries: ltmCount,
+      sharedEntries: sharedCount,
+      episodeCount,
       writes: this.stats.writes,
       retrievals: this.stats.retrievals,
       consolidations: this.stats.consolidations

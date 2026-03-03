@@ -118,6 +118,51 @@ class CitationTracker {
   }
 
   /**
+   * Validate citations against quality rules for a given decision.
+   * Returns issues and whether the decision should be downgraded.
+   *
+   * Rules:
+   * 1. REJECT/BLOCK decisions need >= 3 citations
+   * 2. No orphaned citations (confidence <= 0.2 means no matching evidence)
+   * 3. Single-source dependency warning (all citations from one tool)
+   *
+   * @param {Array} citations - Enriched citations with confidence scores
+   * @param {string} decision - The proposed decision (APPROVE/REVIEW/REJECT/BLOCK)
+   * @param {number} toolCount - Number of tools executed
+   * @returns {{ valid: boolean, issues: Array, shouldDowngrade: boolean }}
+   */
+  validateCitations(citations, decision, toolCount) {
+    const issues = [];
+
+    if (!citations || citations.length === 0) {
+      if (['REJECT', 'BLOCK'].includes(decision)) {
+        issues.push({ rule: 'no_citations', message: 'High-stakes decision with no citations' });
+      }
+      return { valid: issues.length === 0, issues, shouldDowngrade: issues.length > 0 };
+    }
+
+    // Rule 1: REJECT/BLOCK needs >= 3 citations
+    if (['REJECT', 'BLOCK'].includes(decision) && citations.length < 3) {
+      issues.push({ rule: 'min_citations', required: 3, actual: citations.length });
+    }
+
+    // Rule 2: Orphaned citations (no matching evidence)
+    const orphaned = citations.filter(c => c.confidence <= 0.2);
+    if (orphaned.length > 0) {
+      issues.push({ rule: 'orphaned_citations', count: orphaned.length, tools: orphaned.map(c => c.toolName) });
+    }
+
+    // Rule 3: Single-source dependency
+    const toolNames = [...new Set(citations.map(c => c.toolName))];
+    if (toolNames.length === 1 && citations.length > 1) {
+      issues.push({ rule: 'single_source', tool: toolNames[0] });
+    }
+
+    const shouldDowngrade = issues.some(i => i.rule === 'min_citations' || i.rule === 'no_citations');
+    return { valid: issues.length === 0, issues, shouldDowngrade };
+  }
+
+  /**
    * Extract the claim text surrounding a citation marker.
    * Looks backwards to the previous sentence-ending punctuation or start of text,
    * and forwards to the next sentence-ending punctuation or citation marker.

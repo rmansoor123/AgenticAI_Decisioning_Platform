@@ -43,14 +43,23 @@ class OutcomeSimulator {
    * @param {Object} decision - { agentId, decisionId, action, riskScore, confidence, evidence }
    */
   scheduleOutcome(decision) {
-    const { agentId, decisionId, action, riskScore = 50, confidence = 0.5 } = decision;
+    const { agentId, decisionId, action, riskScore = 50, confidence = 0.5, callback } = decision;
 
     const delayMs = Math.floor(Math.random() * 5000); // 0-5 seconds
     const outcome = this._generateOutcome(action, riskScore, confidence);
 
     const timeoutId = setTimeout(() => {
-      this._emitOutcome(agentId, decisionId, decision, outcome);
+      const payload = this._emitOutcome(agentId, decisionId, decision, outcome);
       this.pendingOutcomes.delete(decisionId);
+
+      // Invoke callback if provided (used for confidence calibration)
+      if (typeof callback === 'function') {
+        try {
+          callback(payload);
+        } catch (e) {
+          // Callback errors are non-fatal
+        }
+      }
     }, delayMs);
 
     this.pendingOutcomes.set(decisionId, { timeoutId, decision, outcome });

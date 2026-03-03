@@ -61,7 +61,7 @@ class TraceCollector {
     return span;
   }
 
-  endTrace(traceId, result = {}) {
+  async endTrace(traceId, result = {}) {
     const trace = this.activeTraces.get(traceId);
     if (!trace) return null;
 
@@ -89,6 +89,14 @@ class TraceCollector {
     // Persist to database
     db_ops.insert('agent_traces', 'trace_id', traceId, trace);
     this.stats.tracesCompleted++;
+
+    // Queue for OTLP export
+    try {
+      const { getOTelExporter } = await import('./otel-exporter.js');
+      getOTelExporter().queueTrace(trace);
+    } catch (e) {
+      // OTel export is optional
+    }
 
     return trace;
   }
