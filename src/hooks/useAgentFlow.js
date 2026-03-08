@@ -42,7 +42,13 @@ export function useAgentFlow(correlationId) {
     setEvents(prev => {
       const seen = seenIdsRef.current
       const novel = incoming.filter(e => e.id && !seen.has(e.id))
-      if (novel.length === 0) return prev
+      if (novel.length === 0) {
+        // Even with no new events, check if we already have a terminal event
+        foundTerminal = prev.some(e =>
+          e.type === 'agent:decision:complete' || e.type === 'agent:decision:error'
+        )
+        return prev
+      }
 
       novel.forEach(e => seen.add(e.id))
 
@@ -168,7 +174,8 @@ export function useAgentFlow(correlationId) {
 
       try {
         const resp = await fetch(
-          `${API_BASE}/agents/events?correlationId=${encodeURIComponent(correlationId)}&limit=500`
+          `${API_BASE}/agents/events?correlationId=${encodeURIComponent(correlationId)}&limit=500`,
+          { cache: 'no-store' }
         )
         const json = await resp.json()
 

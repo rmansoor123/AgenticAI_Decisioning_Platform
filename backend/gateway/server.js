@@ -495,6 +495,7 @@ app.get('/api/health', (req, res) => {
 
 // Agent events endpoint — backfill events by correlationId
 app.get('/api/agents/events', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
   try {
     const { getEventBus: getEB } = await import('./websocket/event-bus.js');
     const bus = getEB();
