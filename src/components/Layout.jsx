@@ -30,6 +30,7 @@ export default function Layout({ children, wsConnected }) {
       color: 'text-blue-400',
       children: [
         { name: 'Onboarding', href: '/onboarding', phase: 'Pre-Launch' },
+        { name: 'Live Onboarding', href: '/onboarding/live' },
         { name: 'Account Setup', href: '/account-setup' },
         { name: 'Item Setup', href: '/item-setup' },
         { name: 'Listings', href: '/listing' },

@@ -102,6 +102,13 @@ export class BaseAgent {
     this.evalTracker = getEvalTracker();
     this.promptRegistry = getPromptRegistry();
 
+    // Temporal memory (lazy-init, may be null if TEMPORAL_BACKEND=none)
+    this.temporalMemory = null;
+    import('./temporal-factory.js')
+      .then(({ getTemporalMemory }) => getTemporalMemory())
+      .then(tm => { this.temporalMemory = tm; })
+      .catch(() => { /* temporal memory not available */ });
+
     // Listen for outcome feedback events
     if (eventBus) {
       eventBus.subscribe('agent:outcome:received', (payload) => {
@@ -154,6 +161,9 @@ export class BaseAgent {
     // Reset re-plan counter and investigation round for each reasoning session
     this._replanCount = 0;
     this._investigationRound = 0;
+
+    // Extract correlation ID for event scoping
+    this._correlationId = context._correlationId || null;
 
     // Rate limit check
     const rateLimiter = getAgentRateLimiter();
@@ -255,26 +265,55 @@ export class BaseAgent {
       context._patternMatches = patternMatches;
 
       // Step 2: THINK - Analyze the situation
+      this.emitEvent('agent:step:start', {
+        agentId: this.agentId, step: 'THINK', description: 'Analyzing input and identifying risk factors',
+        input: this.sanitizeInput(input)
+      });
       this.currentChain.observe('Received input for analysis', input);
       thought.reasoning.push(await this.think(input, context));
+      this.emitEvent('agent:step:complete', {
+        agentId: this.agentId, step: 'THINK',
+        understanding: thought.reasoning[0]?.understanding || null,
+        keyRisks: thought.reasoning[0]?.key_risks || [],
+        confidence: thought.reasoning[0]?.confidence || null,
+        suggestedApproach: thought.reasoning[0]?.suggested_approach || null,
+        llmEnhanced: thought.reasoning[0]?.llmEnhanced || false,
+        patternMatches: patternMatches?.matches?.length || 0
+      });
 
       // Checkpoint after think
       try { getReasoningCheckpoint().save(traceId, this.agentId, 'think', { input, thinkResult: thought.reasoning }); } catch (e) { /* non-critical */ }
 
       // Step 3: PLAN - Determine actions needed
+      this.emitEvent('agent:step:start', {
+        agentId: this.agentId, step: 'PLAN', description: 'Selecting tools and building investigation plan'
+      });
       const plan = await this.plan(thought.reasoning[0], context);
       this.currentChain.analyze(`Created plan with ${plan.actions.length} actions`);
       thought.reasoning.push({ plan });
+      this.emitEvent('agent:step:complete', {
+        agentId: this.agentId, step: 'PLAN',
+        goal: plan.goal || null,
+        reasoning: plan.reasoning || null,
+        actions: plan.actions?.map(a => ({ tool: a.type, rationale: a.rationale || null })) || [],
+        actionCount: plan.actions?.length || 0,
+        llmEnhanced: plan.llmEnhanced || false
+      });
 
       // Checkpoint after plan
       try { getReasoningCheckpoint().save(traceId, this.agentId, 'plan', { plan: { actions: plan.actions?.map(a => a.type) } }); } catch (e) { /* non-critical */ }
 
       // Step 4: ACT - Execute the plan
+      this.emitEvent('agent:step:start', {
+        agentId: this.agentId, step: 'ACT', description: `Executing ${plan.actions.length} tool(s)`,
+        tools: plan.actions.map(a => a.type)
+      });
       for (const action of plan.actions) {
-        // Emit action start
+        // Emit action start with rationale
         this.emitEvent('agent:action:start', {
           agentId: this.agentId,
           action: action.type,
+          rationale: action.rationale || null,
           params: this.sanitizeInput(action.params)
         });
 
@@ -282,11 +321,16 @@ export class BaseAgent {
         const actionResult = await this.act(action);
         thought.actions.push({ action, result: actionResult });
 
-        // Emit action complete
+        // Emit action complete with result summary
+        const resultData = actionResult?.data || actionResult || {};
         this.emitEvent('agent:action:complete', {
           agentId: this.agentId,
           action: action.type,
-          success: actionResult?.success !== false
+          success: actionResult?.success !== false,
+          source: resultData.source || null,
+          riskScore: resultData.riskScore ?? resultData.risk_score ?? null,
+          verified: resultData.verified ?? resultData.valid ?? null,
+          summary: this._summarizeToolResult(action.type, resultData)
         });
         this.traceCollector.endSpan(traceId, `action:${action.type}`, { success: actionResult?.success !== false });
 
@@ -370,6 +414,11 @@ export class BaseAgent {
       }
 
       // Step 5: OBSERVE - Evaluate results
+      this.emitEvent('agent:step:start', {
+        agentId: this.agentId, step: 'OBSERVE', description: 'Synthesizing findings from all tool results',
+        toolCount: thought.actions.length,
+        successCount: thought.actions.filter(a => a.result?.success !== false).length
+      });
       thought.result = await this.observe(thought.actions, context);
 
       // Validate observation output schema
@@ -427,7 +476,22 @@ export class BaseAgent {
       // Checkpoint after observe
       try { getReasoningCheckpoint().save(traceId, this.agentId, 'observe', { decision: thought.result?.decision || thought.result?.recommendation?.action, riskScore: thought.result?.riskScore, confidence: thought.result?.confidence }); } catch (e) { /* non-critical */ }
 
+      this.emitEvent('agent:step:complete', {
+        agentId: this.agentId, step: 'OBSERVE',
+        decision: thought.result?.recommendation?.action || thought.result?.decision || null,
+        riskScore: thought.result?.riskScore || thought.result?.overallRisk?.score || null,
+        confidence: thought.result?.confidence || null,
+        reasoning: thought.result?.reasoning || thought.result?.summary || null,
+        riskFactors: thought.result?.riskFactors?.slice(0, 5) || [],
+        llmEnhanced: thought.result?.llmEnhanced || false
+      });
+
       // Step 5.1: REFLECT — critique proposed decision before policy check
+      this.emitEvent('agent:step:start', {
+        agentId: this.agentId, step: 'REFLECT',
+        description: 'Self-critiquing proposed decision before policy check',
+        proposedDecision: thought.result?.recommendation?.action || thought.result?.decision
+      });
       this.traceCollector.startSpan(traceId, 'reflection', {
         proposedDecision: thought.result?.recommendation?.action || thought.result?.decision
       });
@@ -465,6 +529,14 @@ export class BaseAgent {
       this.traceCollector.endSpan(traceId, 'reflection', {
         shouldRevise: reflection.shouldRevise,
         concerns: reflection.concerns.length
+      });
+      this.emitEvent('agent:step:complete', {
+        agentId: this.agentId, step: 'REFLECT',
+        shouldRevise: reflection.shouldRevise,
+        concerns: reflection.concerns || [],
+        revisedAction: reflection.revisedAction || null,
+        revisedConfidence: reflection.revisedConfidence || null,
+        llmEnhanced: reflection.llmEnhanced || false
       });
 
       // Step 5.15: MULTI-TURN INVESTIGATION — deepen analysis if findings are uncertain
@@ -515,6 +587,10 @@ export class BaseAgent {
       }
 
       // Step 5.25: POLICY CHECK — enforce hard/soft policies on the proposed decision
+      this.emitEvent('agent:step:start', {
+        agentId: this.agentId, step: 'POLICY', description: 'Enforcing hard/soft policy rules',
+        proposedDecision: thought.result?.recommendation?.action || thought.result?.decision
+      });
       const proposedDecision = thought.result?.recommendation || { action: thought.result?.decision, confidence: thought.result?.confidence };
       if (proposedDecision?.action) {
         const policyResult = this.policyEngine.enforce(
@@ -543,15 +619,43 @@ export class BaseAgent {
         } else if (policyResult.flags.length > 0) {
           thought.result.policyFlags = policyResult.flags;
         }
+        this.emitEvent('agent:step:complete', {
+          agentId: this.agentId, step: 'POLICY',
+          allowed: policyResult.allowed,
+          violations: policyResult.violations?.map(v => ({ policyId: v.policyId, severity: v.severity, message: v.message })) || [],
+          flags: policyResult.flags || [],
+          enforcedAction: !policyResult.allowed ? policyResult.enforcedDecision?.action : null
+        });
+      } else {
+        this.emitEvent('agent:step:complete', {
+          agentId: this.agentId, step: 'POLICY', allowed: true, violations: [], flags: []
+        });
       }
 
       // Step 5.4: AGENT JUDGE — cross-agent review for high-stakes decisions
-      const judgeDecision = thought.result?.recommendation?.action || thought.result?.decision;
+      const rawDecision = thought.result?.recommendation?.action || thought.result?.decision;
+      const judgeDecision = typeof rawDecision === 'object' ? rawDecision?.action : rawDecision;
       if (['REJECT', 'BLOCK'].includes(judgeDecision) && (thought.result?.confidence || 0) >= 0.7) {
+        this.emitEvent('agent:step:start', {
+          agentId: this.agentId, step: 'JUDGE',
+          description: 'Independent cross-agent review of high-stakes decision',
+          decisionUnderReview: judgeDecision,
+          judgeRole: 'cross-agent'
+        });
         try {
           const judge = getAgentJudge();
           const review = await judge.evaluate(thought, this.agentId);
           thought.result._judgeReview = review;
+
+          this.emitEvent('agent:step:complete', {
+            agentId: this.agentId, step: 'JUDGE',
+            quality: review.quality,
+            recommendation: review.recommendation,
+            issues: review.issues || [],
+            reasoning: review.reasoning || null,
+            judgeAgent: review.judgeAgent || null,
+            llmEnhanced: review.llmEnhanced || false
+          });
 
           if (review.recommendation === 'overturn') {
             const originalAction = judgeDecision;
@@ -571,18 +675,30 @@ export class BaseAgent {
             });
           }
         } catch (e) {
-          // Judge evaluation is non-blocking; skip on failure
+          this.emitEvent('agent:step:complete', {
+            agentId: this.agentId, step: 'JUDGE', skipped: true, reason: e.message
+          });
         }
+      } else {
+        // Judge not triggered — log why
+        this.emitEvent('agent:step:complete', {
+          agentId: this.agentId, step: 'JUDGE', skipped: true,
+          reason: !['REJECT', 'BLOCK'].includes(judgeDecision)
+            ? `Decision "${judgeDecision}" does not require judge review`
+            : `Confidence ${(thought.result?.confidence || 0).toFixed(2)} below 0.7 threshold`
+        });
       }
 
       // Step 5.5: Write decision back to knowledge base
       await this.writeBackKnowledge(input, thought.result);
 
       // Step 6: Form conclusion
-      this.currentChain.conclude(
-        thought.result?.summary || 'Analysis complete',
-        CONFIDENCE.LIKELY
-      );
+      if (this.currentChain) {
+        this.currentChain.conclude(
+          thought.result?.summary || 'Analysis complete',
+          CONFIDENCE.LIKELY
+        );
+      }
 
       // Step 7: LEARN - Update memory and patterns
       this.updateMemory(thought);
@@ -646,7 +762,7 @@ export class BaseAgent {
       });
 
       // Attach chain of thought to result
-      thought.chainOfThought = this.currentChain.generateTrace();
+      thought.chainOfThought = this.currentChain?.generateTrace() || null;
 
       // Record metrics and end trace
       const reasonDuration = Date.now() - reasonStartTime;
@@ -680,8 +796,10 @@ export class BaseAgent {
     } catch (error) {
       thought.error = error.message;
       thought.result = { success: false, error: error.message };
-      this.currentChain.conclude(`Error: ${error.message}`, CONFIDENCE.CERTAIN);
-      thought.chainOfThought = this.currentChain.generateTrace();
+      if (this.currentChain) {
+        this.currentChain.conclude(`Error: ${error.message}`, CONFIDENCE.CERTAIN);
+        thought.chainOfThought = this.currentChain?.generateTrace() || null;
+      }
       const reasonDuration = Date.now() - reasonStartTime;
       this.metricsCollector.recordExecution(this.agentId, reasonDuration, false);
       await this.traceCollector.endTrace(traceId, { success: false, error: error.message });
@@ -739,17 +857,21 @@ export class BaseAgent {
       thought.result._graphTrace = result._graphTrace;
       thought.result._visitedNodes = result._visitedNodes;
 
-      this.currentChain.conclude(
-        thought.result?.summary || 'Graph-based analysis complete',
-        CONFIDENCE.LIKELY
-      );
+      if (this.currentChain) {
+        this.currentChain.conclude(
+          thought.result?.summary || 'Graph-based analysis complete',
+          CONFIDENCE.LIKELY
+        );
+      }
     } catch (error) {
       thought.error = error.message;
       thought.result = { success: false, error: error.message };
-      this.currentChain.conclude(`Error: ${error.message}`, CONFIDENCE.CERTAIN);
+      if (this.currentChain) {
+        this.currentChain.conclude(`Error: ${error.message}`, CONFIDENCE.CERTAIN);
+      }
     }
 
-    thought.chainOfThought = this.currentChain.generateTrace();
+    thought.chainOfThought = this.currentChain?.generateTrace() || null;
     const reasonDuration = Date.now() - reasonStartTime;
     this.metricsCollector.recordExecution(this.agentId, reasonDuration, thought.result?.success !== false);
     await this.traceCollector.endTrace(traceId, { success: thought.result?.success !== false });
@@ -1029,7 +1151,8 @@ export class BaseAgent {
     const confidence = observation?.confidence || 0;
 
     // 1. Evidence contradiction: count approve vs reject signals
-    const toolResults = actions.map(a => a.result).filter(Boolean);
+    const safeActions = Array.isArray(actions) ? actions : [];
+    const toolResults = safeActions.map(a => a.result).filter(Boolean);
     let approveSignals = 0;
     let rejectSignals = 0;
     for (const r of toolResults) {
@@ -1050,7 +1173,7 @@ export class BaseAgent {
     }
 
     // 2. Confidence-evidence mismatch
-    const toolsRun = actions.length;
+    const toolsRun = safeActions.length;
     if (confidence > 0.8 && toolsRun < 3) {
       concerns.push(`High confidence (${confidence}) with only ${toolsRun} tools executed — potentially overconfident`);
     }
@@ -1212,6 +1335,23 @@ Select follow-up tools to investigate the concerns.`;
       }, importance);
     }
 
+    // Save temporal fact if entity ID present in context (fire-and-forget)
+    if (this.temporalMemory && decision) {
+      const entityId = thought.result?.sellerId || thought.result?.transactionId
+        || thought.result?.entityId || null;
+      if (entityId) {
+        const entityType = thought.result?.sellerId ? 'seller'
+          : thought.result?.transactionId ? 'transaction' : 'entity';
+        try {
+          Promise.resolve(this.temporalMemory.saveTemporalFact(entityId, entityType, {
+            text: `${decision}: ${thought.result?.summary || ''}`,
+            confidence: thought.result?.confidence || 0.5,
+            riskScore: thought.result?.overallRisk?.score || thought.result?.riskScore || 0,
+          }, { agentId: this.agentId })).catch(() => {});
+        } catch (_) { /* fire-and-forget */ }
+      }
+    }
+
     // Periodically consolidate pattern memory (every 20 decisions)
     if (this.thoughtLog.length % 20 === 0 && this.thoughtLog.length > 0) {
       const topPatterns = this.patternMemory.getTopPatterns(50);
@@ -1227,7 +1367,20 @@ Select follow-up tools to investigate the concerns.`;
       .slice(-5);
     // Also check persistent long-term memory
     const longTerm = this.memoryStore.queryLongTerm(this.agentId, inputStr.slice(0, 100), 3);
-    return { recent: inMemory, learned: longTerm };
+
+    // Include temporal history if available
+    let temporal = [];
+    if (this.temporalMemory) {
+      const entityId = input?.sellerId || input?.transactionId || input?.entityId || null;
+      if (entityId) {
+        try {
+          const result = this.temporalMemory.queryTemporalHistory(entityId, inputStr.slice(0, 100), 5);
+          temporal = result instanceof Promise ? [] : result; // sync only for in-memory
+        } catch (_) { /* temporal unavailable */ }
+      }
+    }
+
+    return { recent: inMemory, learned: longTerm, temporal };
   }
 
   /**
@@ -1718,10 +1871,48 @@ Select follow-up tools to investigate the concerns.`;
   /**
    * Emit an event to the event bus
    */
+  /**
+   * Summarize a tool result into a human-readable string for the flow viewer.
+   */
+  _summarizeToolResult(toolName, data) {
+    if (!data) return 'No data returned';
+    try {
+      switch (toolName) {
+        case 'verify_email':
+          return `Email ${data.valid ? 'valid' : 'invalid'}${data.disposable ? ' (disposable)' : ''}${data.reputation ? `, reputation: ${data.reputation}` : ''}`;
+        case 'check_ip_reputation':
+          return `IP ${data.country || '??'}${data.proxy ? ' PROXY' : ''}${data.hosting ? ' HOSTING' : ''}${data.riskScore != null ? `, risk: ${data.riskScore}` : ''}`;
+        case 'verify_identity':
+          return `${data.documentType || 'Document'} format ${data.formatValid || data.valid ? 'valid' : 'invalid'}${data.confidence ? `, confidence: ${(data.confidence * 100).toFixed(0)}%` : ''}`;
+        case 'verify_business':
+          return `Business ${data.found || data.verified ? 'found' : 'not found'}${data.companyName ? `: ${data.companyName}` : ''}${data.status ? `, status: ${data.status}` : ''}`;
+        case 'verify_address':
+          return `Address ${data.valid || data.found ? 'verified' : 'not verified'}${data.formattedAddress ? `: ${data.formattedAddress.slice(0, 60)}` : ''}`;
+        case 'screen_watchlist':
+          return `${data.matched ? 'MATCH FOUND' : 'No matches'}${data.ofacMatches?.length ? ` (${data.ofacMatches.length} OFAC)` : ''}${data.forumSpamResult?.found ? ' + forum spam' : ''}`;
+        case 'check_fraud_databases':
+          return `${data.found ? 'FOUND in fraud DB' : 'Clean'}${data.riskScore != null ? `, risk: ${data.riskScore}` : ''}`;
+        case 'verify_bank_account':
+          return `Routing ${data.routingValid ? 'valid' : 'invalid'}${data.bankName ? ` (${data.bankName})` : ''}${data.mismatch ? ' MISMATCH' : ''}`;
+        case 'check_financial_history':
+          return `Financial risk: ${data.riskLevel || 'unknown'}${data.score != null ? `, score: ${data.score}` : ''}`;
+        case 'analyze_business_category':
+          return `Category risk: ${data.riskLevel || 'unknown'}${data.riskScore != null ? ` (${data.riskScore})` : ''}`;
+        case 'check_duplicates':
+          return `${data.duplicatesFound || data.matches?.length ? `${data.matches?.length || 0} duplicate(s) found` : 'No duplicates'}`;
+        default:
+          return data.summary || JSON.stringify(data).slice(0, 100);
+      }
+    } catch {
+      return 'Result processed';
+    }
+  }
+
   emitEvent(eventType, data) {
     if (eventBus) {
       eventBus.publish(eventType, {
         ...data,
+        ...(this._correlationId ? { correlationId: this._correlationId } : {}),
         timestamp: new Date().toISOString()
       });
     }

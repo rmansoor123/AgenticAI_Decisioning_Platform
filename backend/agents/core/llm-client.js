@@ -1,7 +1,8 @@
 /**
- * LLM Client - Anthropic Claude Integration
+ * LLM Client - Multi-Provider (OpenAI + Anthropic)
  *
  * Provides LLM reasoning capabilities to agents with:
+ * - OpenAI and Anthropic provider support (LLM_PROVIDER env var)
  * - Singleton pattern for shared client
  * - Graceful fallback when API key absent
  * - Retry with exponential backoff
@@ -13,24 +14,43 @@
 import { getLLMCache } from './llm-cache.js';
 import { getCostTracker } from './cost-tracker.js';
 
+// Dynamic SDK imports
 let Anthropic = null;
+let OpenAI = null;
+
 try {
   const mod = await import('@anthropic-ai/sdk');
   Anthropic = mod.default || mod.Anthropic;
 } catch (e) {
-  // SDK not installed — LLM features disabled
+  // Anthropic SDK not installed
 }
 
-const MODEL = 'claude-sonnet-4-20250514';
+try {
+  const mod = await import('openai');
+  OpenAI = mod.default || mod.OpenAI;
+} catch (e) {
+  // OpenAI SDK not installed
+}
+
+const LLM_PROVIDER = process.env.LLM_PROVIDER || 'openai'; // 'openai' | 'anthropic'
+
+const DEFAULT_MODELS = {
+  openai: 'gpt-4o-mini',
+  anthropic: 'claude-haiku-4-5-20251001'
+};
+
+const MODEL = process.env.LLM_MODEL || DEFAULT_MODELS[LLM_PROVIDER] || 'gpt-4o-mini';
 const TEMPERATURE = 0.3;
 const MAX_TOKENS = 2048;
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 5;
 const BASE_DELAY_MS = 1000;
+const RATE_LIMIT_DELAY_MS = 15000;
 
 class LLMClient {
   constructor() {
     this.client = null;
     this.enabled = false;
+    this.provider = LLM_PROVIDER;
     this.stats = {
       calls: 0,
       totalTokens: 0,
@@ -39,36 +59,59 @@ class LLMClient {
     };
     this.repairStats = { attempts: 0, successes: 0 };
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
     const useLLM = process.env.USE_LLM === 'true';
 
-    if (Anthropic && apiKey && apiKey !== 'your_anthropic_key' && useLLM) {
+    if (!useLLM) {
+      console.log('LLM Client disabled (USE_LLM not true). Agents use hardcoded logic.');
+      return;
+    }
+
+    if (this.provider === 'openai') {
+      this._initOpenAI();
+    } else {
+      this._initAnthropic();
+    }
+  }
+
+  _initOpenAI() {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (OpenAI && apiKey && apiKey !== 'your_openai_key') {
+      try {
+        this.client = new OpenAI({ apiKey });
+        this.enabled = true;
+        console.log(`LLM Client initialized (OpenAI, model: ${MODEL})`);
+      } catch (e) {
+        console.warn('LLM Client: Failed to initialize OpenAI SDK:', e.message);
+      }
+    } else {
+      const reasons = [];
+      if (!OpenAI) reasons.push('SDK not installed');
+      if (!apiKey || apiKey === 'your_openai_key') reasons.push('no OPENAI_API_KEY');
+      console.log(`LLM Client: OpenAI disabled (${reasons.join(', ')}). Agents use hardcoded logic.`);
+    }
+  }
+
+  _initAnthropic() {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (Anthropic && apiKey && apiKey !== 'your_anthropic_key') {
       try {
         this.client = new Anthropic({ apiKey });
         this.enabled = true;
-        console.log('LLM Client initialized (Claude enabled)');
+        console.log(`LLM Client initialized (Anthropic Claude, model: ${MODEL})`);
       } catch (e) {
         console.warn('LLM Client: Failed to initialize Anthropic SDK:', e.message);
       }
     } else {
       const reasons = [];
       if (!Anthropic) reasons.push('SDK not installed');
-      if (!apiKey || apiKey === 'your_anthropic_key') reasons.push('no API key');
-      if (!useLLM) reasons.push('USE_LLM not true');
-      console.log(`LLM Client disabled (${reasons.join(', ')}). Agents use hardcoded logic.`);
+      if (!apiKey || apiKey === 'your_anthropic_key') reasons.push('no ANTHROPIC_API_KEY');
+      console.log(`LLM Client: Anthropic disabled (${reasons.join(', ')}). Agents use hardcoded logic.`);
     }
   }
 
   /**
-   * Call Claude with system + user prompts.
-   * Returns { content, usage, latencyMs, toolUse, cached? } or null on failure.
-   *
-   * Options:
-   *   - model: override model
-   *   - maxTokens: override max tokens
-   *   - temperature: override temperature
-   *   - agentId: caller agent ID for cost attribution
-   *   - skipCache: if true, bypass response cache
+   * Call LLM with system + user prompts.
+   * Routes to OpenAI or Anthropic based on provider.
    */
   async complete(systemPrompt, userPrompt, options = {}) {
     if (!this.enabled) return null;
@@ -77,7 +120,7 @@ class LLMClient {
     const temperature = options.temperature ?? TEMPERATURE;
     const agentId = options.agentId || 'SYSTEM';
 
-    // Check cache first (unless explicitly skipped)
+    // Check cache first
     if (!options.skipCache) {
       const cache = getLLMCache();
       const cached = cache.get(model, temperature, systemPrompt, userPrompt);
@@ -92,52 +135,47 @@ class LLMClient {
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
-        const response = await this.client.messages.create({
-          model,
-          max_tokens: options.maxTokens || MAX_TOKENS,
-          temperature,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userPrompt }]
-        });
+        let result;
+        if (this.provider === 'openai') {
+          result = await this._callOpenAI(model, temperature, systemPrompt, userPrompt, options);
+        } else {
+          result = await this._callAnthropic(model, temperature, systemPrompt, userPrompt, options);
+        }
 
         const latencyMs = Date.now() - startTime;
-        const inputTokens = response.usage?.input_tokens || 0;
-        const outputTokens = response.usage?.output_tokens || 0;
+        const { inputTokens, outputTokens, content, toolUse } = result;
 
         this.stats.calls++;
         this.stats.totalTokens += inputTokens + outputTokens;
         this.stats.totalLatencyMs += latencyMs;
 
-        // Record cost
         const costTracker = getCostTracker();
         costTracker.recordCost(agentId, model, inputTokens, outputTokens, latencyMs);
 
-        const content = response.content
-          .filter(b => b.type === 'text')
-          .map(b => b.text)
-          .join('\n');
-
-        const toolUse = response.content.find(b => b.type === 'tool_use') || null;
-
-        const result = {
+        const finalResult = {
           content,
           usage: { inputTokens, outputTokens },
           latencyMs,
           toolUse
         };
 
-        // Store in cache
         if (!options.skipCache) {
           const cache = getLLMCache();
-          cache.set(model, temperature, systemPrompt, userPrompt, result);
+          cache.set(model, temperature, systemPrompt, userPrompt, finalResult);
         }
 
-        return result;
+        return finalResult;
       } catch (error) {
         lastError = error;
-        const status = error?.status || error?.statusCode;
+        const status = error?.status || error?.statusCode || error?.code;
 
-        if (status === 429 || status >= 500) {
+        if (status === 429 || status === 'rate_limit_exceeded') {
+          const delay = RATE_LIMIT_DELAY_MS * (attempt + 1);
+          console.warn(`LLM Client: Rate limited, waiting ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})`);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+        if (typeof status === 'number' && status >= 500) {
           const delay = BASE_DELAY_MS * Math.pow(2, attempt);
           await new Promise(r => setTimeout(r, delay));
           continue;
@@ -151,6 +189,54 @@ class LLMClient {
     this.stats.errors++;
     console.warn('LLM Client: Call failed after retries:', lastError?.message);
     return null;
+  }
+
+  async _callOpenAI(model, temperature, systemPrompt, userPrompt, options) {
+    const response = await this.client.chat.completions.create({
+      model,
+      max_tokens: options.maxTokens || MAX_TOKENS,
+      temperature,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ]
+    });
+
+    const choice = response.choices?.[0];
+    const content = choice?.message?.content || '';
+    const inputTokens = response.usage?.prompt_tokens || 0;
+    const outputTokens = response.usage?.completion_tokens || 0;
+
+    // OpenAI tool calls (if any)
+    const toolCalls = choice?.message?.tool_calls;
+    const toolUse = toolCalls?.[0] ? {
+      type: 'tool_use',
+      name: toolCalls[0].function?.name,
+      input: JSON.parse(toolCalls[0].function?.arguments || '{}')
+    } : null;
+
+    return { content, inputTokens, outputTokens, toolUse };
+  }
+
+  async _callAnthropic(model, temperature, systemPrompt, userPrompt, options) {
+    const response = await this.client.messages.create({
+      model,
+      max_tokens: options.maxTokens || MAX_TOKENS,
+      temperature,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }]
+    });
+
+    const content = response.content
+      .filter(b => b.type === 'text')
+      .map(b => b.text)
+      .join('\n');
+
+    const toolUse = response.content.find(b => b.type === 'tool_use') || null;
+    const inputTokens = response.usage?.input_tokens || 0;
+    const outputTokens = response.usage?.output_tokens || 0;
+
+    return { content, inputTokens, outputTokens, toolUse };
   }
 
   /**
@@ -182,41 +268,29 @@ class LLMClient {
 
   /**
    * Attempt to parse JSON from LLM text output.
-   * Handles plain JSON, markdown ```json blocks, and plain ``` blocks.
-   * @param {string} text - Raw LLM output
-   * @returns {Object|Array|null} Parsed JSON or null on failure
    */
   _tryParseJson(text) {
     if (!text) return null;
 
-    // Try extracting from markdown code blocks first (```json ... ``` or ``` ... ```)
     const codeBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
     if (codeBlockMatch) {
       try {
         return JSON.parse(codeBlockMatch[1].trim());
-      } catch (e) {
-        // Fall through to general extraction
-      }
+      } catch (e) { /* fall through */ }
     }
 
-    // Try to extract a JSON object { ... }
     const objMatch = text.match(/\{[\s\S]*\}/);
     if (objMatch) {
       try {
         return JSON.parse(objMatch[0]);
-      } catch (e) {
-        // Fall through
-      }
+      } catch (e) { /* fall through */ }
     }
 
-    // Try to extract a JSON array [ ... ]
     const arrMatch = text.match(/\[[\s\S]*\]/);
     if (arrMatch) {
       try {
         return JSON.parse(arrMatch[0]);
-      } catch (e) {
-        // Fall through
-      }
+      } catch (e) { /* fall through */ }
     }
 
     return null;
@@ -224,32 +298,16 @@ class LLMClient {
 
   /**
    * Call LLM and parse JSON from the response, with one repair retry on parse failure.
-   *
-   * Flow:
-   *   1. If LLM not enabled, return fallback immediately.
-   *   2. Call this.complete() and try to parse JSON from the response.
-   *   3. If parse fails, build a repair prompt with the raw output + expected schema,
-   *      call complete() again (max 1 repair = 2 total LLM calls).
-   *   4. Track repair success rate in this.repairStats.
-   *   5. If both fail, return fallback.
-   *
-   * @param {string} systemPrompt - System prompt for LLM
-   * @param {string} userPrompt - User prompt for LLM
-   * @param {Object} schema - Expected JSON schema (used in repair prompt)
-   * @param {*} fallback - Value to return if all parsing fails
-   * @returns {Promise<Object>} Parsed JSON or fallback
    */
   async completeWithJsonRetry(systemPrompt, userPrompt, schema, fallback) {
     if (!this.enabled) return fallback;
 
-    // First attempt
     const firstResponse = await this.complete(systemPrompt, userPrompt);
     if (!firstResponse) return fallback;
 
     const firstParsed = this._tryParseJson(firstResponse.content);
     if (firstParsed !== null) return firstParsed;
 
-    // First parse failed — attempt repair
     this.repairStats.attempts++;
 
     const repairPrompt =
@@ -276,6 +334,7 @@ class LLMClient {
   getStats() {
     return {
       enabled: this.enabled,
+      provider: this.provider,
       model: MODEL,
       ...this.stats,
       avgLatencyMs: this.stats.calls > 0

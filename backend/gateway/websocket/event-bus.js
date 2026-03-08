@@ -59,7 +59,7 @@ class EventBus {
   constructor() {
     this.subscribers = new Map(); // Map<eventType, Set<callback>>
     this.eventHistory = [];
-    this.maxHistorySize = 1000;
+    this.maxHistorySize = 10000;
     this.stats = {
       eventsPublished: 0,
       eventsDelivered: 0,

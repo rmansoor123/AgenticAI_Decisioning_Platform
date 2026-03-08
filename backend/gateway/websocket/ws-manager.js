@@ -13,7 +13,7 @@ class WebSocketClient {
   constructor(ws, req) {
     this.id = `WS-${uuidv4().slice(0, 8).toUpperCase()}`;
     this.ws = ws;
-    this.subscriptions = new Set(['system:*']); // Default subscription
+    this.subscriptions = new Set(['system:*', 'agent:*']); // Default subscriptions
     this.connectedAt = new Date().toISOString();
     this.lastActivity = new Date().toISOString();
     this.messageCount = 0;
@@ -98,17 +98,8 @@ class WebSocketManager {
       totalBroadcasts: 0
     };
 
-    // Subscribe to event bus for all events
-    this._setupEventBusSubscription();
-  }
-
-  /**
-   * Setup event bus subscription to forward events to WebSocket clients
-   */
-  _setupEventBusSubscription() {
-    this.eventBus.subscribe('*', (event) => {
-      this._routeEventToClients(event);
-    });
+    // Event bus subscription is handled externally in server.js
+    // to avoid singleton mismatch issues between agent modules and WS manager
   }
 
   /**

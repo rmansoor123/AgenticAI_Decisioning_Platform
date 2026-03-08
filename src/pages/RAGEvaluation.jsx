@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react'
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
-import { Brain, Activity, Target, Shield, RefreshCw, TrendingUp } from 'lucide-react'
+import { Brain, Activity, Target, Shield, RefreshCw, TrendingUp, AlertTriangle, Eye, Scale, FlaskConical } from 'lucide-react'
 
 const EVAL_API = 'http://localhost:8000'
 
-function ScoreCard({ title, score, icon: Icon, color }) {
-  const pct = (score * 100).toFixed(1)
-  const bgColor = score >= 0.8 ? 'bg-green-900/30 border-green-700' : score >= 0.6 ? 'bg-yellow-900/30 border-yellow-700' : 'bg-red-900/30 border-red-700'
-  const textColor = score >= 0.8 ? 'text-green-400' : score >= 0.6 ? 'text-yellow-400' : 'text-red-400'
+function ScoreCard({ title, score, icon: Icon, color, inverted = false }) {
+  const displayScore = inverted ? 1 - score : score
+  const pct = (displayScore * 100).toFixed(1)
+  const bgColor = displayScore >= 0.8 ? 'bg-green-900/30 border-green-700' : displayScore >= 0.6 ? 'bg-yellow-900/30 border-yellow-700' : 'bg-red-900/30 border-red-700'
+  const textColor = displayScore >= 0.8 ? 'text-green-400' : displayScore >= 0.6 ? 'text-yellow-400' : 'text-red-400'
 
   return (
     <div className={`${bgColor} border rounded-xl p-4`}>
@@ -16,8 +17,9 @@ function ScoreCard({ title, score, icon: Icon, color }) {
         <Icon className={`w-5 h-5 ${color}`} />
       </div>
       <div className={`text-3xl font-bold ${textColor}`}>{pct}%</div>
+      {inverted && <div className="text-xs text-gray-500 mt-0.5">lower is better</div>}
       <div className="mt-1 w-full bg-gray-700 rounded-full h-2">
-        <div className={`h-2 rounded-full ${score >= 0.8 ? 'bg-green-500' : score >= 0.6 ? 'bg-yellow-500' : 'bg-red-500'}`} style={{ width: `${pct}%` }} />
+        <div className={`h-2 rounded-full ${displayScore >= 0.8 ? 'bg-green-500' : displayScore >= 0.6 ? 'bg-yellow-500' : 'bg-red-500'}`} style={{ width: `${pct}%` }} />
       </div>
     </div>
   )
@@ -27,6 +29,7 @@ export default function RAGEvaluation() {
   const [metrics, setMetrics] = useState(null)
   const [history, setHistory] = useState([])
   const [evaluations, setEvaluations] = useState([])
+  const [experiments, setExperiments] = useState([])
   const [loading, setLoading] = useState(true)
   const [evalRunning, setEvalRunning] = useState(false)
   const [expanded, setExpanded] = useState(null)
@@ -34,14 +37,16 @@ export default function RAGEvaluation() {
   const fetchData = async () => {
     setLoading(true)
     try {
-      const [metricsRes, historyRes, evalsRes] = await Promise.all([
+      const [metricsRes, historyRes, evalsRes, experimentsRes] = await Promise.all([
         fetch(`${EVAL_API}/metrics`).then(r => r.json()).catch(() => null),
         fetch(`${EVAL_API}/metrics/history?limit=100`).then(r => r.json()).catch(() => null),
         fetch(`${EVAL_API}/metrics/evaluations?limit=50`).then(r => r.json()).catch(() => null),
+        fetch(`${EVAL_API}/experiments/list/fraud-detection`).then(r => r.json()).catch(() => null),
       ])
       if (metricsRes?.success) setMetrics(metricsRes.data)
       if (historyRes?.success) setHistory(historyRes.data)
       if (evalsRes?.success) setEvaluations(evalsRes.data)
+      if (experimentsRes?.success) setExperiments(experimentsRes.experiments || [])
     } catch (e) {
       console.error('Failed to fetch eval data:', e)
     }
@@ -95,7 +100,7 @@ export default function RAGEvaluation() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">RAG Evaluation Dashboard</h1>
-          <p className="text-gray-400 mt-1">TruLens + RAGAS metrics for retrieval-augmented generation quality</p>
+          <p className="text-gray-400 mt-1">TruLens + RAGAS + DeepEval metrics for retrieval-augmented generation quality</p>
         </div>
         <div className="flex gap-2">
           <button onClick={fetchData} className="flex items-center gap-2 px-4 py-2 bg-gray-700 text-gray-200 rounded-lg hover:bg-gray-600 transition">
@@ -120,13 +125,33 @@ export default function RAGEvaluation() {
         </div>
       ) : (
         <>
-          {/* Score Cards */}
+          {/* Core Score Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <ScoreCard title="Answer Relevance" score={metrics.answer_relevance} icon={Target} color="text-blue-400" />
             <ScoreCard title="Context Precision" score={metrics.context_precision} icon={Activity} color="text-purple-400" />
             <ScoreCard title="Groundedness" score={metrics.groundedness} icon={Shield} color="text-green-400" />
             <ScoreCard title="Faithfulness" score={metrics.faithfulness} icon={Brain} color="text-amber-400" />
           </div>
+
+          {/* DeepEval Score Cards */}
+          {(metrics.deepeval_hallucination !== undefined || metrics.deepeval_toxicity !== undefined || metrics.deepeval_bias !== undefined) && (
+            <div>
+              <h3 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
+                <FlaskConical className="w-4 h-4" /> DeepEval Safety Metrics
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {metrics.deepeval_hallucination !== undefined && (
+                  <ScoreCard title="Hallucination" score={metrics.deepeval_hallucination} icon={AlertTriangle} color="text-orange-400" inverted />
+                )}
+                {metrics.deepeval_toxicity !== undefined && (
+                  <ScoreCard title="Toxicity" score={metrics.deepeval_toxicity} icon={Eye} color="text-red-400" inverted />
+                )}
+                {metrics.deepeval_bias !== undefined && (
+                  <ScoreCard title="Bias" score={metrics.deepeval_bias} icon={Scale} color="text-pink-400" inverted />
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Total evaluations badge */}
           <div className="flex items-center gap-2 text-sm text-gray-400">
@@ -150,6 +175,7 @@ export default function RAGEvaluation() {
                     <Line type="monotone" dataKey="answer_relevance" name="Answer Relevance" stroke="#60A5FA" strokeWidth={2} dot={false} />
                     <Line type="monotone" dataKey="groundedness" name="Groundedness" stroke="#34D399" strokeWidth={2} dot={false} />
                     <Line type="monotone" dataKey="coherence" name="Coherence" stroke="#FBBF24" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="deepeval_hallucination" name="Hallucination" stroke="#FB923C" strokeWidth={2} dot={false} strokeDasharray="5 5" />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -174,6 +200,44 @@ export default function RAGEvaluation() {
               </div>
             )}
           </div>
+
+          {/* Experiment Tracking (BrainTrust) */}
+          {experiments.length > 0 && (
+            <div className="bg-gray-800 rounded-xl border border-gray-700">
+              <div className="p-4 border-b border-gray-700">
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <FlaskConical className="w-5 h-5 text-indigo-400" /> Experiment Tracking
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">BrainTrust experiments for fraud-detection project</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-gray-400 border-b border-gray-700">
+                      <th className="text-left p-3">Experiment</th>
+                      <th className="text-left p-3">Status</th>
+                      <th className="text-left p-3">Created</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {experiments.slice(0, 10).map((exp, i) => (
+                      <tr key={exp.id || i} className="border-b border-gray-700/50 hover:bg-gray-700/30 transition">
+                        <td className="p-3 text-gray-300">{exp.name || exp.id}</td>
+                        <td className="p-3">
+                          <span className="px-2 py-1 bg-green-900/50 text-green-300 text-xs rounded-full">
+                            {exp.status || 'active'}
+                          </span>
+                        </td>
+                        <td className="p-3 text-gray-500 text-xs">
+                          {exp.created ? new Date(exp.created).toLocaleString() : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Evaluations Table */}
           <div className="bg-gray-800 rounded-xl border border-gray-700">
@@ -248,7 +312,7 @@ export default function RAGEvaluation() {
                     <span className="text-gray-400 text-sm">All Scores:</span>
                     <div className="flex flex-wrap gap-2 mt-1">
                       {ev.scores.map((s, i) => (
-                        <span key={i} className={`px-3 py-1 rounded-full text-xs font-mono ${getScoreColor(s.score)} bg-gray-700`}>
+                        <span key={i} className={`px-3 py-1 rounded-full text-xs font-mono ${getScoreColor(s.metric.startsWith('deepeval_') ? 1 - s.score : s.score)} bg-gray-700`}>
                           {s.metric}: {(s.score * 100).toFixed(1)}%
                         </span>
                       ))}

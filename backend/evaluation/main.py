@@ -1,5 +1,6 @@
-"""FastAPI evaluation service — Pinecone + TruLens + RAGAS."""
+"""FastAPI evaluation service — Pinecone + TruLens + RAGAS + DeepEval + BrainTrust + Qdrant + Mem0 + Letta."""
 
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +12,10 @@ from routers.search import router as search_router
 from routers.evaluate import router as evaluate_router
 from routers.dashboard import router as dashboard_router
 from routers.retrieval_eval import router as retrieval_eval_router
+from routers.vector_search import router as vector_search_router
+from routers.memory import router as memory_router
+from routers.braintrust import router as braintrust_router
+from routers.letta_memory import router as letta_memory_router
 
 
 @asynccontextmanager
@@ -21,6 +26,32 @@ async def lifespan(app: FastAPI):
         get_pinecone_service()
     except Exception as e:
         print(f"[EvalService] Pinecone init failed (will retry on first request): {e}")
+
+    # Initialize Qdrant if configured
+    vector_backend = os.getenv("VECTOR_BACKEND", "pinecone").lower()
+    if vector_backend == "qdrant":
+        try:
+            from services.qdrant_service import _get_qdrant_client, _get_embedding_model
+            _get_qdrant_client()
+            _get_embedding_model()
+            print("[EvalService] Qdrant + embedding model initialized")
+        except Exception as e:
+            print(f"[EvalService] Qdrant init failed (will retry on first request): {e}")
+
+    # Initialize Letta if configured as memory backend
+    memory_backend = os.getenv("MEMORY_BACKEND", "sqlite").lower()
+    if memory_backend == "letta":
+        try:
+            from services.letta_service import health as letta_health
+
+            status = letta_health()
+            if status.get("status") == "ok":
+                print("[EvalService] Letta memory service connected")
+            else:
+                print(f"[EvalService] Letta not reachable: {status}")
+        except Exception as e:
+            print(f"[EvalService] Letta init check failed: {e}")
+
     yield
     print("[EvalService] Shutting down...")
 
@@ -43,6 +74,10 @@ app.include_router(search_router)
 app.include_router(evaluate_router)
 app.include_router(dashboard_router)
 app.include_router(retrieval_eval_router)
+app.include_router(vector_search_router)
+app.include_router(memory_router)
+app.include_router(braintrust_router)
+app.include_router(letta_memory_router)
 
 
 @app.get("/health")

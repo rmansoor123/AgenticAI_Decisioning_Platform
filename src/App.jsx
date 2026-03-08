@@ -14,6 +14,7 @@ import Shipping from './pages/Shipping'
 import AgenticAI from './pages/AgenticAI'
 import Onboarding from './pages/Onboarding'
 import SellerOnboardingForm from './pages/SellerOnboardingForm'
+import SellerOnboardingLive from './pages/SellerOnboardingLive'
 import SellerRiskLifecycle from './pages/SellerRiskLifecycle'
 import SellerNetworkAnalysis from './pages/SellerNetworkAnalysis'
 import SellerRiskProfile from './pages/SellerRiskProfile'
@@ -32,7 +33,8 @@ import FeedbackReview from './pages/FeedbackReview'
 import AutonomousAgents from './pages/AutonomousAgents'
 
 const API_BASE = '/api'
-const WS_URL = ((window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host + '/ws')
+// Connect directly to backend WebSocket to avoid Vite HMR proxy conflict
+const WS_URL = 'ws://localhost:3001/ws'
 
 function App() {
   const [transactions, setTransactions] = useState([])
@@ -170,6 +172,7 @@ function App() {
           <Route path="/agents" element={<AgenticAI />} />
           <Route path="/onboarding" element={<Onboarding />} />
           <Route path="/onboarding/form" element={<SellerOnboardingForm />} />
+          <Route path="/onboarding/live" element={<SellerOnboardingLive />} />
           <Route path="/seller-risk" element={<SellerRiskLifecycle />} />
           <Route path="/seller-network" element={<SellerNetworkAnalysis />} />
           <Route path="/observability" element={<Observability />} />

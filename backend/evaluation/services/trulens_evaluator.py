@@ -95,7 +95,7 @@ def get_evaluations(limit: int = 50, use_case: str | None = None) -> list[dict]:
 
 
 def get_aggregate_metrics() -> dict:
-    """Compute aggregate metrics across all evaluations."""
+    """Compute aggregate metrics across all evaluations (dynamic metric collection)."""
     if not _evaluations:
         return {
             "answer_relevance": 0.0,
@@ -106,38 +106,55 @@ def get_aggregate_metrics() -> dict:
             "by_use_case": {},
         }
 
-    metrics = {"answer_relevance": [], "context_relevance": [], "groundedness": [], "coherence": []}
-    by_use_case: dict[str, dict[str, list]] = {}
+    # Dynamically collect all metric names from stored evaluations
+    metrics: dict[str, list[float]] = {}
+    by_use_case: dict[str, dict[str, list[float]]] = {}
 
     for ev in _evaluations:
         uc = ev["use_case"]
         if uc not in by_use_case:
-            by_use_case[uc] = {"answer_relevance": [], "context_relevance": [], "groundedness": [], "coherence": []}
+            by_use_case[uc] = {}
 
         for s in ev["scores"]:
             m = s["metric"]
-            if m in metrics:
-                metrics[m].append(s["score"])
-            if m in by_use_case[uc]:
-                by_use_case[uc][m].append(s["score"])
+            if m not in metrics:
+                metrics[m] = []
+            metrics[m].append(s["score"])
+            if m not in by_use_case[uc]:
+                by_use_case[uc][m] = []
+            by_use_case[uc][m].append(s["score"])
 
     def avg(lst):
         return sum(lst) / len(lst) if lst else 0.0
 
-    return {
-        "answer_relevance": round(avg(metrics["answer_relevance"]), 4),
-        "context_precision": round(avg(metrics["context_relevance"]), 4),
-        "groundedness": round(avg(metrics["groundedness"]), 4),
-        "faithfulness": round(avg(metrics["coherence"]), 4),
+    # Standard aliased metrics (backward compatible)
+    result = {
+        "answer_relevance": round(avg(metrics.get("answer_relevance", [])), 4),
+        "context_precision": round(avg(metrics.get("context_relevance", [])), 4),
+        "groundedness": round(avg(metrics.get("groundedness", [])), 4),
+        "faithfulness": round(avg(metrics.get("coherence", [])), 4),
         "total_evaluations": len(_evaluations),
-        "by_use_case": {
-            uc: {
-                "answer_relevance": round(avg(scores["answer_relevance"]), 4),
-                "context_precision": round(avg(scores["context_relevance"]), 4),
-                "groundedness": round(avg(scores["groundedness"]), 4),
-                "faithfulness": round(avg(scores["coherence"]), 4),
-                "count": len(scores["answer_relevance"]),
-            }
-            for uc, scores in by_use_case.items()
-        },
     }
+
+    # Include all additional metrics (deepeval_*, ragas_*, etc.)
+    for m, values in metrics.items():
+        if m not in ("answer_relevance", "context_relevance", "groundedness", "coherence"):
+            result[m] = round(avg(values), 4)
+
+    result["by_use_case"] = {
+        uc: {
+            "answer_relevance": round(avg(scores.get("answer_relevance", [])), 4),
+            "context_precision": round(avg(scores.get("context_relevance", [])), 4),
+            "groundedness": round(avg(scores.get("groundedness", [])), 4),
+            "faithfulness": round(avg(scores.get("coherence", [])), 4),
+            "count": len(scores.get("answer_relevance", scores.get(next(iter(scores), ""), []))),
+            **{
+                m: round(avg(v), 4)
+                for m, v in scores.items()
+                if m not in ("answer_relevance", "context_relevance", "groundedness", "coherence")
+            },
+        }
+        for uc, scores in by_use_case.items()
+    }
+
+    return result

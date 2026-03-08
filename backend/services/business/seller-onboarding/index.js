@@ -78,120 +78,143 @@ router.post('/sellers', async (req, res) => {
       }
     }
 
-    // Use Agentic AI for comprehensive onboarding evaluation
-    console.log(`[Onboarding Agent] Evaluating seller: ${sellerId}`);
-    const agentResult = await sellerOnboarding.evaluateSeller(sellerId, sellerData);
+    // Generate correlation ID for event scoping
+    const correlationId = 'ONB-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
 
-    // Extract decision from agent result
-    const decision = agentResult.result?.decision || { action: 'REVIEW', confidence: 0.5 };
-    const riskAssessment = {
-      riskScore: agentResult.result?.overallRisk?.score || 50,
-      signals: agentResult.result?.riskFactors || [],
-      decision: decision.action,
-      confidence: decision.confidence,
-      reasoning: agentResult.result?.reasoning,
-      evaluatedAt: new Date().toISOString(),
-      agentEvaluation: {
-        agentId: sellerOnboarding.agentId,
-        agentName: sellerOnboarding.name,
-        evidenceGathered: agentResult.result?.evidence?.length || 0,
-        riskFactors: agentResult.result?.riskFactors?.length || 0,
-        chainOfThought: (() => {
-          try { return JSON.parse(JSON.stringify(agentResult.chainOfThought || [])); }
-          catch { return []; }
-        })()
-      }
-    };
-
-    sellerData.onboardingRiskAssessment = riskAssessment;
-
-    // Fire-and-forget evaluation via Python eval service
-    const evalInterval = parseInt(process.env.EVAL_INTERVAL || '5');
-    if (!global._evalCounter) global._evalCounter = 0;
-    global._evalCounter++;
-
-    if (global._evalCounter % evalInterval === 0) {
-      const evalServiceUrl = process.env.EVAL_SERVICE_URL || 'http://localhost:8000';
-      fetch(`${evalServiceUrl}/evaluate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: `Evaluate seller: ${sellerData.businessName || 'Unknown'} (${sellerData.businessCategory || 'Unknown'}) from ${sellerData.country || 'Unknown'}`,
-          retrieved_contexts: (riskAssessment.agentEvaluation?.chainOfThought || []).map(s => s.content || JSON.stringify(s)).slice(0, 5),
-          agent_response: `Decision: ${decision.action || 'UNKNOWN'}. Risk Score: ${riskAssessment.riskScore || 0}. ${agentResult.result?.reasoning || ''}`,
-          ground_truth: null,
-          use_case: 'onboarding_decision',
-          agent_id: 'seller-onboarding-agent',
-        }),
-      }).catch(() => {}); // fire-and-forget
-    }
-
-    // Set status based on agent decision
-    if (decision.action === 'REJECT') {
-      sellerData.status = 'BLOCKED';
-    } else if (decision.action === 'REVIEW') {
-      sellerData.status = 'UNDER_REVIEW';
-    } else if (decision.action === 'APPROVE') {
-      sellerData.status = 'PENDING'; // Will be activated after final checks
-    } else {
-      sellerData.status = 'UNDER_REVIEW'; // Default to review if uncertain
-    }
-
-    // Store seller
+    // Store seller immediately with EVALUATING status
+    sellerData.status = 'EVALUATING';
     db_ops.insert('sellers', 'seller_id', sellerId, sellerData);
-
-    // Emit risk events for onboarding
-    emitRiskEvent({
-      sellerId, domain: 'onboarding', eventType: 'ONBOARDING_RISK_ASSESSMENT',
-      riskScore: riskAssessment.riskScore || 0,
-      metadata: { decision: decision.action, confidence: decision.confidence }
-    });
-    if (!sellerData.kycVerified) {
-      emitRiskEvent({ sellerId, domain: 'onboarding', eventType: 'KYC_FAILED', riskScore: 40, metadata: {} });
-    }
-    if (!sellerData.bankVerified) {
-      emitRiskEvent({ sellerId, domain: 'onboarding', eventType: 'BANK_VERIFICATION_FAILED', riskScore: 30, metadata: {} });
-    }
-    if (decision.action === 'REJECT') {
-      emitRiskEvent({ sellerId, domain: 'onboarding', eventType: 'SELLER_BLOCKED', riskScore: 80, metadata: { reason: decision.reason } });
-    }
 
     // Update image seller_id references if images were saved with temp ID
     if (sellerData.idVerification?.savedImageIds) {
       const { selfie, idDocument } = sellerData.idVerification.savedImageIds;
-      
-      // Update selfie image
       if (selfie) {
         const selfieImg = db_ops.getById('seller_images', 'image_id', selfie);
         if (selfieImg && selfieImg.data.sellerId?.startsWith('TEMP-')) {
-          const updatedSelfie = { ...selfieImg.data, sellerId };
-          db_ops.update('seller_images', 'image_id', selfie, updatedSelfie);
+          db_ops.update('seller_images', 'image_id', selfie, { ...selfieImg.data, sellerId });
         }
       }
-      
-      // Update ID document image
       if (idDocument) {
         const idImg = db_ops.getById('seller_images', 'image_id', idDocument);
         if (idImg && idImg.data.sellerId?.startsWith('TEMP-')) {
-          const updatedId = { ...idImg.data, sellerId };
-          db_ops.update('seller_images', 'image_id', idDocument, updatedId);
+          db_ops.update('seller_images', 'image_id', idDocument, { ...idImg.data, sellerId });
         }
       }
     }
 
-    // Safely serialize to avoid circular references
-    const safeSellerData = JSON.parse(JSON.stringify(sellerData));
-    res.status(201).json({
+    // Return immediately — agent runs in background, events stream via WebSocket
+    res.status(202).json({
       success: true,
-      data: safeSellerData,
-      riskAssessment: safeSellerData.onboardingRiskAssessment,
-      agentEvaluation: {
-        agentId: sellerOnboarding.agentId,
-        decision: decision.action,
-        confidence: decision.confidence,
-        reasoning: decision.reason
-      }
+      correlationId,
+      sellerId,
+      status: 'EVALUATING',
+      message: 'Agent evaluation started. Watch the Agent Flow panel for real-time progress.'
     });
+
+    // Fire-and-forget: run agent pipeline asynchronously
+    console.log(`[Onboarding Agent] Evaluating seller: ${sellerId} (correlation: ${correlationId})`);
+    sellerOnboarding.evaluateSeller(sellerId, sellerData, { _correlationId: correlationId })
+      .then(agentResult => {
+        const decision = agentResult.result?.decision || { action: 'REVIEW', confidence: 0.5 };
+        const riskAssessment = {
+          riskScore: agentResult.result?.overallRisk?.score || 50,
+          signals: agentResult.result?.riskFactors || [],
+          decision: decision.action,
+          confidence: decision.confidence,
+          reasoning: agentResult.result?.reasoning,
+          evaluatedAt: new Date().toISOString(),
+          agentEvaluation: {
+            agentId: sellerOnboarding.agentId,
+            agentName: sellerOnboarding.name,
+            evidenceGathered: agentResult.result?.evidence?.length || 0,
+            riskFactors: agentResult.result?.riskFactors?.length || 0,
+            chainOfThought: (() => {
+              try { return JSON.parse(JSON.stringify(agentResult.chainOfThought || [])); }
+              catch { return []; }
+            })()
+          }
+        };
+
+        // Update seller with final decision
+        const updatedData = { ...sellerData, onboardingRiskAssessment: riskAssessment };
+        if (decision.action === 'REJECT') updatedData.status = 'BLOCKED';
+        else if (decision.action === 'REVIEW') updatedData.status = 'UNDER_REVIEW';
+        else if (decision.action === 'APPROVE') updatedData.status = 'PENDING';
+        else updatedData.status = 'UNDER_REVIEW';
+
+        db_ops.update('sellers', 'seller_id', sellerId, updatedData);
+
+        // Emit risk events
+        emitRiskEvent({
+          sellerId, domain: 'onboarding', eventType: 'ONBOARDING_RISK_ASSESSMENT',
+          riskScore: riskAssessment.riskScore || 0,
+          metadata: { decision: decision.action, confidence: decision.confidence }
+        });
+        if (!sellerData.kycVerified) {
+          emitRiskEvent({ sellerId, domain: 'onboarding', eventType: 'KYC_FAILED', riskScore: 40, metadata: {} });
+        }
+        if (!sellerData.bankVerified) {
+          emitRiskEvent({ sellerId, domain: 'onboarding', eventType: 'BANK_VERIFICATION_FAILED', riskScore: 30, metadata: {} });
+        }
+        if (decision.action === 'REJECT') {
+          emitRiskEvent({ sellerId, domain: 'onboarding', eventType: 'SELLER_BLOCKED', riskScore: 80, metadata: { reason: decision.reason } });
+        }
+
+        // Emit completion event with decision (so frontend knows agent is done)
+        try {
+          import('../../../gateway/websocket/event-bus.js').then(({ getEventBus }) => {
+            const bus = getEventBus();
+            bus.publish('agent:decision:complete', {
+              correlationId,
+              sellerId,
+              decision: decision.action,
+              confidence: decision.confidence,
+              reasoning: decision.reason || agentResult.result?.reasoning,
+              riskScore: riskAssessment.riskScore,
+              timestamp: new Date().toISOString()
+            });
+          }).catch(() => {});
+        } catch {}
+
+        // Fire-and-forget evaluation via Python eval service
+        const evalInterval = parseInt(process.env.EVAL_INTERVAL || '5');
+        if (!global._evalCounter) global._evalCounter = 0;
+        global._evalCounter++;
+        if (global._evalCounter % evalInterval === 0) {
+          const evalServiceUrl = process.env.EVAL_SERVICE_URL || 'http://localhost:8000';
+          fetch(`${evalServiceUrl}/evaluate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              query: `Evaluate seller: ${sellerData.businessName || 'Unknown'} (${sellerData.businessCategory || 'Unknown'}) from ${sellerData.country || 'Unknown'}`,
+              retrieved_contexts: (riskAssessment.agentEvaluation?.chainOfThought || []).map(s => s.content || JSON.stringify(s)).slice(0, 5),
+              agent_response: `Decision: ${decision.action || 'UNKNOWN'}. Risk Score: ${riskAssessment.riskScore || 0}. ${agentResult.result?.reasoning || ''}`,
+              ground_truth: null,
+              use_case: 'onboarding_decision',
+              agent_id: 'seller-onboarding-agent',
+            }),
+          }).catch(() => {});
+        }
+
+        console.log(`[Onboarding Agent] Completed: ${sellerId} → ${decision.action} (${(decision.confidence * 100).toFixed(0)}%)`);
+      })
+      .catch(error => {
+        console.error(`[Onboarding Agent] Error evaluating ${sellerId}:`, error.message);
+        // Update seller status to reflect failure
+        db_ops.update('sellers', 'seller_id', sellerId, { ...sellerData, status: 'EVALUATION_FAILED', error: error.message });
+        // Emit error event
+        try {
+          import('../../../gateway/websocket/event-bus.js').then(({ getEventBus }) => {
+            const bus = getEventBus();
+            bus.publish('agent:decision:error', {
+              correlationId,
+              sellerId,
+              error: error.message,
+              timestamp: new Date().toISOString()
+            });
+          }).catch(() => {});
+        } catch {}
+      });
   } catch (error) {
     console.error('Onboarding error:', error);
     res.status(500).json({ success: false, error: error.message });

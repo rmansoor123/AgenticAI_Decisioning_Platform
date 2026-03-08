@@ -193,7 +193,8 @@ You are ${agentName}, a ${agentRole}. You have completed your investigation. Syn
 ${domainSection}
 ${phaseInstructions}`;
 
-  const evidenceSummary = actions.map(a => {
+  const safeActions = Array.isArray(actions) ? actions : [];
+  const evidenceSummary = safeActions.map(a => {
     const toolName = a.action?.type || 'unknown';
     const success = a.result?.success !== false;
     const data = a.result?.data ? JSON.stringify(a.result.data).slice(0, 300) : 'no data';
@@ -238,7 +239,8 @@ You are NOT the agent's ally — you are an independent auditor hired to find mi
 ${domainSection}
 ${phaseInstructions}`;
 
-  const evidenceSummary = (evidence || []).map(a => {
+  const safeEvidence = Array.isArray(evidence) ? evidence : [];
+  const evidenceSummary = safeEvidence.map(a => {
     const toolName = a.action?.type || 'unknown';
     const success = a.result?.success !== false;
     const data = a.result?.data ? JSON.stringify(a.result.data).slice(0, 200) : 'no data';

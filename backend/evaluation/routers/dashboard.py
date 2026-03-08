@@ -6,6 +6,17 @@ from services.trulens_evaluator import get_aggregate_metrics, get_evaluations
 router = APIRouter(prefix="/metrics", tags=["metrics"])
 
 
+@router.get("/deepeval")
+async def get_deepeval_metrics():
+    """Get aggregated DeepEval metrics (hallucination, toxicity, bias)."""
+    try:
+        from services.deepeval_evaluator import get_deepeval_aggregate_metrics
+
+        return {"success": True, "data": get_deepeval_aggregate_metrics()}
+    except ImportError:
+        return {"success": False, "error": "deepeval not installed"}
+
+
 @router.get("")
 async def get_metrics():
     """Get aggregated evaluation metrics."""

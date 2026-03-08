@@ -22,6 +22,17 @@ import {
   verifyBusinessReal,
   screenWatchlistReal
 } from '../tools/real-apis.js';
+import {
+  checkIpReputationFree,
+  verifyEmailFree,
+  screenWatchlistFree,
+  checkFraudDatabasesFree,
+  verifyBusinessFree,
+  verifyAddressFree,
+  verifyBankAccountFree,
+  checkFinancialHistoryDeterministic,
+  verifyIdentityDeterministic
+} from '../tools/free-apis.js';
 import { CONFIDENCE } from '../core/chain-of-thought.js';
 import { getKnowledgeBase } from '../core/knowledge-base.js';
 import { getContextEngine } from '../core/context-engine.js';
@@ -30,8 +41,8 @@ import { createToolExecutor } from '../core/tool-executor.js';
 import { getThresholdManager } from '../core/threshold-manager.js';
 import { createGraphTools } from '../tools/graph-tools.js';
 
-// Use environment variable to switch between real and simulated
-const USE_REAL_APIS = process.env.USE_REAL_APIS === 'true';
+// Three-tier API mode: 'free' (default), 'real' (enterprise), 'simulation' (dev/testing)
+const API_MODE = process.env.API_MODE || (process.env.USE_REAL_APIS === 'true' ? 'real' : 'free');
 
 export class SellerOnboardingAgent extends BaseAgent {
   constructor() {
@@ -82,24 +93,33 @@ export class SellerOnboardingAgent extends BaseAgent {
     this.registerTool('verify_identity', 'Verify identity documents (ID, passport, etc.)', async (params) => {
       const { documentType, documentNumber, country } = params;
 
-      if (USE_REAL_APIS) {
+      if (API_MODE === 'real') {
         try {
           return await verifyIdentityReal(params);
         } catch (e) {
-          console.warn("Real API failed, using simulation: ", e);
+          console.warn("Real API failed, trying free: ", e.message);
         }
       }
 
-      // Simulate identity verification
+      if (API_MODE !== 'simulation') {
+        try {
+          return await verifyIdentityDeterministic(params);
+        } catch (e) {
+          console.warn("Free API failed, using simulation: ", e.message);
+        }
+      }
+
+      // Simulation fallback
       const verification = {
         documentType,
         documentNumber,
         country,
-        verified: Math.random() > 0.15, // 85% pass rate
+        verified: Math.random() > 0.15,
         verificationMethod: 'OCR_AND_ML',
         confidence: 0.85 + Math.random() * 0.15,
         issues: Math.random() > 0.8 ? ['document_expired', 'poor_quality'] : [],
-        verifiedAt: new Date().toISOString()
+        verifiedAt: new Date().toISOString(),
+        source: 'simulation'
       };
 
       return { success: true, data: verification };
@@ -109,11 +129,19 @@ export class SellerOnboardingAgent extends BaseAgent {
     this.registerTool('verify_business', 'Verify business registration and legitimacy', async (params) => {
       const { businessName, registrationNumber, country, businessCategory } = params;
 
-      if (USE_REAL_APIS) {
+      if (API_MODE === 'real') {
         try {
           return await verifyBusinessReal(params);
         } catch (e) {
-          console.warn("Real API failed, using simulation: ", e);
+          console.warn("Real API failed, trying free: ", e.message);
+        }
+      }
+
+      if (API_MODE !== 'simulation') {
+        try {
+          return await verifyBusinessFree(params);
+        } catch (e) {
+          console.warn("Free API failed, using simulation: ", e.message);
         }
       }
 
@@ -131,7 +159,8 @@ export class SellerOnboardingAgent extends BaseAgent {
           registrationDate: business?.data?.registrationDate || new Date(Date.now() - Math.random() * 365 * 24 * 60 * 60 * 1000 * 5).toISOString(),
           businessAge: business?.data?.businessAge || Math.floor(Math.random() * 3650) + 30,
           status: business?.data?.status || 'ACTIVE',
-          verifiedAt: new Date().toISOString()
+          verifiedAt: new Date().toISOString(),
+          source: 'simulation'
         }
       };
     });
@@ -140,16 +169,25 @@ export class SellerOnboardingAgent extends BaseAgent {
     this.registerTool('verify_address', 'Verify business and mailing address', async (params) => {
       const { address, country, addressType } = params;
 
+      if (API_MODE !== 'simulation') {
+        try {
+          return await verifyAddressFree(params);
+        } catch (e) {
+          console.warn("Free address API failed, using simulation: ", e.message);
+        }
+      }
+
       return {
         success: true,
         data: {
           address,
           country,
           addressType,
-          verified: Math.random() > 0.2, // 80% pass rate
+          verified: Math.random() > 0.2,
           verificationMethod: 'ADDRESS_API',
           riskIndicators: Math.random() > 0.85 ? ['PO_BOX', 'RESIDENTIAL_ADDRESS'] : [],
-          verifiedAt: new Date().toISOString()
+          verifiedAt: new Date().toISOString(),
+          source: 'simulation'
         }
       };
     });
@@ -162,11 +200,19 @@ export class SellerOnboardingAgent extends BaseAgent {
     this.registerTool('screen_watchlist', 'Screen against sanctions, PEP, and watchlists', async (params) => {
       const { name, dateOfBirth, country, businessName } = params;
 
-      if (USE_REAL_APIS) {
+      if (API_MODE === 'real') {
         try {
           return await screenWatchlistReal(params);
         } catch (e) {
-          console.warn("Real API failed, using simulation: ", e);
+          console.warn("Real API failed, trying free: ", e.message);
+        }
+      }
+
+      if (API_MODE !== 'simulation') {
+        try {
+          return await screenWatchlistFree(params);
+        } catch (e) {
+          console.warn("Free watchlist API failed, using simulation: ", e.message);
         }
       }
 
@@ -176,11 +222,12 @@ export class SellerOnboardingAgent extends BaseAgent {
           name,
           businessName,
           country,
-          sanctionsMatch: Math.random() > 0.95, // 5% match rate
-          pepMatch: Math.random() > 0.97, // 3% match rate
-          watchlistMatch: Math.random() > 0.98, // 2% match rate
+          sanctionsMatch: Math.random() > 0.95,
+          pepMatch: Math.random() > 0.97,
+          watchlistMatch: Math.random() > 0.98,
           matches: [],
-          screenedAt: new Date().toISOString()
+          screenedAt: new Date().toISOString(),
+          source: 'simulation'
         }
       };
     });
@@ -188,6 +235,14 @@ export class SellerOnboardingAgent extends BaseAgent {
     // Tool: Check fraud databases
     this.registerTool('check_fraud_databases', 'Check seller against fraud databases', async (params) => {
       const { email, businessName, phone, taxId } = params;
+
+      if (API_MODE !== 'simulation') {
+        try {
+          return await checkFraudDatabasesFree(params);
+        } catch (e) {
+          console.warn("Free fraud DB check failed, using simulation: ", e.message);
+        }
+      }
 
       const fraudCheck = await checkFraudList({ email, businessName, phone });
       const consortiumCheck = await checkConsortiumData({ email, businessName, phone });
@@ -200,7 +255,8 @@ export class SellerOnboardingAgent extends BaseAgent {
           isBlocked: fraudCheck?.data?.isBlocked || false,
           isHighRisk: fraudCheck?.data?.isHighRisk || (Math.random() > 0.9),
           riskScore: fraudCheck?.data?.riskScore || Math.floor(Math.random() * 100),
-          checkedAt: new Date().toISOString()
+          checkedAt: new Date().toISOString(),
+          source: 'simulation'
         }
       };
     });
@@ -213,11 +269,19 @@ export class SellerOnboardingAgent extends BaseAgent {
     this.registerTool('verify_bank_account', 'Verify bank account details and ownership', async (params) => {
       const { accountNumber, routingNumber, accountHolderName, bankName, country } = params;
 
-      if (USE_REAL_APIS) {
+      if (API_MODE === 'real') {
         try {
           return await verifyBankAccountReal(params);
         } catch (e) {
-          console.warn("Real API failed, using simulation: ", e);
+          console.warn("Real API failed, trying free: ", e.message);
+        }
+      }
+
+      if (API_MODE !== 'simulation') {
+        try {
+          return await verifyBankAccountFree(params);
+        } catch (e) {
+          console.warn("Free bank API failed, using simulation: ", e.message);
         }
       }
 
@@ -229,11 +293,12 @@ export class SellerOnboardingAgent extends BaseAgent {
           accountHolderName,
           bankName,
           country,
-          verified: Math.random() > 0.1, // 90% pass rate
+          verified: Math.random() > 0.1,
           accountType: ['CHECKING', 'SAVINGS'][Math.floor(Math.random() * 2)],
           accountAge: Math.floor(Math.random() * 3650) + 30,
-          ownershipMatch: Math.random() > 0.15, // 85% match
-          verifiedAt: new Date().toISOString()
+          ownershipMatch: Math.random() > 0.15,
+          verifiedAt: new Date().toISOString(),
+          source: 'simulation'
         }
       };
     });
@@ -242,17 +307,26 @@ export class SellerOnboardingAgent extends BaseAgent {
     this.registerTool('check_financial_history', 'Check credit and financial history', async (params) => {
       const { businessName, taxId, country } = params;
 
+      if (API_MODE !== 'simulation') {
+        try {
+          return await checkFinancialHistoryDeterministic(params);
+        } catch (e) {
+          console.warn("Deterministic financial check failed, using simulation: ", e.message);
+        }
+      }
+
       return {
         success: true,
         data: {
           businessName,
           taxId,
-          creditScore: Math.floor(Math.random() * 300) + 500, // 500-800
-          creditHistory: Math.floor(Math.random() * 3650) + 365, // 1-10 years
+          creditScore: Math.floor(Math.random() * 300) + 500,
+          creditHistory: Math.floor(Math.random() * 3650) + 365,
           bankruptcies: Math.random() > 0.95 ? 1 : 0,
           liens: Math.random() > 0.9 ? Math.floor(Math.random() * 3) : 0,
           financialRisk: Math.random() > 0.85 ? 'MEDIUM' : 'LOW',
-          checkedAt: new Date().toISOString()
+          checkedAt: new Date().toISOString(),
+          source: 'simulation'
         }
       };
     });
@@ -268,15 +342,25 @@ export class SellerOnboardingAgent extends BaseAgent {
         return { success: false, error: 'Email is required' };
       }
 
-      if (USE_REAL_APIS) {
+      if (API_MODE === 'real') {
         try {
           return await verifyEmailReal(email);
         } catch (e) {
-          console.warn("Real API failed, using simulation: ", e);
+          console.warn("Real API failed, trying free: ", e.message);
         }
       }
 
-      return await verifyEmail(email);
+      if (API_MODE !== 'simulation') {
+        try {
+          return await verifyEmailFree(email);
+        } catch (e) {
+          console.warn("Free email API failed, using simulation: ", e.message);
+        }
+      }
+
+      const sim = await verifyEmail(email);
+      if (sim.data) sim.data.source = 'simulation';
+      return sim;
     });
 
     // Tool: Check IP reputation
@@ -286,15 +370,25 @@ export class SellerOnboardingAgent extends BaseAgent {
         return { success: false, error: 'IP address is required' };
       }
 
-      if (USE_REAL_APIS) {
+      if (API_MODE === 'real') {
         try {
           return await checkIpReputationReal(ipAddress);
         } catch (e) {
-          console.warn("Real API failed, using simulation: ", e);
+          console.warn("Real API failed, trying free: ", e.message);
         }
       }
 
-      return await checkIpReputation(ipAddress);
+      if (API_MODE !== 'simulation') {
+        try {
+          return await checkIpReputationFree(ipAddress);
+        } catch (e) {
+          console.warn("Free IP API failed, using simulation: ", e.message);
+        }
+      }
+
+      const sim = await checkIpReputation(ipAddress);
+      if (sim.data) sim.data.source = 'simulation';
+      return sim;
     });
 
     // ============================================================================
@@ -332,7 +426,7 @@ export class SellerOnboardingAgent extends BaseAgent {
       const { email, phone, businessName, taxId } = params;
 
       // Check database for similar sellers
-      const allSellers = db_ops.getAll('sellers', 10000, 0).map(s => s.data);
+      const allSellers = (db_ops.getAll('sellers', 10000, 0) || []).map(s => s.data);
 
       const duplicates = allSellers.filter(s => {
         return s.email === email ||
@@ -364,7 +458,7 @@ export class SellerOnboardingAgent extends BaseAgent {
     this.registerTool('analyze_historical_patterns', 'Check for patterns in similar sellers', async (params) => {
       const { businessCategory, country, businessAge } = params;
 
-      const similarSellers = db_ops.getAll('sellers', 10000, 0)
+      const similarSellers = (db_ops.getAll('sellers', 10000, 0) || [])
         .map(s => s.data)
         .filter(s => s.businessCategory === businessCategory && s.country === country);
 
@@ -556,7 +650,9 @@ export class SellerOnboardingAgent extends BaseAgent {
 
   // Override observe to generate onboarding decision
   async observe(actions, context) {
-    const evidence = actions.map(a => ({
+    // Ensure actions is always an array
+    const safeActions = Array.isArray(actions) ? actions : [];
+    const evidence = safeActions.map(a => ({
       source: a.action.type,
       data: a.result?.data,
       success: a.result?.success !== false,
@@ -899,12 +995,12 @@ ${factors.length > 0 ? `Total risk score: ${factors.reduce((sum, f) => sum + f.s
   }
 
   // Public method to evaluate a seller
-  async evaluateSeller(sellerId, sellerData) {
+  async evaluateSeller(sellerId, sellerData, extraContext = {}) {
     this.status = 'EVALUATING';
     this.currentTask = sellerId;
 
     const input = { sellerId, sellerData };
-    const result = await this.reason(input, { input });
+    const result = await this.reason(input, { input, ...extraContext });
 
     this.status = 'IDLE';
     this.currentTask = null;

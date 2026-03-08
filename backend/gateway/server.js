@@ -390,6 +390,12 @@ initializeMLModels().catch(err => {
   console.log('ML inference will initialize models on first request');
 });
 
+// Initialize OFAC SDN screening (fire-and-forget, non-blocking)
+import { initOFACScreening } from '../agents/tools/ofac-screening.js';
+initOFACScreening().catch(err => {
+  console.warn('OFAC screening initialization failed:', err.message);
+});
+
 // Initialize Streaming Engine + Feature Store + Processors
 import { getStreamEngine } from '../streaming/stream-engine.js';
 import { getFeatureStore } from '../streaming/feature-store.js';
@@ -488,6 +494,30 @@ app.get('/api/health', (req, res) => {
       'graph': 'running'
     }
   });
+});
+
+// Agent events endpoint — backfill events by correlationId
+app.get('/api/agents/events', async (req, res) => {
+  try {
+    const { getEventBus: getEB } = await import('./websocket/event-bus.js');
+    const bus = getEB();
+    const { correlationId, since, limit = 200 } = req.query;
+
+    let events = bus.getRecentEvents({
+      type: 'agent:*',
+      limit: parseInt(limit),
+      since: since || undefined
+    });
+
+    // Filter by correlationId if provided
+    if (correlationId) {
+      events = events.filter(e => e.data?.correlationId === correlationId);
+    }
+
+    res.json({ success: true, events, count: events.length });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 // API Documentation endpoint
@@ -809,6 +839,12 @@ wss.on('connection', (ws, req) => {
 
 // Start the transaction pipeline for real-time events
 transactionPipeline.start();
+
+// Forward ALL events from event bus to WebSocket clients
+// Centralized here to avoid singleton mismatch between agent modules and WS manager
+eventBus.subscribe('*', (event) => {
+  wsManager._routeEventToClients(event);
+});
 
 // Broadcast function for backward compatibility
 function broadcast(data) {
