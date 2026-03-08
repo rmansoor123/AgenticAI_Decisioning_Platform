@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import {
   User, Building, Mail, Phone, MapPin, CreditCard, FileText,
   Shield, CheckCircle, XCircle, Clock, AlertTriangle, Loader,
-  ArrowRight, Brain, Zap
+  ArrowRight, Brain, Zap, Plus, RotateCcw
 } from 'lucide-react'
 import AgentFlowViewer from '../components/AgentFlowViewer'
 import { useAgentFlow } from '../hooks/useAgentFlow'
@@ -20,6 +20,61 @@ const countries = [
   'US', 'UK', 'CA', 'DE', 'FR', 'IT', 'ES', 'AU', 'JP', 'CN',
   'NG', 'RO', 'PK', 'BD', 'IN', 'BR', 'MX', 'RU', 'ZA', 'EG'
 ]
+
+// --- Random seller data generation ---
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
+const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min
+const randDigits = (n) => Array.from({ length: n }, () => randInt(0, 9)).join('')
+
+const sellerProfiles = [
+  { name: 'Coastal Home Goods LLC', cat: 'Home & Garden', country: 'US', city: 'San Diego, CA', owner: 'Maria Santos', domain: 'coastalhomegoods.com' },
+  { name: 'TechFlow Electronics Inc', cat: 'Electronics', country: 'US', city: 'San Jose, CA', owner: 'Sarah Chen', domain: 'techflow-electronics.com' },
+  { name: 'Alpine Sports Gear GmbH', cat: 'Sports & Outdoors', country: 'DE', city: 'Munich, Bavaria', owner: 'Hans Mueller', domain: 'alpinesportsgear.de' },
+  { name: 'Sakura Beauty Tokyo', cat: 'Health & Beauty', country: 'JP', city: 'Shibuya, Tokyo', owner: 'Yuki Tanaka', domain: 'sakurabeauty.jp' },
+  { name: 'Lagos Fashion House', cat: 'Fashion', country: 'NG', city: 'Victoria Island, Lagos', owner: 'Adebayo Okonkwo', domain: 'lagosfashionhouse.ng' },
+  { name: 'Maple Leaf Toys Co', cat: 'Toys & Games', country: 'CA', city: 'Toronto, ON', owner: 'Emily Tremblay', domain: 'mapleleaftoys.ca' },
+  { name: 'British Book Emporium', cat: 'Books & Media', country: 'UK', city: 'Kensington, London', owner: 'James Whitfield', domain: 'britishbookemporium.co.uk' },
+  { name: 'Outback Auto Parts', cat: 'Automotive', country: 'AU', city: 'Sydney, NSW', owner: 'Liam McAllister', domain: 'outbackautoparts.com.au' },
+  { name: 'Roma Gourmet Imports', cat: 'Food & Beverage', country: 'IT', city: 'Rome, Lazio', owner: 'Marco Rossi', domain: 'romagourmet.it' },
+  { name: 'Shanghai Digital Solutions', cat: 'Digital Products', country: 'CN', city: 'Pudong, Shanghai', owner: 'Wei Zhang', domain: 'shanghaidigital.cn' },
+  { name: 'Rio Jewelry Designs', cat: 'Jewelry', country: 'BR', city: 'Copacabana, Rio de Janeiro', owner: 'Ana Oliveira', domain: 'riojewelry.com.br' },
+  { name: 'Paris Luxe Boutique', cat: 'Fashion', country: 'FR', city: 'Le Marais, Paris', owner: 'Sophie Dubois', domain: 'parisluxe.fr' },
+  { name: 'Seoul K-Beauty Hub', cat: 'Health & Beauty', country: 'IN', city: 'New Delhi', owner: 'Priya Sharma', domain: 'kbeautyhub.in' },
+  { name: 'Bucharest Tech Traders', cat: 'Electronics', country: 'RO', city: 'Sector 1, Bucharest', owner: 'Andrei Popescu', domain: 'bucharesttech.ro' },
+  { name: 'Cape Town Gift Bazaar', cat: 'Gift Cards', country: 'ZA', city: 'Cape Town, WC', owner: 'Thabo Nkosi', domain: 'capetowngifts.co.za' },
+  { name: 'Mexico City Event Tickets', cat: 'Tickets', country: 'MX', city: 'Polanco, CDMX', owner: 'Carlos Hernandez', domain: 'mxeventtickets.com.mx' },
+  { name: 'Dhaka Handcraft Exports', cat: 'Home & Garden', country: 'BD', city: 'Gulshan, Dhaka', owner: 'Fatima Rahman', domain: 'dhakahandcraft.com.bd' },
+  { name: 'Moscow Premium Services', cat: 'Services', country: 'RU', city: 'Tverskoy, Moscow', owner: 'Alexei Ivanov', domain: 'moscowpremium.ru' },
+  { name: 'Karachi Wholesale Mart', cat: 'Electronics', country: 'PK', city: 'Clifton, Karachi', owner: 'Ahmed Khan', domain: 'karachiwholesale.pk' },
+  { name: 'Barcelona Outdoor Living', cat: 'Home & Garden', country: 'ES', city: 'Eixample, Barcelona', owner: 'Lucia Martinez', domain: 'bcnoutdoor.es' },
+]
+
+const bankNames = ['Wells Fargo', 'Chase Bank', 'Bank of America', 'Citibank', 'HSBC', 'Deutsche Bank', 'Barclays', 'BNP Paribas', 'Santander', 'Standard Chartered', 'TD Bank', 'Commonwealth Bank']
+const docTypes = ['PASSPORT', 'DRIVERS_LICENSE', 'NATIONAL_ID']
+
+function generateRandomSeller() {
+  const profile = pick(sellerProfiles)
+  const phone = `+${randInt(1, 99)}-${randDigits(3)}-${randDigits(3)}-${randDigits(4)}`
+  return {
+    businessName: profile.name,
+    businessCategory: profile.cat,
+    businessRegistrationNumber: `REG-${randInt(2015, 2025)}-${randDigits(5)}`,
+    businessAge: String(randInt(1, 20)),
+    taxId: `TAX-${randDigits(2)}-${randDigits(7)}`,
+    email: `${profile.owner.split(' ')[0].toLowerCase()}@${profile.domain}`,
+    phone,
+    country: profile.country,
+    address: `${randInt(100, 9999)} ${pick(['Main St', 'Commerce Blvd', 'Market Ave', 'Enterprise Rd', 'Trade Lane', 'Innovation Dr'])}, ${profile.city}`,
+    documentType: pick(docTypes),
+    documentNumber: `${String.fromCharCode(65 + randInt(0, 25))}${randDigits(7)}`,
+    bankName: pick(bankNames),
+    accountNumber: randDigits(10),
+    routingNumber: randDigits(9),
+    accountHolderName: profile.owner,
+    ipAddress: `${randInt(1, 223)}.${randInt(0, 255)}.${randInt(0, 255)}.${randInt(1, 254)}`,
+    website: `https://${profile.domain}`
+  }
+}
 
 const getDecisionColor = (decision) => {
   switch (decision) {
@@ -40,25 +95,7 @@ const getDecisionIcon = (decision) => {
 }
 
 export default function SellerOnboardingLive() {
-  const [formData, setFormData] = useState({
-    businessName: 'Coastal Home Goods LLC',
-    businessCategory: 'Home & Garden',
-    businessRegistrationNumber: 'REG-2022-45891',
-    businessAge: '4',
-    taxId: 'TAX-84-2931567',
-    email: 'info@coastalhomegoods.com',
-    phone: '+1-858-555-0234',
-    country: 'US',
-    address: '1200 Pacific Highway, San Diego, CA 92101',
-    documentType: 'DRIVERS_LICENSE',
-    documentNumber: 'D1234567',
-    bankName: 'Wells Fargo',
-    accountNumber: '9876543210',
-    routingNumber: '121042882',
-    accountHolderName: 'Maria Santos',
-    ipAddress: '8.8.4.4',
-    website: 'https://coastalhomegoods.com'
-  })
+  const [formData, setFormData] = useState(generateRandomSeller)
 
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState(null)
@@ -94,6 +131,15 @@ export default function SellerOnboardingLive() {
     }
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
+  }
+
+  const handleNewApplication = () => {
+    setFormData(generateRandomSeller())
+    clearEvents()
+    setCorrelationId(null)
+    setSubmitting(false)
+    setResult(null)
+    setErrors({})
   }
 
   const handleSubmit = async (e) => {
@@ -173,14 +219,33 @@ export default function SellerOnboardingLive() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-          <div className="p-2 bg-gradient-to-br from-indigo-500 to-cyan-500 rounded-xl">
-            <Zap className="w-6 h-6 text-white" />
-          </div>
-          Live Seller Onboarding
-        </h1>
-        <p className="text-gray-400 mt-1">Submit seller data and watch the agent pipeline in real-time</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+            <div className="p-2 bg-gradient-to-br from-indigo-500 to-cyan-500 rounded-xl">
+              <Zap className="w-6 h-6 text-white" />
+            </div>
+            Live Seller Onboarding
+          </h1>
+          <p className="text-gray-400 mt-1">Submit seller data and watch the agent pipeline in real-time</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <a
+            href="/onboarding"
+            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm font-medium rounded-lg border border-gray-700 transition-colors flex items-center gap-2"
+          >
+            <FileText className="w-4 h-4" />
+            View All Sellers
+          </a>
+          <button
+            onClick={handleNewApplication}
+            disabled={submitting}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
+          >
+            <Plus className="w-4 h-4" />
+            New Application
+          </button>
+        </div>
       </div>
 
       {/* Two-panel layout */}
@@ -391,9 +456,9 @@ export default function SellerOnboardingLive() {
         {/* Right panel: Agent Flow Viewer */}
         <div className="flex-1 min-w-0">
           <AgentFlowViewer
-            events={events}
+            events={correlationId ? events : []}
             isConnected={isConnected}
-            isRunning={isAgentRunning || submitting}
+            isRunning={correlationId ? (isAgentRunning || submitting) : false}
             correlationId={correlationId}
           />
         </div>

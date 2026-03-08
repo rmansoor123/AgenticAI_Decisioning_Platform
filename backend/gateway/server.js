@@ -514,7 +514,73 @@ app.get('/api/agents/events', async (req, res) => {
       events = events.filter(e => e.data?.correlationId === correlationId);
     }
 
+    // Always prefer DB when querying by correlationId — in-memory buffer may have
+    // only a partial set since agent pipelines complete faster than the buffer retains
+    if (correlationId) {
+      const persisted = getEventPersister().getByCorrelationId(correlationId, parseInt(limit));
+      if (persisted.length > events.length) {
+        events = persisted.map(row => ({
+          id: row.event_id,
+          type: row.data?.type || row.event_type,
+          data: row.data,
+          timestamp: row.data?.timestamp || row.created_at
+        }));
+      }
+    }
+
     res.json({ success: true, events, count: events.length });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Full agent decision flow endpoint — always queries DB for complete flow
+app.get('/api/agents/flow/:correlationId', async (req, res) => {
+  try {
+    const { correlationId } = req.params;
+    const events = getEventPersister().getByCorrelationId(correlationId);
+
+    if (events.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: `No events found for correlationId: ${correlationId}`
+      });
+    }
+
+    // Structure the response by categorizing events
+    const steps = [];
+    const actions = [];
+    let decision = null;
+
+    for (const row of events) {
+      const eventData = row.data || {};
+      const eventType = eventData.type || row.event_type || '';
+
+      if (eventType.includes('step:')) {
+        steps.push({ type: eventType, data: eventData, timestamp: eventData.timestamp || row.created_at });
+      }
+      if (eventType.includes('action:')) {
+        actions.push({ type: eventType, data: eventData, timestamp: eventData.timestamp || row.created_at });
+      }
+      if (eventType.includes('complete') && eventData.decision) {
+        decision = eventData.decision;
+      }
+    }
+
+    res.json({
+      success: true,
+      correlationId,
+      eventCount: events.length,
+      decision,
+      steps,
+      actions,
+      events: events.map(row => ({
+        id: row.event_id,
+        type: row.data?.type || row.event_type,
+        data: row.data,
+        timestamp: row.data?.timestamp || row.created_at
+      }))
+    });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -845,6 +911,10 @@ transactionPipeline.start();
 eventBus.subscribe('*', (event) => {
   wsManager._routeEventToClients(event);
 });
+
+// Persist agent:* events to database for full flow retrieval after restart
+import { getEventPersister } from '../agents/core/event-persister.js';
+getEventPersister().start(eventBus);
 
 // Broadcast function for backward compatibility
 function broadcast(data) {

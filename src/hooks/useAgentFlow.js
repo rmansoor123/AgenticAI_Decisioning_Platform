@@ -55,8 +55,8 @@ export function useAgentFlow(correlationId) {
             const eventData = msg.data || msg
             const eventCorrelationId = eventData.correlationId
 
-            // Filter by correlationId if we have one
-            if (correlationIdRef.current && eventCorrelationId !== correlationIdRef.current) return
+            // Only process events when we have a correlationId and it matches
+            if (!correlationIdRef.current || eventCorrelationId !== correlationIdRef.current) return
 
             const agentEvent = {
               id: msg.id || `evt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -120,16 +120,26 @@ export function useAgentFlow(correlationId) {
     }
   }, [])
 
-  // Backfill events when correlationId changes
+  // Backfill events when correlationId changes.
+  // Polls every 500ms until we see agent:decision:complete or agent:decision:error,
+  // since the pipeline may finish before the first backfill fetch returns.
   useEffect(() => {
     if (!correlationId) return
 
+    let cancelled = false
+    let retries = 0
+    const maxRetries = 20 // 10 seconds max
+
     const backfill = async () => {
       try {
-        const resp = await fetch(`${API_BASE}/agents/events?correlationId=${encodeURIComponent(correlationId)}&limit=200`)
+        const resp = await fetch(`${API_BASE}/agents/events?correlationId=${encodeURIComponent(correlationId)}&limit=500`)
         const json = await resp.json()
 
+        if (cancelled) return
+
         if (json.success && json.events?.length > 0) {
+          let hasTerminal = false
+
           setEvents(prev => {
             // Merge backfill events, deduplicate by id
             const existingIds = new Set(prev.map(e => e.id))
@@ -142,21 +152,67 @@ export function useAgentFlow(correlationId) {
                 timestamp: e.timestamp
               }))
 
-            if (newEvents.length === 0) return prev
-
             // Combine and sort by timestamp
-            const combined = [...prev, ...newEvents]
-            combined.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-            return combined
+            const combined = newEvents.length > 0 ? [...prev, ...newEvents] : prev
+            if (newEvents.length > 0) {
+              combined.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+            }
+
+            // Check if we have a terminal event
+            hasTerminal = combined.some(e =>
+              e.type === 'agent:decision:complete' || e.type === 'agent:decision:error'
+            )
+
+            // Extract decision from terminal event
+            if (hasTerminal) {
+              const decEvt = combined.find(e => e.type === 'agent:decision:complete')
+              if (decEvt?.data) {
+                // Use setTimeout to avoid setState-in-setState
+                setTimeout(() => {
+                  setIsAgentRunning(false)
+                  setAgentDecision({
+                    decision: decEvt.data.decision,
+                    confidence: decEvt.data.confidence,
+                    reasoning: decEvt.data.reasoning,
+                    riskScore: decEvt.data.riskScore,
+                    sellerId: decEvt.data.sellerId
+                  })
+                }, 0)
+              }
+              const errEvt = combined.find(e => e.type === 'agent:decision:error')
+              if (errEvt?.data && !decEvt) {
+                setTimeout(() => {
+                  setIsAgentRunning(false)
+                  setAgentDecision({ decision: 'ERROR', error: errEvt.data.error })
+                }, 0)
+              }
+            }
+
+            return newEvents.length > 0 ? combined : prev
           })
+
+          // If we found a terminal event, stop polling
+          if (hasTerminal) return
+        }
+
+        // Retry if agent hasn't completed yet
+        retries++
+        if (!cancelled && retries < maxRetries) {
+          setTimeout(backfill, 500)
         }
       } catch (e) {
-        // Backfill failed, not critical
-        console.warn('Agent event backfill failed:', e.message)
+        // Backfill failed, retry
+        retries++
+        if (!cancelled && retries < maxRetries) {
+          setTimeout(backfill, 500)
+        }
       }
     }
 
-    backfill()
+    // Initial delay to let the first events arrive
+    setTimeout(backfill, 300)
+
+    return () => { cancelled = true }
   }, [correlationId])
 
   return { events, isConnected, isAgentRunning, agentDecision, clearEvents }
