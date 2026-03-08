@@ -442,13 +442,10 @@ setPayoutRiskAgent(payoutRiskAgent);
 setListingIntelligenceAgent(listingIntelligenceAgent);
 setProfileMutationAgent(profileMutationAgent);
 setReturnsAbuseAgent(returnsAbuseAgent);
-crossDomainAgent.start();
-policyEvolutionAgent.start();
-payoutRiskAgent.start();
-listingIntelligenceAgent.start();
-profileMutationAgent.start();
-returnsAbuseAgent.start();
-console.log('Autonomous agents started: Cross-Domain Correlation, Policy Evolution, Payout Risk, Listing Intelligence, Profile Mutation, Returns Abuse');
+// Autonomous agents are registered but NOT auto-started to avoid
+// consuming LLM API quota and causing rate limits during interactive
+// seller evaluations. Start them on-demand via their REST endpoints.
+console.log('Autonomous agents registered (not auto-started): Cross-Domain Correlation, Policy Evolution, Payout Risk, Listing Intelligence, Profile Mutation, Returns Abuse');
 
 // ============================================================================
 // API ROUTES
