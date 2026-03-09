@@ -16,6 +16,7 @@ from routers.vector_search import router as vector_search_router
 from routers.memory import router as memory_router
 from routers.braintrust import router as braintrust_router
 from routers.letta_memory import router as letta_memory_router
+from routers.phoenix import router as phoenix_router
 
 
 @asynccontextmanager
@@ -52,6 +53,38 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"[EvalService] Letta init check failed: {e}")
 
+    # Initialize Phoenix if configured
+    obs_backend = os.getenv("OBSERVABILITY_BACKEND", "sqlite").lower()
+    if obs_backend == "phoenix":
+        try:
+            from services.phoenix_service import init_phoenix
+            if init_phoenix():
+                print("[EvalService] Phoenix tracing initialized")
+            else:
+                print("[EvalService] Phoenix init failed (will retry on first trace)")
+        except Exception as e:
+            print(f"[EvalService] Phoenix init failed: {e}")
+
+    # Initialize ChromaDB if configured
+    if vector_backend == "chromadb":
+        try:
+            from services.chromadb_service import _get_chromadb_client, _get_embedding_model
+            _get_chromadb_client()
+            _get_embedding_model()
+            print("[EvalService] ChromaDB + embedding model initialized")
+        except Exception as e:
+            print(f"[EvalService] ChromaDB init failed (will retry on first request): {e}")
+
+    # Initialize Weaviate if configured
+    if vector_backend == "weaviate":
+        try:
+            from services.weaviate_service import _get_weaviate_client, _get_embedding_model as _get_weaviate_emb
+            _get_weaviate_client()
+            _get_weaviate_emb()
+            print("[EvalService] Weaviate + embedding model initialized")
+        except Exception as e:
+            print(f"[EvalService] Weaviate init failed (will retry on first request): {e}")
+
     yield
     print("[EvalService] Shutting down...")
 
@@ -78,6 +111,7 @@ app.include_router(vector_search_router)
 app.include_router(memory_router)
 app.include_router(braintrust_router)
 app.include_router(letta_memory_router)
+app.include_router(phoenix_router)
 
 
 @app.get("/health")

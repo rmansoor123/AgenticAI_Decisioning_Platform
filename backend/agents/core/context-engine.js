@@ -13,6 +13,7 @@ import { getContextRanker } from './context-ranker.js';
 import { getSelfQueryEngine } from './self-query.js';
 import { getQueryDecomposer } from './query-decomposer.js';
 import { getNeuralReranker } from './neural-reranker.js';
+import { vectorSearch } from './vector-backend.js';
 
 const DEFAULT_TOKEN_BUDGET = 4000;
 
@@ -143,7 +144,6 @@ class ContextEngine {
       }
 
       // 4c. Execute hybrid search for each sub-query (dense + sparse in parallel, fused via RRF)
-      const evalServiceUrl = process.env.EVAL_SERVICE_URL || 'http://localhost:8000';
       const vectorNamespace = namespace === 'onboarding' ? 'onboarding-knowledge' : namespace === 'risk-events' ? 'fraud-cases' : namespace;
       const RRF_K = 60; // Reciprocal Rank Fusion constant
 
@@ -152,32 +152,20 @@ class ContextEngine {
 
         // Run dense (vector) and sparse (TF-IDF) searches in parallel
         const [denseResults, sparseResults] = await Promise.all([
-          // Dense: Pinecone vector search via eval service
+          // Dense: vector search via vector-backend factory (routes to Pinecone/Qdrant/ChromaDB/Weaviate)
           (async () => {
             try {
-              const vectorResponse = await fetch(`${evalServiceUrl}/search`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  query: sq,
-                  namespace: vectorNamespace,
-                  top_k: topK * 2, // fetch more for fusion
-                  filters: Object.keys(selfQueryFilters).length > 0 ? selfQueryFilters : null,
-                }),
-                signal: AbortSignal.timeout(3000),
-              });
-              if (vectorResponse.ok) {
-                const vectorData = await vectorResponse.json();
-                return (vectorData.results || []).map((r, i) => ({
-                  text: r.text,
-                  relevanceScore: r.score,
-                  outcome: r.metadata?.outcome || null,
-                  parentDocumentId: r.metadata?.parentDocumentId || null,
-                  ...r.metadata,
-                  _rank: i + 1,
-                  _source: 'dense',
-                }));
-              }
+              const filter = Object.keys(selfQueryFilters).length > 0 ? selfQueryFilters : null;
+              const results = await vectorSearch(vectorNamespace, sq, topK * 2, filter);
+              return results.map((r, i) => ({
+                text: r.metadata?.text || r.text,
+                relevanceScore: r.score,
+                outcome: r.metadata?.outcome || null,
+                parentDocumentId: r.metadata?.parentDocumentId || null,
+                ...r.metadata,
+                _rank: i + 1,
+                _source: 'dense',
+              }));
             } catch (e) { /* vector search unavailable */ }
             return [];
           })(),

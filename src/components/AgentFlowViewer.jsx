@@ -30,13 +30,14 @@ class AgentFlowErrorBoundary extends Component {
 
 // ── Step-level config ──
 const STEP_CONFIG = {
-  THINK:   { icon: Brain,         color: 'cyan',    label: 'Think' },
-  PLAN:    { icon: ClipboardList,  color: 'violet',  label: 'Plan' },
-  ACT:     { icon: Play,          color: 'indigo',  label: 'Act' },
-  OBSERVE: { icon: Search,        color: 'blue',    label: 'Observe' },
-  REFLECT: { icon: Lightbulb,     color: 'amber',   label: 'Reflect' },
-  POLICY:  { icon: Shield,        color: 'red',     label: 'Policy' },
-  JUDGE:   { icon: Gavel,         color: 'orange',  label: 'Judge' },
+  THINK:       { icon: Brain,         color: 'cyan',    label: 'Think' },
+  PLAN:        { icon: ClipboardList,  color: 'violet',  label: 'Plan' },
+  ACT:         { icon: Play,          color: 'indigo',  label: 'Act' },
+  OBSERVE:     { icon: Search,        color: 'blue',    label: 'Observe' },
+  REFLECT:     { icon: Lightbulb,     color: 'amber',   label: 'Reflect' },
+  INVESTIGATE: { icon: Target,        color: 'purple',  label: 'Investigate' },
+  POLICY:      { icon: Shield,        color: 'red',     label: 'Policy' },
+  JUDGE:       { icon: Gavel,         color: 'orange',  label: 'Judge' },
 }
 
 function getSourceBadge(source) {
@@ -67,9 +68,13 @@ function StepCard({ step, events }) {
   const [expanded, setExpanded] = useState(true)
   const config = STEP_CONFIG[step] || STEP_CONFIG.THINK
   const Icon = config.icon
-  const startEvt = events.find(e => e.type === 'agent:step:start' && e.data?.step === step)
-  const completeEvt = events.find(e => e.type === 'agent:step:complete' && e.data?.step === step)
-  const isRunning = startEvt && !completeEvt
+  // Use the LAST occurrence so multi-turn investigation shows latest state
+  const allStarts = events.filter(e => e.type === 'agent:step:start' && e.data?.step === step)
+  const allCompletes = events.filter(e => e.type === 'agent:step:complete' && e.data?.step === step)
+  const startEvt = allStarts[allStarts.length - 1]
+  const completeEvt = allCompletes[allCompletes.length - 1]
+  const isRunning = allStarts.length > allCompletes.length
+  const roundCount = allStarts.length
   const data = completeEvt?.data || {}
 
   return (
@@ -94,6 +99,7 @@ function StepCard({ step, events }) {
               {config.label}
             </span>
             {isRunning && <span className="text-[10px] text-gray-500 animate-pulse">running...</span>}
+            {roundCount > 1 && <span className="text-[10px] px-1 py-0.5 rounded bg-purple-500/20 text-purple-300">round {roundCount}</span>}
             {data.llmEnhanced && <span className="text-[10px] px-1 py-0.5 rounded bg-purple-500/20 text-purple-300">LLM</span>}
             {data.skipped && <span className="text-[10px] px-1 py-0.5 rounded bg-gray-500/20 text-gray-400">skipped</span>}
           </div>
@@ -177,6 +183,15 @@ function StepCard({ step, events }) {
               )}
               {data.revisedAction && <DetailRow label="Revised To" value={data.revisedAction} />}
               {data.concerns?.length === 0 && <DetailRow label="Result" value="No concerns — decision upheld" />}
+            </>
+          )}
+
+          {/* INVESTIGATE details */}
+          {step === 'INVESTIGATE' && (
+            <>
+              {data.description && <DetailRow label="Result" value={data.description} />}
+              {data.actionsExecuted != null && <DetailRow label="Follow-up Actions" value={`${data.actionsExecuted} additional tool(s) executed`} />}
+              {data.investigationRound && <DetailRow label="Round" value={data.investigationRound} />}
             </>
           )}
 
@@ -364,7 +379,7 @@ function AgentFlowViewerInner({ events = [], isConnected, isRunning, correlation
   }, [events.length])
 
   // Group events by step
-  const steps = ['THINK', 'PLAN', 'ACT', 'OBSERVE', 'REFLECT', 'POLICY', 'JUDGE']
+  const steps = ['THINK', 'PLAN', 'ACT', 'OBSERVE', 'REFLECT', 'INVESTIGATE', 'POLICY', 'JUDGE']
   const activeSteps = steps.filter(s =>
     events.some(e => (e.type === 'agent:step:start' || e.type === 'agent:step:complete') && e.data?.step === s)
   )
@@ -498,6 +513,9 @@ function AgentFlowViewerInner({ events = [], isConnected, isRunning, correlation
 
             {/* REFLECT step */}
             {activeSteps.includes('REFLECT') && <StepCard step="REFLECT" events={events} />}
+
+            {/* INVESTIGATE step (multi-turn deep investigation) */}
+            {activeSteps.includes('INVESTIGATE') && <StepCard step="INVESTIGATE" events={events} />}
 
             {/* POLICY step */}
             {activeSteps.includes('POLICY') && <StepCard step="POLICY" events={events} />}

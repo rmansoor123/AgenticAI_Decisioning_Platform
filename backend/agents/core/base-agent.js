@@ -15,11 +15,14 @@ import { v4 as uuidv4 } from 'uuid';
 import { getAgentMessenger, MESSAGE_TYPES, PRIORITY } from './agent-messenger.js';
 import { getPatternMemory, PATTERN_TYPES, CONFIDENCE_LEVELS } from './pattern-memory.js';
 import { createChainOfThought, STEP_TYPES, CONFIDENCE } from './chain-of-thought.js';
-import { getMemoryStore } from './memory-store.js';
+import { getMemoryBackend } from './memory-factory.js';
 import { getContextEngine } from './context-engine.js';
-import { getMetricsCollector } from './metrics-collector.js';
-import { getTraceCollector } from './trace-collector.js';
-import { getDecisionLogger } from './decision-logger.js';
+import {
+  getObservabilityTraceCollector,
+  getObservabilityMetricsCollector,
+  getObservabilityDecisionLogger,
+} from './observability-factory.js';
+import { getTemporalMemory } from './temporal-factory.js';
 import { getLLMClient } from './llm-client.js';
 import {
   buildThinkPrompt,
@@ -89,12 +92,13 @@ export class BaseAgent {
     // Inter-agent communication
     this.messenger = getAgentMessenger();
     this.patternMemory = getPatternMemory();
-    this.memoryStore = getMemoryStore();
+    this.memoryStore = null;       // lazy-init via _ensureServicesInit()
     this.sessionId = `SESSION-${Date.now().toString(36)}`;
     this.contextEngine = getContextEngine();
-    this.metricsCollector = getMetricsCollector();
-    this.traceCollector = getTraceCollector();
-    this.decisionLogger = getDecisionLogger();
+    this.metricsCollector = null;   // lazy-init via _ensureServicesInit()
+    this.traceCollector = null;     // lazy-init via _ensureServicesInit()
+    this.decisionLogger = null;     // lazy-init via _ensureServicesInit()
+    this._servicesReady = false;
     this.llmClient = getLLMClient();
     this.outcomeSimulator = getOutcomeSimulator();
     this.thresholdManager = getThresholdManager();
@@ -102,12 +106,8 @@ export class BaseAgent {
     this.evalTracker = getEvalTracker();
     this.promptRegistry = getPromptRegistry();
 
-    // Temporal memory (lazy-init, may be null if TEMPORAL_BACKEND=none)
+    // Temporal memory (initialized by _ensureServicesInit, may be null if TEMPORAL_BACKEND=none)
     this.temporalMemory = null;
-    import('./temporal-factory.js')
-      .then(({ getTemporalMemory }) => getTemporalMemory())
-      .then(tm => { this.temporalMemory = tm; })
-      .catch(() => { /* temporal memory not available */ });
 
     // Listen for outcome feedback events
     if (eventBus) {
@@ -130,6 +130,32 @@ export class BaseAgent {
     // Graph-based reasoning (opt-in via subclass setting this.useReasoningGraph = true)
     this.useReasoningGraph = false;
     this._reasoningGraph = null;
+  }
+
+  /**
+   * Lazy async initialization of factory-based services.
+   * Called once at the start of reason() — allows env-based backend switching.
+   */
+  async _ensureServicesInit() {
+    if (this._servicesReady) return;
+    if (this._servicesInitPromise) return this._servicesInitPromise;
+
+    this._servicesInitPromise = (async () => {
+      // Memory backend (Mem0, Letta, or SQLite)
+      this.memoryStore = await getMemoryBackend();
+
+      // Observability backend (Langfuse, Phoenix, or SQLite)
+      this.traceCollector = await getObservabilityTraceCollector();
+      this.metricsCollector = await getObservabilityMetricsCollector();
+      this.decisionLogger = await getObservabilityDecisionLogger();
+
+      // Temporal memory (Zep, in-memory, or null)
+      this.temporalMemory = await getTemporalMemory();
+
+      this._servicesReady = true;
+    })();
+
+    return this._servicesInitPromise;
   }
 
   /**
@@ -158,6 +184,9 @@ export class BaseAgent {
   // Core reasoning loop - "Think, Act, Observe"
   // Supports both linear TPAOR flow and graph-based routing.
   async reason(input, context = {}) {
+    // Initialize factory-based services (memory, observability, temporal)
+    await this._ensureServicesInit();
+
     // Reset re-plan counter and investigation round for each reasoning session
     this._replanCount = 0;
     this._investigationRound = 0;
@@ -544,6 +573,12 @@ export class BaseAgent {
         this._investigationRound = (this._investigationRound || 0) + 1;
         this.traceCollector.startSpan(traceId, 'investigation-round-2', {});
 
+        this.emitEvent('agent:step:start', {
+          agentId: this.agentId, step: 'INVESTIGATE',
+          description: `Deepening investigation (round ${this._investigationRound}) — initial findings uncertain`,
+          investigationRound: this._investigationRound
+        });
+
         // Generate follow-up plan based on round 1 findings
         const followUpPlan = await this._planFollowUp(thought, reflection, context);
 
@@ -560,6 +595,12 @@ export class BaseAgent {
         }
 
         // Re-observe with all evidence (round 1 + round 2)
+        this.emitEvent('agent:step:start', {
+          agentId: this.agentId, step: 'OBSERVE',
+          description: `Re-observing with combined evidence (round ${this._investigationRound})`,
+          toolCount: thought.actions.length,
+          investigationRound: this._investigationRound
+        });
         thought.result = await this.observe(thought.actions, context);
 
         // Re-calibrate confidence
@@ -570,10 +611,37 @@ export class BaseAgent {
           thought.result._rawConfidence = rawConfidence;
         }
 
+        this.emitEvent('agent:step:complete', {
+          agentId: this.agentId, step: 'OBSERVE',
+          decision: thought.result?.recommendation?.action || thought.result?.decision || null,
+          riskScore: thought.result?.riskScore || thought.result?.overallRisk?.score || null,
+          confidence: thought.result?.confidence || null,
+          investigationRound: this._investigationRound
+        });
+
         // Re-reflect on updated findings
+        this.emitEvent('agent:step:start', {
+          agentId: this.agentId, step: 'REFLECT',
+          description: `Re-reflecting on updated findings (round ${this._investigationRound})`,
+          investigationRound: this._investigationRound
+        });
         reflection = await this.reflect(thought.result, thought.actions, input, context);
         thought.reflection = reflection;
         thought.result._investigationRounds = this._investigationRound;
+
+        this.emitEvent('agent:step:complete', {
+          agentId: this.agentId, step: 'REFLECT',
+          shouldRevise: reflection.shouldRevise,
+          concerns: reflection.concerns || [],
+          investigationRound: this._investigationRound
+        });
+
+        this.emitEvent('agent:step:complete', {
+          agentId: this.agentId, step: 'INVESTIGATE',
+          description: `Investigation round ${this._investigationRound} complete`,
+          actionsExecuted: followUpPlan.actions.length,
+          investigationRound: this._investigationRound
+        });
 
         this.currentChain.addStep({
           type: 'analysis',
@@ -1407,25 +1475,17 @@ Select follow-up tools to investigate the concerns.`;
       'risk': 'risk-events'
     }[domain] || 'transactions';
 
-    // 1. Try Pinecone vector search
-    const evalServiceUrl = process.env.EVAL_SERVICE_URL || 'http://localhost:8000';
+    // 1. Vector search via factory (routes to Pinecone/Qdrant/ChromaDB/Weaviate)
     try {
-      const response = await fetch(`${evalServiceUrl}/search`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, namespace: vectorNamespace, top_k: 5 }),
-        signal: AbortSignal.timeout(3000)
-      });
-      if (response.ok) {
-        const data = await response.json();
-        for (const r of (data.results || [])) {
-          results.push({
-            text: r.text,
-            _score: r.score,
-            _source: 'vector',
-            ...r.metadata
-          });
-        }
+      const { vectorSearch } = await import('./vector-backend.js');
+      const vectorResults = await vectorSearch(vectorNamespace, query, 5);
+      for (const r of vectorResults) {
+        results.push({
+          text: r.metadata?.text || r.text,
+          _score: r.score,
+          _source: 'vector',
+          ...r.metadata
+        });
       }
     } catch (e) {
       // Vector search unavailable
@@ -1491,26 +1551,22 @@ Select follow-up tools to investigate the concerns.`;
       // Local KB write failed — not critical
     }
 
-    // Write to Pinecone via eval service
-    const evalServiceUrl = process.env.EVAL_SERVICE_URL || 'http://localhost:8000';
+    // Write to vector backend via factory (routes to Pinecone/Qdrant/ChromaDB/Weaviate)
     try {
+      const { vectorIngest } = await import('./vector-backend.js');
       const vectorNamespace = {
         'onboarding': 'onboarding-knowledge',
         'transactions': 'fraud-cases',
         'risk-events': 'risk-patterns'
       }[namespace] || 'fraud-cases';
 
-      await fetch(`${evalServiceUrl}/ingest`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          namespace: vectorNamespace,
-          records: [{ id: `decision-${Date.now()}`, text, ...knowledgeEntry }]
-        }),
-        signal: AbortSignal.timeout(5000)
-      });
+      await vectorIngest(vectorNamespace, [{
+        id: `decision-${Date.now()}`,
+        text,
+        metadata: knowledgeEntry
+      }]);
     } catch (e) {
-      // Pinecone ingest failed — not critical
+      // Vector ingest failed — not critical
     }
   }
 
@@ -1519,6 +1575,11 @@ Select follow-up tools to investigate the concerns.`;
    * Called when agent:outcome:received event fires for this agent's decision.
    */
   handleOutcomeFeedback(payload) {
+    if (!this._servicesReady) {
+      console.warn(`[${this.agentId}] Outcome feedback received before services initialized, skipping`);
+      return;
+    }
+
     const { decisionId, originalDecision, outcome, wasCorrect } = payload;
 
     // 1. Update pattern memory feedback (provideFeedback finally gets called!)

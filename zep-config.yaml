@@ -1,0 +1,45 @@
+store:
+  type: postgres
+  postgres:
+    dsn: postgres://fraud_user:fraud_pass@postgres:5432/zep?sslmode=disable
+llm:
+  service: openai
+  model: gpt-4o-mini
+  anthropic_api_key: ""
+  openai_api_key: "${OPENAI_API_KEY}"
+nlp:
+  server_url: ""
+extractors:
+  documents:
+    embeddings:
+      enabled: true
+      service: local
+      dimensions: 384
+      chunk_size: 512
+  messages:
+    summarizer:
+      enabled: true
+    embeddings:
+      enabled: true
+      service: local
+      dimensions: 384
+      chunk_size: 512
+    entities:
+      enabled: false
+    intent:
+      enabled: false
+memory:
+  message_window: 12
+server:
+  host: 0.0.0.0
+  port: 8000
+log:
+  level: info
+auth:
+  secret: ""
+  required: false
+opentelemetry:
+  enabled: false
+data_config:
+  purge_every: 60
+development: true
