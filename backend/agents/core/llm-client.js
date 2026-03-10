@@ -1,8 +1,8 @@
 /**
- * LLM Client - Multi-Provider (OpenAI + Anthropic)
+ * LLM Client - Multi-Provider (Ollama + OpenAI + Anthropic)
  *
  * Provides LLM reasoning capabilities to agents with:
- * - OpenAI and Anthropic provider support (LLM_PROVIDER env var)
+ * - Ollama, OpenAI, and Anthropic provider support (LLM_PROVIDER env var)
  * - Singleton pattern for shared client
  * - Graceful fallback when API key absent
  * - Retry with exponential backoff
@@ -32,9 +32,10 @@ try {
   // OpenAI SDK not installed
 }
 
-const LLM_PROVIDER = process.env.LLM_PROVIDER || 'openai'; // 'openai' | 'anthropic'
+const LLM_PROVIDER = process.env.LLM_PROVIDER || 'ollama'; // 'ollama' | 'openai' | 'anthropic'
 
 const DEFAULT_MODELS = {
+  ollama: 'qwen2.5:7b',
   openai: 'gpt-4o-mini',
   anthropic: 'claude-haiku-4-5-20251001'
 };
@@ -68,6 +69,8 @@ class LLMClient {
 
     if (this.provider === 'openai') {
       this._initOpenAI();
+    } else if (this.provider === 'ollama') {
+      this._initOllama();
     } else {
       this._initAnthropic();
     }
@@ -88,6 +91,21 @@ class LLMClient {
       if (!OpenAI) reasons.push('SDK not installed');
       if (!apiKey || apiKey === 'your_openai_key') reasons.push('no OPENAI_API_KEY');
       console.log(`LLM Client: OpenAI disabled (${reasons.join(', ')}). Agents use hardcoded logic.`);
+    }
+  }
+
+  _initOllama() {
+    const baseURL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434/v1';
+    if (OpenAI) {
+      try {
+        this.client = new OpenAI({ baseURL, apiKey: 'ollama' });
+        this.enabled = true;
+        console.log(`LLM Client initialized (Ollama, model: ${MODEL}, baseURL: ${baseURL})`);
+      } catch (e) {
+        console.warn('LLM Client: Failed to initialize Ollama via OpenAI SDK:', e.message);
+      }
+    } else {
+      console.log('LLM Client: Ollama disabled (OpenAI SDK not installed — required for OpenAI-compatible API). Agents use hardcoded logic.');
     }
   }
 
@@ -136,7 +154,7 @@ class LLMClient {
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
         let result;
-        if (this.provider === 'openai') {
+        if (this.provider === 'openai' || this.provider === 'ollama') {
           result = await this._callOpenAI(model, temperature, systemPrompt, userPrompt, options);
         } else {
           result = await this._callAnthropic(model, temperature, systemPrompt, userPrompt, options);
@@ -332,7 +350,7 @@ class LLMClient {
    * Get stats summary
    */
   getStats() {
-    return {
+    const stats = {
       enabled: this.enabled,
       provider: this.provider,
       model: MODEL,
@@ -343,6 +361,10 @@ class LLMClient {
       cache: getLLMCache().getStats(),
       cost: getCostTracker().getSystemCost()
     };
+    if (this.provider === 'ollama') {
+      stats.ollamaBaseURL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434/v1';
+    }
+    return stats;
   }
 }
 

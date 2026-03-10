@@ -119,13 +119,31 @@ Step 9:    EVALUATE            → Async eval via TruLens/RAGAS
 3. **Reflection catches errors pre-decision.** The reflect step runs BEFORE policy enforcement so both LLM critique and business rules act as independent safety layers.
 4. **Eval is fire-and-forget.** Evaluation tracking never blocks the decision path.
 5. **Synthetic data for development.** All data is Faker-generated. Real API integrations are optional via env vars.
-6. **Single LLM provider.** Only Anthropic Claude via `@anthropic-ai/sdk`. Temperature 0.3 for deterministic outputs.
+6. **Multi-provider LLM.** Default: Ollama (local, free). Also supports OpenAI and Anthropic. Temperature 0.3 for deterministic outputs.
+
+## LLM Providers
+
+The platform supports three LLM providers via `LLM_PROVIDER` env var. All agents work without LLM via hardcoded fallback logic.
+
+| Provider | Default Model | Cost | Setup |
+|----------|--------------|------|-------|
+| **Ollama** (default) | `qwen2.5:7b` | Free, local | `docker-compose up ollama -d && bash scripts/setup-ollama.sh` |
+| OpenAI | `gpt-4o-mini` | Paid API | Set `LLM_PROVIDER=openai` + `OPENAI_API_KEY` |
+| Anthropic | `claude-haiku-4-5-20251001` | Paid API | Set `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` |
+
+- **Switch providers:** Change `LLM_PROVIDER` in `.env` (ollama / openai / anthropic)
+- **Disable LLM entirely:** Set `USE_LLM=false` — agents use hardcoded decision logic (fast, no API costs, good for bulk simulation runs)
+- **Ollama uses the OpenAI SDK** via its OpenAI-compatible API at `http://localhost:11434/v1`
 
 ## Environment Variables
 
 ```
-ANTHROPIC_API_KEY=sk-ant-...     # Claude API key
 USE_LLM=true                     # Enable LLM-enhanced reasoning
+LLM_PROVIDER=ollama              # ollama | openai | anthropic
+LLM_MODEL=qwen2.5:7b             # Override default model per provider
+OLLAMA_BASE_URL=http://localhost:11434/v1  # Ollama API endpoint
+OPENAI_API_KEY=                   # OpenAI API key (when LLM_PROVIDER=openai)
+ANTHROPIC_API_KEY=                # Anthropic API key (when LLM_PROVIDER=anthropic)
 EVAL_SERVICE_URL=http://localhost:8000  # Python eval service
 DB_PATH=./data/fraud_detection.db      # SQLite database path
 PORT=3001                         # Express server port

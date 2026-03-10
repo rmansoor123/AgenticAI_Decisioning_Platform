@@ -142,6 +142,21 @@ services:
       timeout: 5s
       retries: 5
 
+  # Ollama - local open-source LLM (default provider)
+  # GPU: add deploy.resources.reservations block if NVIDIA GPU available
+  # To pull model after start: docker exec -it <container> ollama pull qwen2.5:7b
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollamadata:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   phoenix:
     image: arizephoenix/phoenix:latest
     ports:
@@ -162,4 +177,5 @@ volumes:
   lettadata:
   chromadata:
   weaviatedata:
+  ollamadata:
   phoenixdata:
