@@ -53,6 +53,7 @@ export default function Layout({ children, wsConnected }) {
         { name: 'Risk Lifecycle', href: '/seller-risk' },
         { name: 'Network Analysis', href: '/seller-network' },
         { name: 'Risk Rules', href: '/risk-rules' },
+        { name: 'Rules Repository', href: '/rules-repository' },
         { name: 'Case Queue', href: '/case-queue' },
         { name: 'Prompt Library', href: '/prompt-library' },
         { name: 'Feedback Review', href: '/feedback-review' }

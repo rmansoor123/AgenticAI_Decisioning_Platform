@@ -31,6 +31,7 @@ import RAGEvaluation from './pages/RAGEvaluation'
 import PromptLibrary from './pages/PromptLibrary'
 import FeedbackReview from './pages/FeedbackReview'
 import AutonomousAgents from './pages/AutonomousAgents'
+import RulesRepository from './pages/RulesRepository'
 
 const API_BASE = '/api'
 // Connect directly to backend WebSocket to avoid Vite HMR proxy conflict
@@ -190,6 +191,7 @@ function App() {
           <Route path="/prompt-library" element={<PromptLibrary />} />
           <Route path="/feedback-review" element={<FeedbackReview />} />
           <Route path="/autonomous" element={<AutonomousAgents />} />
+          <Route path="/rules-repository" element={<RulesRepository />} />
         </Routes>
       </Layout>
     </BrowserRouter>
