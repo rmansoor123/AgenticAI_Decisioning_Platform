@@ -1,7 +1,51 @@
 import express from 'express';
+import { randomUUID } from 'crypto';
 import { db_ops } from '../../shared/common/database.js';
 
 const router = express.Router();
+
+// POST / — Create a new case (used by all services or direct submission)
+router.post('/', async (req, res) => {
+  try {
+    const {
+      checkpoint, sellerId, entityId, entityType,
+      decision, riskScore, reasoning, agentId, priority
+    } = req.body;
+
+    if (!checkpoint || !sellerId) {
+      return res.status(400).json({ success: false, error: 'checkpoint and sellerId are required' });
+    }
+
+    const caseId = 'CASE-' + randomUUID().substring(0, 8).toUpperCase();
+    const computedPriority = priority || (
+      riskScore >= 80 ? 'CRITICAL' : riskScore >= 60 ? 'HIGH' : riskScore >= 40 ? 'MEDIUM' : 'LOW'
+    );
+
+    const caseData = {
+      caseId,
+      checkpoint,
+      priority: computedPriority,
+      status: 'OPEN',
+      sellerId,
+      entityId: entityId || null,
+      entityType: entityType || null,
+      decision: decision || null,
+      riskScore: riskScore || 0,
+      reasoning: reasoning || null,
+      agentId: agentId || null,
+      createdAt: new Date().toISOString()
+    };
+
+    db_ops.insert('cases', 'case_id', caseId, caseData);
+
+    // Non-blocking: run AlertTriageAgent to evaluate priority + routing
+    triageCase(caseData).catch(() => {});
+
+    res.status(201).json({ success: true, data: caseData });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 // GET /cases — List cases with filters
 router.get('/', (req, res) => {
@@ -202,5 +246,63 @@ router.post('/:caseId/notes', (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// Non-blocking AlertTriageAgent call for case prioritization
+async function triageCase(caseData) {
+  try {
+    const { alertTriage } = await import('../../agents/index.js');
+    const result = await alertTriage.reason({
+      type: 'case_triage',
+      caseId: caseData.caseId,
+      checkpoint: caseData.checkpoint,
+      sellerId: caseData.sellerId,
+      entityId: caseData.entityId,
+      entityType: caseData.entityType,
+      decision: caseData.decision,
+      riskScore: caseData.riskScore,
+      reasoning: caseData.reasoning,
+      submittedAt: new Date().toISOString()
+    }, {
+      entityId: caseData.caseId,
+      evaluationType: 'case_triage'
+    });
+
+    const rec = result.result?.recommendation || result.result?.decision;
+    const updates = { ...caseData };
+    let changed = false;
+
+    // Update priority if agent suggests different
+    const agentPriority = rec?.priority;
+    if (agentPriority && ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].includes(agentPriority)) {
+      updates.priority = agentPriority;
+      changed = true;
+    }
+
+    // Update assigned team if agent suggests routing
+    const assignedTeam = rec?.assignedTeam || rec?.team;
+    if (assignedTeam) {
+      updates.assignedTeam = assignedTeam;
+      changed = true;
+    }
+
+    // Store triage metadata
+    updates.triageResult = {
+      agentId: 'ALERT_TRIAGE',
+      suggestedPriority: agentPriority,
+      suggestedTeam: assignedTeam,
+      reasoning: result.result?.reasoning || rec?.reason,
+      evaluatedAt: new Date().toISOString()
+    };
+    changed = true;
+
+    if (changed) {
+      db_ops.update('cases', 'case_id', caseData.caseId, updates);
+      console.log(`[CaseQueue] Triage: ${caseData.caseId} → priority: ${updates.priority}, team: ${updates.assignedTeam || 'unassigned'}`);
+    }
+  } catch (err) {
+    console.warn(`[CaseQueue] AlertTriageAgent failed for ${caseData.caseId}:`, err.message);
+    // Non-blocking: case keeps its original priority
+  }
+}
 
 export default router;

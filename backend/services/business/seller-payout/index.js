@@ -1,7 +1,9 @@
 import express from 'express';
+import { randomUUID } from 'crypto';
 import { db_ops } from '../../../shared/common/database.js';
 import { generatePayout } from '../../../shared/synthetic-data/generators.js';
 import { emitRiskEvent } from '../../risk-profile/emit-event.js';
+import { getPayoutRiskAgent } from '../../../agents/specialized/payout-risk-agent.js';
 
 const router = express.Router();
 
@@ -43,40 +45,81 @@ router.get('/payouts/:payoutId', (req, res) => {
   }
 });
 
-// Request payout
-router.post('/payouts', (req, res) => {
+// Request payout — wired to PayoutRiskAgent
+router.post('/payouts', async (req, res) => {
   try {
     const { sellerId, amount, method } = req.body;
 
-    // Get seller info for risk assessment
+    // Get seller info
     const seller = db_ops.getById('sellers', 'seller_id', sellerId);
     if (!seller) {
       return res.status(404).json({ success: false, error: 'Seller not found' });
     }
 
-    // Get recent payouts for velocity check
+    // Get recent payouts for context
     const recentPayouts = db_ops.getAll('payouts', 1000, 0)
       .map(p => p.data)
       .filter(p => p.sellerId === sellerId);
 
-    // Perform payout risk assessment
-    const riskAssessment = performPayoutRiskAssessment({
-      sellerId,
-      amount,
-      sellerData: seller.data,
-      recentPayouts
-    });
+    const payoutId = `PAY-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+
+    // Run PayoutRiskAgent
+    let decision = 'HOLD';
+    let riskScore = 50;
+    let reasoning = 'Default hold — agent evaluation pending';
+    let agentId = 'PAYOUT_RISK';
+    let agentResult = null;
+
+    try {
+      const agent = getPayoutRiskAgent();
+      agentResult = await agent.reason({
+        type: 'payout_risk_evaluation',
+        payoutId,
+        sellerId,
+        amount,
+        method: method || 'BANK_TRANSFER',
+        sellerData: seller.data,
+        recentPayouts,
+        submittedAt: new Date().toISOString()
+      }, {
+        entityId: payoutId,
+        evaluationType: 'payout_risk'
+      });
+
+      const rec = agentResult.result?.recommendation || agentResult.result?.decision;
+      decision = rec?.action || 'HOLD';
+      riskScore = agentResult.result?.overallRisk?.score ?? 50;
+      reasoning = agentResult.result?.reasoning || rec?.reason || 'Agent evaluation complete';
+      agentId = agentResult.result?.agentId || 'PAYOUT_RISK';
+    } catch (agentError) {
+      console.error(`[PayoutService] Agent error for ${payoutId}:`, agentError.message);
+      decision = 'HOLD';
+      riskScore = 50;
+      reasoning = `Agent error — defaulting to HOLD: ${agentError.message}`;
+    }
+
+    // Map agent decision to payout status
+    let payoutStatus;
+    if (decision === 'APPROVE') payoutStatus = 'PENDING';
+    else if (decision === 'REJECT') payoutStatus = 'REJECTED';
+    else payoutStatus = 'ON_HOLD'; // HOLD or any unknown decision
 
     const payout = {
-      payoutId: `PAY-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`,
+      payoutId,
       sellerId,
       amount,
       currency: 'USD',
       method: method || 'BANK_TRANSFER',
-      status: riskAssessment.decision === 'HOLD' ? 'ON_HOLD' : 'PENDING',
-      riskHold: riskAssessment.decision === 'HOLD',
-      holdReason: riskAssessment.decision === 'HOLD' ? riskAssessment.holdReason : null,
-      riskAssessment,
+      status: payoutStatus,
+      riskHold: payoutStatus === 'ON_HOLD',
+      holdReason: payoutStatus !== 'PENDING' ? reasoning : null,
+      riskAssessment: {
+        riskScore,
+        decision,
+        reasoning,
+        agentId,
+        evaluatedAt: new Date().toISOString()
+      },
       bankAccount: seller.data.bankAccount || {
         last4: '****',
         bankName: 'Unknown',
@@ -88,19 +131,53 @@ router.post('/payouts', (req, res) => {
 
     db_ops.insert('payouts', 'payout_id', payout.payoutId, payout);
 
-    // Emit risk events for payout
-    if (payout.status === 'ON_HOLD' || riskAssessment?.decision === 'HOLD') {
-      emitRiskEvent({
-        sellerId: payout.sellerId, domain: 'payout', eventType: 'PAYOUT_HELD',
-        riskScore: riskAssessment?.riskScore || 45,
-        metadata: { amount: payout.amount }
-      });
+    // Emit risk event
+    emitRiskEvent({
+      sellerId,
+      domain: 'payout',
+      eventType: decision === 'APPROVE' ? 'PAYOUT_APPROVED' : decision === 'REJECT' ? 'PAYOUT_REJECTED' : 'PAYOUT_HELD',
+      riskScore,
+      metadata: { amount, decision, payoutId }
+    });
+
+    // Create case on HOLD or REJECT
+    if (decision === 'HOLD' || decision === 'REJECT') {
+      const caseId = 'CASE-' + randomUUID().substring(0, 8).toUpperCase();
+      const caseData = {
+        caseId,
+        checkpoint: 'PAYOUT_RISK',
+        priority: riskScore >= 80 ? 'CRITICAL' : riskScore >= 60 ? 'HIGH' : 'MEDIUM',
+        status: 'OPEN',
+        sellerId,
+        entityId: payoutId,
+        entityType: 'PAYOUT',
+        decision,
+        riskScore,
+        reasoning,
+        agentId,
+        createdAt: new Date().toISOString()
+      };
+      db_ops.insert('cases', 'case_id', caseId, caseData);
+
+      // Non-blocking: triage the case
+      triageCase(caseData).catch(() => {});
     }
+
+    // Emit completion event
+    try {
+      const { getEventBus } = await import('../../../gateway/websocket/event-bus.js');
+      getEventBus().publish('agent:decision:complete', {
+        sellerId, entityId: payoutId, decision, riskScore, reasoning,
+        timestamp: new Date().toISOString()
+      });
+    } catch {}
+
+    console.log(`[PayoutService] ${payoutId} → ${decision} (risk: ${riskScore})`);
 
     res.status(201).json({
       success: true,
       data: payout,
-      riskAssessment
+      riskAssessment: payout.riskAssessment
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -197,12 +274,10 @@ router.get('/sellers/:sellerId/balance', (req, res) => {
   try {
     const sellerId = req.params.sellerId;
 
-    // Get seller transactions (sales)
     const transactions = db_ops.getAll('transactions', 10000, 0)
       .map(t => t.data)
       .filter(t => t.sellerId === sellerId);
 
-    // Get seller payouts
     const payouts = db_ops.getAll('payouts', 1000, 0)
       .map(p => p.data)
       .filter(p => p.sellerId === sellerId);
@@ -291,71 +366,24 @@ router.get('/stats', (req, res) => {
   }
 });
 
-// Helper function for payout risk assessment
-function performPayoutRiskAssessment({ sellerId, amount, sellerData, recentPayouts }) {
-  const signals = [];
-  let riskScore = 0;
-  let holdReason = null;
-
-  // Check seller risk tier
-  if (sellerData.riskTier === 'HIGH' || sellerData.riskTier === 'CRITICAL') {
-    signals.push({ signal: 'HIGH_RISK_SELLER', weight: 30 });
-    riskScore += 30;
+// Non-blocking AlertTriageAgent call for case prioritization
+async function triageCase(caseData) {
+  try {
+    const { default: AlertTriageAgent } = await import('../../../agents/specialized/alert-triage-agent.js');
+    const { alertTriage } = await import('../../../agents/index.js');
+    const result = await alertTriage.reason(caseData, { evaluationType: 'case_triage' });
+    const updatedPriority = result.result?.recommendation?.priority || result.result?.decision?.priority;
+    const assignedTeam = result.result?.recommendation?.assignedTeam || result.result?.decision?.assignedTeam;
+    if (updatedPriority || assignedTeam) {
+      const updates = {};
+      if (updatedPriority) updates.priority = updatedPriority;
+      if (assignedTeam) updates.assignedTeam = assignedTeam;
+      updates.triageResult = { agentId: 'ALERT_TRIAGE', evaluatedAt: new Date().toISOString() };
+      db_ops.update('cases', 'case_id', caseData.caseId, { ...caseData, ...updates });
+    }
+  } catch (err) {
+    console.warn(`[PayoutService] Case triage failed for ${caseData.caseId}:`, err.message);
   }
-
-  // Check if bank is verified
-  if (!sellerData.bankVerified) {
-    signals.push({ signal: 'BANK_NOT_VERIFIED', weight: 40 });
-    riskScore += 40;
-    holdReason = 'Bank account not verified';
-  }
-
-  // Check account age
-  const accountAgeDays = (new Date() - new Date(sellerData.createdAt)) / (1000 * 60 * 60 * 24);
-  if (accountAgeDays < 30) {
-    signals.push({ signal: 'NEW_ACCOUNT', weight: 20 });
-    riskScore += 20;
-  }
-
-  // Check payout velocity
-  const last24hPayouts = recentPayouts.filter(p =>
-    new Date() - new Date(p.createdAt) < 24 * 60 * 60 * 1000
-  );
-  if (last24hPayouts.length >= 3) {
-    signals.push({ signal: 'HIGH_PAYOUT_VELOCITY', weight: 25 });
-    riskScore += 25;
-    holdReason = holdReason || 'Unusual payout velocity';
-  }
-
-  // Check amount threshold
-  if (amount > 10000) {
-    signals.push({ signal: 'HIGH_AMOUNT', weight: 15 });
-    riskScore += 15;
-  }
-
-  // Check if amount exceeds seller's average
-  const avgPayout = recentPayouts.length > 0
-    ? recentPayouts.reduce((sum, p) => sum + p.amount, 0) / recentPayouts.length
-    : amount;
-  if (amount > avgPayout * 3) {
-    signals.push({ signal: 'UNUSUAL_AMOUNT', weight: 20 });
-    riskScore += 20;
-    holdReason = holdReason || 'Amount significantly higher than usual';
-  }
-
-  // Decision
-  let decision = 'APPROVE';
-  if (riskScore >= 50) {
-    decision = 'HOLD';
-  }
-
-  return {
-    riskScore,
-    signals,
-    decision,
-    holdReason,
-    evaluatedAt: new Date().toISOString()
-  };
 }
 
 export default router;

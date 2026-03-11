@@ -1,6 +1,8 @@
 import express from 'express';
+import { randomUUID } from 'crypto';
 import { db_ops } from '../../../shared/common/database.js';
 import { emitRiskEvent } from '../../risk-profile/emit-event.js';
+import { getReturnsAbuseAgent } from '../../../agents/specialized/returns-abuse-agent.js';
 
 const router = express.Router();
 const COLLECTION = 'returns';
@@ -68,57 +70,103 @@ router.get('/:id', (req, res) => {
   }
 });
 
-// POST / — Create new record, assess risk, emit event if riskScore > 0
-router.post('/', (req, res) => {
+// POST / — Create return request, run ReturnsAbuseAgent
+router.post('/', async (req, res) => {
   try {
     const id = `RET-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-    let riskScore = 0;
-    const riskFactors = [];
 
-    if (req.body.serialReturner) {
-      riskScore += 40;
-      riskFactors.push('serialReturner');
+    // Run ReturnsAbuseAgent
+    let decision = 'INVESTIGATE';
+    let riskScore = 50;
+    let reasoning = 'Default investigate — agent evaluation pending';
+    let agentId = 'RETURNS_ABUSE';
+    let riskFactors = [];
+
+    try {
+      const agent = getReturnsAbuseAgent();
+      const agentResult = await agent.reason({
+        type: 'returns_abuse_evaluation',
+        returnId: id,
+        sellerId: req.body.sellerId,
+        orderId: req.body.orderId,
+        reason: req.body.reason,
+        refundAmount: req.body.refundAmount,
+        serialReturner: req.body.serialReturner,
+        emptyBox: req.body.emptyBox,
+        refundExceedsPurchase: req.body.refundExceedsPurchase,
+        wardrobing: req.body.wardrobing,
+        fundsWithdrawn: req.body.fundsWithdrawn,
+        submittedAt: new Date().toISOString()
+      }, {
+        entityId: id,
+        evaluationType: 'returns_abuse'
+      });
+
+      const rec = agentResult.result?.recommendation || agentResult.result?.decision;
+      decision = rec?.action || 'INVESTIGATE';
+      riskScore = agentResult.result?.overallRisk?.score ?? 50;
+      reasoning = agentResult.result?.reasoning || rec?.reason || 'Agent evaluation complete';
+      agentId = agentResult.result?.agentId || 'RETURNS_ABUSE';
+      riskFactors = agentResult.result?.riskFactors?.map(f => f.factor) || [];
+    } catch (agentError) {
+      console.error(`[ReturnsService] Agent error for ${id}:`, agentError.message);
+      decision = 'INVESTIGATE';
+      riskScore = 50;
+      reasoning = `Agent error — defaulting to INVESTIGATE: ${agentError.message}`;
     }
-    if (req.body.emptyBox) {
-      riskScore += 35;
-      riskFactors.push('emptyBox');
-    }
-    if (req.body.refundExceedsPurchase) {
-      riskScore += 50;
-      riskFactors.push('refundExceedsPurchase');
-    }
-    if (req.body.wardrobing) {
-      riskScore += 25;
-      riskFactors.push('wardrobing');
-    }
-    if (req.body.fundsWithdrawn) {
-      riskScore += 45;
-      riskFactors.push('fundsWithdrawn');
-    }
+
+    // Map decision to status
+    let status;
+    if (decision === 'APPROVE') status = 'APPROVED';
+    else if (decision === 'DENY') status = 'DENIED';
+    else status = 'UNDER_INVESTIGATION'; // INVESTIGATE
 
     const record = {
       [ID_FIELD]: id,
       ...req.body,
-      status: 'REQUESTED',
+      status,
       riskScore,
       riskFactors,
+      riskAssessment: {
+        decision, riskScore, reasoning, agentId,
+        evaluatedAt: new Date().toISOString()
+      },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
 
     db_ops.insert(COLLECTION, record);
 
-    if (riskScore > 0) {
-      emitRiskEvent({
-        domain: 'returns',
-        eventType: 'RETURN_RISK',
-        entityId: id,
+    // Emit risk event
+    emitRiskEvent({
+      domain: 'returns',
+      eventType: decision === 'APPROVE' ? 'RETURN_APPROVED' : decision === 'DENY' ? 'RETURN_DENIED' : 'RETURN_INVESTIGATING',
+      entityId: id,
+      sellerId: req.body.sellerId,
+      riskScore: decision === 'APPROVE' ? 0 : riskScore,
+      metadata: { decision, returnId: id }
+    });
+
+    // Create case on INVESTIGATE or DENY
+    if (decision === 'INVESTIGATE' || decision === 'DENY') {
+      const caseId = 'CASE-' + randomUUID().substring(0, 8).toUpperCase();
+      db_ops.insert('cases', 'case_id', caseId, {
+        caseId,
+        checkpoint: 'RETURNS_REVIEW',
+        priority: riskScore >= 80 ? 'CRITICAL' : riskScore >= 60 ? 'HIGH' : 'MEDIUM',
+        status: 'OPEN',
         sellerId: req.body.sellerId,
+        entityId: id,
+        entityType: 'RETURN',
+        decision,
         riskScore,
-        riskFactors,
-        data: record
+        reasoning,
+        agentId,
+        createdAt: new Date().toISOString()
       });
     }
+
+    console.log(`[ReturnsService] ${id} → ${decision} (risk: ${riskScore})`);
 
     res.status(201).json({ success: true, data: record });
   } catch (error) {

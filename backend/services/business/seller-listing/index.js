@@ -1,7 +1,9 @@
 import express from 'express';
+import { randomUUID } from 'crypto';
 import { db_ops } from '../../../shared/common/database.js';
 import { generateListing } from '../../../shared/synthetic-data/generators.js';
 import { emitRiskEvent } from '../../risk-profile/emit-event.js';
+import { getListingIntelligenceAgent } from '../../../agents/specialized/listing-intelligence-agent.js';
 
 const router = express.Router();
 
@@ -44,43 +46,93 @@ router.get('/listings/:listingId', (req, res) => {
   }
 });
 
-// Create listing
-router.post('/listings', (req, res) => {
+// Create listing — wired to ListingIntelligenceAgent
+router.post('/listings', async (req, res) => {
   try {
     const listingData = req.body.listingId ? req.body : generateListing(req.body.sellerId);
 
-    // Perform listing risk assessment
-    const riskAssessment = performListingRiskAssessment(listingData);
-    listingData.riskAssessment = riskAssessment;
+    // Run ListingIntelligenceAgent
+    let decision = 'FLAG';
+    let riskScore = 50;
+    let reasoning = 'Default flag — agent evaluation pending';
+    let agentId = 'LISTING_INTELLIGENCE';
 
-    if (riskAssessment.decision === 'REJECT') {
-      listingData.status = 'REMOVED';
-    } else if (riskAssessment.decision === 'REVIEW') {
-      listingData.status = 'PENDING_REVIEW';
-    } else {
-      listingData.status = 'ACTIVE';
+    try {
+      const agent = getListingIntelligenceAgent();
+      const agentResult = await agent.reason({
+        type: 'listing_review',
+        listingId: listingData.listingId,
+        sellerId: listingData.sellerId,
+        title: listingData.title,
+        description: listingData.description,
+        price: listingData.price,
+        category: listingData.category,
+        images: listingData.images,
+        riskFlags: listingData.riskFlags,
+        submittedAt: new Date().toISOString()
+      }, {
+        entityId: listingData.listingId,
+        evaluationType: 'listing_review'
+      });
+
+      const rec = agentResult.result?.recommendation || agentResult.result?.decision;
+      decision = rec?.action || 'FLAG';
+      riskScore = agentResult.result?.overallRisk?.score ?? 50;
+      reasoning = agentResult.result?.reasoning || rec?.reason || 'Agent evaluation complete';
+      agentId = agentResult.result?.agentId || 'LISTING_INTELLIGENCE';
+    } catch (agentError) {
+      console.error(`[ListingService] Agent error for ${listingData.listingId}:`, agentError.message);
+      decision = 'FLAG';
+      riskScore = 50;
+      reasoning = `Agent error — defaulting to FLAG: ${agentError.message}`;
     }
+
+    // Map decision to listing status
+    if (decision === 'REJECT') listingData.status = 'REMOVED';
+    else if (decision === 'FLAG') listingData.status = 'PENDING_REVIEW';
+    else listingData.status = 'ACTIVE'; // APPROVE
+
+    listingData.riskAssessment = {
+      riskScore, decision, reasoning, agentId,
+      evaluatedAt: new Date().toISOString()
+    };
 
     db_ops.insert('listings', 'listing_id', listingData.listingId, listingData);
 
-    // Emit risk events for listing
-    if (listingData.status === 'REMOVED' || riskAssessment?.decision === 'REJECT') {
-      emitRiskEvent({
-        sellerId: listingData.sellerId, domain: 'listing', eventType: 'LISTING_REJECTED',
-        riskScore: riskAssessment?.riskScore || 50, metadata: { listingId: listingData.listingId }
+    // Emit risk event
+    emitRiskEvent({
+      sellerId: listingData.sellerId,
+      domain: 'listing',
+      eventType: decision === 'APPROVE' ? 'LISTING_APPROVED' : decision === 'REJECT' ? 'LISTING_REJECTED' : 'LISTING_FLAGGED',
+      riskScore: decision === 'APPROVE' ? -5 : riskScore,
+      metadata: { listingId: listingData.listingId, decision }
+    });
+
+    // Create case on FLAG or REJECT
+    if (decision === 'FLAG' || decision === 'REJECT') {
+      const caseId = 'CASE-' + randomUUID().substring(0, 8).toUpperCase();
+      db_ops.insert('cases', 'case_id', caseId, {
+        caseId,
+        checkpoint: 'LISTING_REVIEW',
+        priority: riskScore >= 80 ? 'CRITICAL' : riskScore >= 60 ? 'HIGH' : 'MEDIUM',
+        status: 'OPEN',
+        sellerId: listingData.sellerId,
+        entityId: listingData.listingId,
+        entityType: 'LISTING',
+        decision,
+        riskScore,
+        reasoning,
+        agentId,
+        createdAt: new Date().toISOString()
       });
     }
-    if (listingData.status === 'ACTIVE') {
-      emitRiskEvent({
-        sellerId: listingData.sellerId, domain: 'listing', eventType: 'LISTING_APPROVED',
-        riskScore: -5, metadata: {}
-      });
-    }
+
+    console.log(`[ListingService] ${listingData.listingId} → ${decision} (risk: ${riskScore})`);
 
     res.status(201).json({
       success: true,
       data: listingData,
-      riskAssessment
+      riskAssessment: listingData.riskAssessment
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -96,14 +148,9 @@ router.put('/listings/:listingId', (req, res) => {
     }
 
     const updated = { ...existing.data, ...req.body, updatedAt: new Date().toISOString() };
-
-    // Re-assess risk on update
-    const riskAssessment = performListingRiskAssessment(updated);
-    updated.riskAssessment = riskAssessment;
-
     db_ops.update('listings', 'listing_id', req.params.listingId, updated);
 
-    res.json({ success: true, data: updated, riskAssessment });
+    res.json({ success: true, data: updated });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -161,12 +208,10 @@ router.post('/analyze/bulk', (req, res) => {
     const results = listingIds.map(id => {
       const listing = db_ops.getById('listings', 'listing_id', id);
       if (!listing) return { listingId: id, error: 'Not found' };
-
-      const assessment = performListingRiskAssessment(listing.data);
       return {
         listingId: id,
         title: listing.data.title,
-        riskAssessment: assessment
+        riskAssessment: listing.data.riskAssessment || { decision: 'UNKNOWN' }
       };
     });
 
@@ -241,75 +286,5 @@ router.get('/stats', (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-
-// Helper function for listing risk assessment
-function performListingRiskAssessment(listing) {
-  const signals = [];
-  let riskScore = 0;
-
-  // Price anomaly detection
-  const categoryPrices = {
-    'Electronics': { min: 10, max: 3000 },
-    'Fashion': { min: 5, max: 500 },
-    'Home & Garden': { min: 10, max: 2000 },
-    'Jewelry': { min: 20, max: 10000 }
-  };
-
-  const priceRange = categoryPrices[listing.category] || { min: 5, max: 1000 };
-  if (listing.price < priceRange.min * 0.2 || listing.price > priceRange.max * 2) {
-    signals.push({ signal: 'PRICE_ANOMALY', weight: 25 });
-    riskScore += 25;
-  }
-
-  // Check for prohibited keywords
-  const prohibitedKeywords = ['replica', 'counterfeit', 'fake', 'knockoff', 'unauthorized'];
-  const titleLower = (listing.title || '').toLowerCase();
-  const descLower = (listing.description || '').toLowerCase();
-
-  for (const keyword of prohibitedKeywords) {
-    if (titleLower.includes(keyword) || descLower.includes(keyword)) {
-      signals.push({ signal: 'PROHIBITED_KEYWORD', keyword, weight: 40 });
-      riskScore += 40;
-      break;
-    }
-  }
-
-  // Check risk flags
-  if (listing.riskFlags) {
-    if (listing.riskFlags.prohibitedContent) {
-      signals.push({ signal: 'PROHIBITED_CONTENT_FLAG', weight: 50 });
-      riskScore += 50;
-    }
-    if (listing.riskFlags.counterfeitRisk) {
-      signals.push({ signal: 'COUNTERFEIT_RISK_FLAG', weight: 45 });
-      riskScore += 45;
-    }
-    if (listing.riskFlags.duplicateListing) {
-      signals.push({ signal: 'DUPLICATE_LISTING', weight: 20 });
-      riskScore += 20;
-    }
-  }
-
-  // No images
-  if (!listing.images || listing.images === 0) {
-    signals.push({ signal: 'NO_IMAGES', weight: 15 });
-    riskScore += 15;
-  }
-
-  // Decision
-  let decision = 'APPROVE';
-  if (riskScore >= 60) {
-    decision = 'REJECT';
-  } else if (riskScore >= 30) {
-    decision = 'REVIEW';
-  }
-
-  return {
-    riskScore,
-    signals,
-    decision,
-    evaluatedAt: new Date().toISOString()
-  };
-}
 
 export default router;

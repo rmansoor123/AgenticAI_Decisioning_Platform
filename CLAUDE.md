@@ -260,44 +260,44 @@ Every agent MUST:
 - Decisions: `BLOCK` / `REVIEW` / `MONITOR` / `APPROVE`
 - Use: Deep-dive investigation triggered by other agents or analysts
 
-**AlertTriageAgent** ❌ NOT WIRED
+**AlertTriageAgent** ✅ WIRED
 - File: `backend/agents/specialized/alert-triage-agent.js`
 - Extends: `BaseAgent` | ID: `ALERT_TRIAGE`
 - Role: Prioritize + route cases from all agents to analysts
-- Critical: Wiring this closes the human feedback loop for the entire platform
+- Route: `POST /api/cases` (non-blocking triage after case creation)
 
 **RuleOptimizationAgent** ❌ NOT WIRED
 - File: `backend/agents/specialized/rule-optimization-agent.js`
 - Extends: `BaseAgent` | ID: `RULE_OPTIMIZER`
 - Role: Analyze rule performance, propose threshold changes autonomously
 
-**PayoutRiskAgent** ❌ NOT WIRED
+**PayoutRiskAgent** ✅ WIRED
 - File: `backend/agents/specialized/payout-risk-agent.js`
 - Extends: `AutonomousAgent` | ID: `PAYOUT_RISK`
 - Decisions: `APPROVE` / `HOLD` / `REJECT`
-- Route: `POST /api/payout/payouts` (service exists, agent not connected)
+- Route: `POST /api/payout/payouts`
 - Key signals: payout velocity, bank change recency, dispute ratio, first payout flag
 - Priority: HIGH — money leaves platform here
 
-**ListingIntelligenceAgent** ❌ NOT WIRED
+**ListingIntelligenceAgent** ✅ WIRED
 - File: `backend/agents/specialized/listing-intelligence-agent.js`
 - Extends: `AutonomousAgent` | ID: `LISTING_INTELLIGENCE`
 - Decisions: `APPROVE` / `FLAG` / `REJECT`
-- Route: `POST /api/listing/listings` (service exists, agent not connected)
+- Route: `POST /api/listing/listings`
 - Key signals: counterfeit detection, listing velocity, price anomaly, prohibited items
 
-**ReturnsAbuseAgent** ❌ NOT WIRED
+**ReturnsAbuseAgent** ✅ WIRED
 - File: `backend/agents/specialized/returns-abuse-agent.js`
 - Extends: `AutonomousAgent` | ID: `RETURNS_ABUSE`
 - Decisions: `APPROVE` / `INVESTIGATE` / `DENY`
-- Route: `POST /api/returns` (service exists, agent not connected)
+- Route: `POST /api/returns`
 - Key signals: return rate vs baseline, timing patterns, buyer-seller collusion
 
-**ProfileMutationAgent** ❌ NOT WIRED
+**ProfileMutationAgent** ✅ WIRED
 - File: `backend/agents/specialized/profile-mutation-agent.js`
 - Extends: `AutonomousAgent` | ID: `PROFILE_MUTATION`
 - Decisions: `ALLOW` / `STEP_UP` / `LOCK`
-- Route: `POST /api/profile-updates` (service exists, agent not connected)
+- Route: `POST /api/profile-updates`
 - Key signals: multi-field change, device fingerprint change, bank change + payout within 72h
 - ATO signal: bank change + payout request within 72h
 
@@ -367,7 +367,7 @@ transaction → agent evaluates risk → decision enforced → risk profile upda
 → case created if flagged → agent learns from outcome.
 ```
 ONBOARD → SETUP → LIST → PRICE → TRANSACT → SHIP → PAYOUT → RETURN → PROFILE
-  ✅         ❌      ❌      ❌       ❌          ❌      ❌        ❌       ❌
+  ✅         ❌      ✅      ❌       ❌          ❌      ✅        ✅       ✅
 ```
 
 **Stage 1 — Onboarding** ✅ COMPLETE
@@ -383,7 +383,7 @@ ONBOARD → SETUP → LIST → PRICE → TRANSACT → SHIP → PAYOUT → RETURN
 - Wire to SellerOnboardingAgent (same agent, different checkpoint)
 - Key signals: bank account country mismatch, prepaid card detection, tax ID cross-ref
 
-**Stage 3 — Listing** ❌ NEEDS WIRING
+**Stage 3 — Listing** ✅ WIRED
 - Service: `backend/services/business/seller-listing/`
 - Agent: ListingIntelligenceAgent (exists, not wired)
 - Key signals: counterfeit (luxury brand + new seller + price 60% below market),
@@ -401,7 +401,7 @@ ONBOARD → SETUP → LIST → PRICE → TRANSACT → SHIP → PAYOUT → RETURN
 - Service: `backend/services/business/seller-shipping/`
 - Key signals: address mismatch, freight forwarding, empty box pattern, velocity spike
 
-**Stage 6 — Payout** ❌ NEEDS WIRING
+**Stage 6 — Payout** ✅ WIRED
 - Service: `backend/services/business/seller-payout/`
 - Agent: PayoutRiskAgent (exists, not wired) | Route: `POST /api/payout/payouts`
 - Key signals: payout velocity, bank change recency (<7 days = high risk),
@@ -409,14 +409,14 @@ ONBOARD → SETUP → LIST → PRICE → TRANSACT → SHIP → PAYOUT → RETURN
 - Decision: APPROVE / HOLD / REJECT | Risk weight: 0.12
 - HOLD → case created | REJECT → blocked, review required
 
-**Stage 7 — Returns** ❌ NEEDS WIRING
+**Stage 7 — Returns** ✅ WIRED
 - Service: `backend/services/business/returns/`
 - Agent: ReturnsAbuseAgent (exists, not wired)
 - Key signals: return rate 3x category baseline, day-29 timing pattern,
   buyer-seller collusion, wardrobing, empty box claims
 - Decision: APPROVE / INVESTIGATE / DENY | Risk weight: 0.07
 
-**Stage 8 — Profile Updates** ❌ NEEDS WIRING
+**Stage 8 — Profile Updates** ✅ WIRED
 - Service: `backend/services/business/profile-updates/`
 - Agent: ProfileMutationAgent (exists, not wired)
 - Key signals: 2+ critical fields changed in one session, device fingerprint change,
@@ -437,19 +437,18 @@ the full event history. CrossDomainCorrelationAgent monitors trends across all d
 
 ### Build Priority for Full Journey Coverage
 ```
-Sprint 1 — Wire existing agents (pure execution, no new design):
-  Wire PayoutRiskAgent → seller-payout
-  Wire ListingIntelligenceAgent → seller-listing
-  Wire ReturnsAbuseAgent → returns
-  Wire ProfileMutationAgent → profile-updates
-  Use: .claude/skills/wire-agent/SKILL.md
+Sprint 1 — Wire existing agents ✅ COMPLETE:
+  ✅ Wire PayoutRiskAgent → seller-payout
+  ✅ Wire ListingIntelligenceAgent → seller-listing
+  ✅ Wire ReturnsAbuseAgent → returns
+  ✅ Wire ProfileMutationAgent → profile-updates
+  ✅ Wire AlertTriageAgent → case-queue + POST /cases endpoint
 
 Sprint 2 — New high-value services:
   Build TransactionRiskAgent + transaction-processing (two-tier architecture)
   Build NetworkIntelligenceAgent + network-intelligence (Neo4j graph)
 
-Sprint 3 — Close feedback loop:
-  Wire AlertTriageAgent → case-queue
+Sprint 3 — Remaining feedback loop:
   Schedule CrossDomainCorrelationAgent autonomously (every 6h)
 
 Sprint 4 — Journey monitoring:
@@ -476,21 +475,21 @@ POST /id-verification               OCR document scan
 GET  /stats
 ```
 
-**Seller Payout** ❌ — `/api/payout`
+**Seller Payout** ✅ AGENT WIRED — `/api/payout`
 ```
 GET  /payouts
 GET  /payouts/:payoutId
-POST /payouts                       WIRE PayoutRiskAgent here
+POST /payouts                       creates payout + runs PayoutRiskAgent
 PATCH /payouts/:payoutId/status
 POST /payouts/:payoutId/release     release a held payout
 GET  /stats
 ```
 
-**Seller Listing** ❌ — `/api/listing`
+**Seller Listing** ✅ AGENT WIRED — `/api/listing`
 ```
 GET  /listings
 GET  /listings/:listingId
-POST /listings                      WIRE ListingIntelligenceAgent here
+POST /listings                      creates listing + runs ListingIntelligenceAgent
 PUT  /listings/:listingId
 PATCH /listings/:listingId/status
 GET  /sellers/:sellerId/listings
@@ -498,15 +497,15 @@ GET  /flagged
 GET  /stats
 ```
 
-**Returns** ❌ — `/api/returns`
+**Returns** ✅ AGENT WIRED — `/api/returns`
 ```
-GET  /    GET /:id    POST /          WIRE ReturnsAbuseAgent to POST
+GET  /    GET /:id    POST /          runs ReturnsAbuseAgent
 PATCH /:id/status    GET /stats
 ```
 
-**Profile Updates** ❌ — `/api/profile-updates`
+**Profile Updates** ✅ AGENT WIRED — `/api/profile-updates`
 ```
-GET  /    GET /:id    POST /          WIRE ProfileMutationAgent to POST
+GET  /    GET /:id    POST /          runs ProfileMutationAgent
 PATCH /:id/status    GET /stats
 ```
 
@@ -540,8 +539,9 @@ GET  /:sellerId/timeline            full seller activity timeline ← KEY ENDPOI
 PATCH /:sellerId/override           manual risk override (analysts)
 ```
 
-**Case Queue** — `/api/cases`
+**Case Queue** ✅ ALERT TRIAGE WIRED — `/api/cases`
 ```
+POST /                              create case + runs AlertTriageAgent (non-blocking)
 GET  /                              list cases (status, priority, checkpoint filters)
 GET  /stats
 GET  /:caseId
@@ -653,10 +653,10 @@ policy:violation                          hard policy triggered
 ---
 
 ## Roadmap Priorities
-1. Wire 4 existing agents — payout, listing, returns, profile-updates
+1. ~~Wire 4 existing agents — payout, listing, returns, profile-updates~~ ✅ DONE
 2. Build TransactionRiskAgent + transaction-processing (two-tier: rules <10ms, agent <500ms)
 3. Build NetworkIntelligenceAgent + network-intelligence (Neo4j fraud rings)
-4. Wire AlertTriageAgent → case-queue (closes human feedback loop)
+4. ~~Wire AlertTriageAgent → case-queue (closes human feedback loop)~~ ✅ DONE
 5. Schedule CrossDomainCorrelationAgent autonomously every 6h
 6. Seller journey timeline UI (`GET /api/risk-profile/:id/timeline` already exists)
 7. Self-improving rule loop — RuleOptimizationAgent running nightly autonomously
