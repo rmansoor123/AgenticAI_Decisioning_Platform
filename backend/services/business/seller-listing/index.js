@@ -46,94 +46,116 @@ router.get('/listings/:listingId', (req, res) => {
   }
 });
 
-// Create listing — wired to ListingIntelligenceAgent
+// Create listing — async fire-and-forget with real-time TPAOR streaming
 router.post('/listings', async (req, res) => {
   try {
     const listingData = req.body.listingId ? req.body : generateListing(req.body.sellerId);
+    const listingId = listingData.listingId || `LST-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    listingData.listingId = listingId;
+    const correlationId = `LST-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
-    // Run ListingIntelligenceAgent
-    let decision = 'FLAG';
-    let riskScore = 50;
-    let reasoning = 'Default flag — agent evaluation pending';
-    let agentId = 'LISTING_INTELLIGENCE';
+    // Store listing immediately with EVALUATING status
+    listingData.status = 'EVALUATING';
+    listingData.riskAssessment = null;
+    listingData.createdAt = new Date().toISOString();
+    db_ops.insert('listings', 'listing_id', listingId, listingData);
 
-    try {
-      const agent = getListingIntelligenceAgent();
-      const agentResult = await agent.reason({
-        type: 'listing_review',
-        listingId: listingData.listingId,
-        sellerId: listingData.sellerId,
-        title: listingData.title,
-        description: listingData.description,
-        price: listingData.price,
-        category: listingData.category,
-        images: listingData.images,
-        riskFlags: listingData.riskFlags,
-        submittedAt: new Date().toISOString()
-      }, {
-        entityId: listingData.listingId,
-        evaluationType: 'listing_review'
-      });
-
-      const rec = agentResult.result?.recommendation || agentResult.result?.decision;
-      decision = rec?.action || 'FLAG';
-      riskScore = agentResult.result?.overallRisk?.score ?? 50;
-      reasoning = agentResult.result?.reasoning || rec?.reason || 'Agent evaluation complete';
-      agentId = agentResult.result?.agentId || 'LISTING_INTELLIGENCE';
-    } catch (agentError) {
-      console.error(`[ListingService] Agent error for ${listingData.listingId}:`, agentError.message);
-      decision = 'FLAG';
-      riskScore = 50;
-      reasoning = `Agent error — defaulting to FLAG: ${agentError.message}`;
-    }
-
-    // Map decision to listing status
-    if (decision === 'REJECT') listingData.status = 'REMOVED';
-    else if (decision === 'FLAG') listingData.status = 'PENDING_REVIEW';
-    else listingData.status = 'ACTIVE'; // APPROVE
-
-    listingData.riskAssessment = {
-      riskScore, decision, reasoning, agentId,
-      evaluatedAt: new Date().toISOString()
-    };
-
-    db_ops.insert('listings', 'listing_id', listingData.listingId, listingData);
-
-    // Emit risk event
-    emitRiskEvent({
-      sellerId: listingData.sellerId,
-      domain: 'listing',
-      eventType: decision === 'APPROVE' ? 'LISTING_APPROVED' : decision === 'REJECT' ? 'LISTING_REJECTED' : 'LISTING_FLAGGED',
-      riskScore: decision === 'APPROVE' ? -5 : riskScore,
-      metadata: { listingId: listingData.listingId, decision }
-    });
-
-    // Create case on FLAG or REJECT
-    if (decision === 'FLAG' || decision === 'REJECT') {
-      const caseId = 'CASE-' + randomUUID().substring(0, 8).toUpperCase();
-      db_ops.insert('cases', 'case_id', caseId, {
-        caseId,
-        checkpoint: 'LISTING_REVIEW',
-        priority: riskScore >= 80 ? 'CRITICAL' : riskScore >= 60 ? 'HIGH' : 'MEDIUM',
-        status: 'OPEN',
-        sellerId: listingData.sellerId,
-        entityId: listingData.listingId,
-        entityType: 'LISTING',
-        decision,
-        riskScore,
-        reasoning,
-        agentId,
-        createdAt: new Date().toISOString()
-      });
-    }
-
-    console.log(`[ListingService] ${listingData.listingId} → ${decision} (risk: ${riskScore})`);
-
-    res.status(201).json({
+    // Return HTTP 202 immediately
+    res.status(202).json({
       success: true,
-      data: listingData,
-      riskAssessment: listingData.riskAssessment
+      correlationId,
+      listingId,
+      status: 'EVALUATING',
+      message: 'Agent evaluation started. Watch the Agent Flow panel for real-time progress.'
     });
+
+    // Fire-and-forget: run ListingIntelligenceAgent asynchronously
+    console.log(`[ListingService] Evaluating listing: ${listingId} (correlation: ${correlationId})`);
+
+    const agent = getListingIntelligenceAgent();
+    agent.reason({
+      type: 'listing_review',
+      listingId,
+      sellerId: listingData.sellerId,
+      title: listingData.title,
+      description: listingData.description,
+      price: listingData.price,
+      category: listingData.category,
+      images: listingData.images,
+      riskFlags: listingData.riskFlags,
+      submittedAt: new Date().toISOString()
+    }, {
+      entityId: listingId,
+      evaluationType: 'listing_review',
+      _correlationId: correlationId
+    })
+      .then(agentResult => {
+        const rec = agentResult.result?.recommendation || agentResult.result?.decision;
+        const decision = rec?.action || 'FLAG';
+        const riskScore = agentResult.result?.overallRisk?.score ?? 50;
+        const reasoning = agentResult.result?.reasoning || rec?.reason || 'Agent evaluation complete';
+        const agentId = agentResult.result?.agentId || 'LISTING_INTELLIGENCE';
+
+        // Map decision to status
+        let listingStatus;
+        if (decision === 'REJECT') listingStatus = 'REMOVED';
+        else if (decision === 'FLAG') listingStatus = 'PENDING_REVIEW';
+        else listingStatus = 'ACTIVE';
+
+        // Update listing with final decision
+        db_ops.update('listings', 'listing_id', listingId, {
+          ...listingData,
+          status: listingStatus,
+          riskAssessment: { riskScore, decision, reasoning, agentId, evaluatedAt: new Date().toISOString() }
+        });
+
+        // Emit risk event
+        emitRiskEvent({
+          sellerId: listingData.sellerId, domain: 'listing',
+          eventType: decision === 'APPROVE' ? 'LISTING_APPROVED' : decision === 'REJECT' ? 'LISTING_REJECTED' : 'LISTING_FLAGGED',
+          riskScore: decision === 'APPROVE' ? -5 : riskScore,
+          metadata: { listingId, decision }
+        });
+
+        // Create case on FLAG or REJECT
+        if (decision === 'FLAG' || decision === 'REJECT') {
+          const caseId = 'CASE-' + randomUUID().substring(0, 8).toUpperCase();
+          db_ops.insert('cases', 'case_id', caseId, {
+            caseId, checkpoint: 'LISTING_REVIEW',
+            priority: riskScore >= 80 ? 'CRITICAL' : riskScore >= 60 ? 'HIGH' : 'MEDIUM',
+            status: 'OPEN', sellerId: listingData.sellerId, entityId: listingId, entityType: 'LISTING',
+            decision, riskScore, reasoning, agentId, createdAt: new Date().toISOString()
+          });
+        }
+
+        // Emit completion event with correlationId
+        try {
+          import('../../../gateway/websocket/event-bus.js').then(({ getEventBus }) => {
+            getEventBus().publish('agent:decision:complete', {
+              correlationId, sellerId: listingData.sellerId, entityId: listingId,
+              decision, riskScore, reasoning, timestamp: new Date().toISOString()
+            });
+          }).catch(() => {});
+        } catch {}
+
+        console.log(`[ListingService] Completed: ${listingId} → ${decision} (risk: ${riskScore})`);
+      })
+      .catch(error => {
+        console.error(`[ListingService] Agent error for ${listingId}:`, error.message);
+        db_ops.update('listings', 'listing_id', listingId, {
+          ...listingData,
+          status: 'PENDING_REVIEW',
+          riskAssessment: { riskScore: 50, decision: 'FLAG', reasoning: `Agent error: ${error.message}`, agentId: 'LISTING_INTELLIGENCE', evaluatedAt: new Date().toISOString() }
+        });
+        try {
+          import('../../../gateway/websocket/event-bus.js').then(({ getEventBus }) => {
+            getEventBus().publish('agent:decision:error', {
+              correlationId, sellerId: listingData.sellerId, entityId: listingId,
+              error: error.message, timestamp: new Date().toISOString()
+            });
+          }).catch(() => {});
+        } catch {}
+      });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

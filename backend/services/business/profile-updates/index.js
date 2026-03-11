@@ -69,115 +69,138 @@ router.get('/:id', (req, res) => {
   }
 });
 
-// POST / — Create profile update, run ProfileMutationAgent
+// POST / — Create profile update, async fire-and-forget with real-time TPAOR streaming
 router.post('/', async (req, res) => {
   try {
     const id = `PROF-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+    const correlationId = `PROF-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
-    // Run ProfileMutationAgent
-    let decision = 'STEP_UP';
-    let riskScore = 50;
-    let reasoning = 'Default step-up — agent evaluation pending';
-    let agentId = 'PROFILE_MUTATION';
-    let riskFactors = [];
-
-    try {
-      const agent = getProfileMutationAgent();
-      const agentResult = await agent.reason({
-        type: 'profile_mutation_evaluation',
-        updateId: id,
-        sellerId: req.body.sellerId,
-        updateType: req.body.updateType,
-        changes: req.body.changes,
-        openDispute: req.body.openDispute,
-        newDevice: req.body.newDevice,
-        emailDomainDowngrade: req.body.emailDomainDowngrade,
-        submittedAt: new Date().toISOString()
-      }, {
-        entityId: id,
-        evaluationType: 'profile_mutation'
-      });
-
-      const rec = agentResult.result?.recommendation || agentResult.result?.decision;
-      decision = rec?.action || 'STEP_UP';
-      riskScore = agentResult.result?.overallRisk?.score ?? 50;
-      reasoning = agentResult.result?.reasoning || rec?.reason || 'Agent evaluation complete';
-      agentId = agentResult.result?.agentId || 'PROFILE_MUTATION';
-      riskFactors = agentResult.result?.riskFactors?.map(f => f.factor) || [];
-    } catch (agentError) {
-      console.error(`[ProfileUpdatesService] Agent error for ${id}:`, agentError.message);
-      decision = 'STEP_UP';
-      riskScore = 50;
-      reasoning = `Agent error — defaulting to STEP_UP: ${agentError.message}`;
-    }
-
-    // Map decision to status
-    let status;
-    if (decision === 'ALLOW') status = 'APPROVED';
-    else if (decision === 'LOCK') status = 'LOCKED';
-    else status = 'STEP_UP_REQUIRED'; // STEP_UP
-
+    // Store record immediately with EVALUATING status
     const record = {
       [ID_FIELD]: id,
       ...req.body,
-      status,
-      riskScore,
-      riskFactors,
-      riskAssessment: {
-        decision, riskScore, reasoning, agentId,
-        evaluatedAt: new Date().toISOString()
-      },
+      status: 'EVALUATING',
+      riskScore: 0,
+      riskFactors: [],
+      riskAssessment: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
 
     db_ops.insert(COLLECTION, record);
 
-    // Emit risk event
-    emitRiskEvent({
-      domain: 'profile_updates',
-      eventType: decision === 'ALLOW' ? 'PROFILE_UPDATE_APPROVED' : decision === 'LOCK' ? 'PROFILE_UPDATE_LOCKED' : 'PROFILE_UPDATE_STEP_UP',
-      entityId: id,
-      sellerId: req.body.sellerId,
-      riskScore: decision === 'ALLOW' ? 0 : riskScore,
-      metadata: { decision, updateType: req.body.updateType }
+    // Return HTTP 202 immediately
+    res.status(202).json({
+      success: true,
+      correlationId,
+      updateId: id,
+      status: 'EVALUATING',
+      message: 'Agent evaluation started. Watch the Agent Flow panel for real-time progress.'
     });
 
-    // On LOCK: update seller status to UNDER_REVIEW
-    if (decision === 'LOCK' && req.body.sellerId) {
-      const seller = db_ops.getById('sellers', 'seller_id', req.body.sellerId);
-      if (seller) {
-        db_ops.update('sellers', 'seller_id', req.body.sellerId, {
-          ...seller.data,
-          status: 'UNDER_REVIEW',
-          lockReason: reasoning,
-          lockedAt: new Date().toISOString()
+    // Fire-and-forget: run ProfileMutationAgent asynchronously
+    console.log(`[ProfileUpdatesService] Evaluating profile update: ${id} (correlation: ${correlationId})`);
+
+    const agent = getProfileMutationAgent();
+    agent.reason({
+      type: 'profile_mutation_evaluation',
+      updateId: id,
+      sellerId: req.body.sellerId,
+      updateType: req.body.updateType,
+      changes: req.body.changes,
+      openDispute: req.body.openDispute,
+      newDevice: req.body.newDevice,
+      emailDomainDowngrade: req.body.emailDomainDowngrade,
+      submittedAt: new Date().toISOString()
+    }, {
+      entityId: id,
+      evaluationType: 'profile_mutation',
+      _correlationId: correlationId
+    })
+      .then(agentResult => {
+        const rec = agentResult.result?.recommendation || agentResult.result?.decision;
+        const decision = rec?.action || 'STEP_UP';
+        const riskScore = agentResult.result?.overallRisk?.score ?? 50;
+        const reasoning = agentResult.result?.reasoning || rec?.reason || 'Agent evaluation complete';
+        const agentId = agentResult.result?.agentId || 'PROFILE_MUTATION';
+        const riskFactors = agentResult.result?.riskFactors?.map(f => f.factor) || [];
+
+        // Map decision to status
+        let status;
+        if (decision === 'ALLOW') status = 'APPROVED';
+        else if (decision === 'LOCK') status = 'LOCKED';
+        else status = 'STEP_UP_REQUIRED';
+
+        // Update record with final decision
+        db_ops.update(COLLECTION, id, {
+          ...record,
+          status,
+          riskScore,
+          riskFactors,
+          riskAssessment: { decision, riskScore, reasoning, agentId, evaluatedAt: new Date().toISOString() },
+          updatedAt: new Date().toISOString()
         });
-      }
-    }
 
-    // Create case on STEP_UP or LOCK
-    if (decision === 'STEP_UP' || decision === 'LOCK') {
-      const caseId = 'CASE-' + randomUUID().substring(0, 8).toUpperCase();
-      db_ops.insert('cases', 'case_id', caseId, {
-        caseId,
-        checkpoint: 'PROFILE_UPDATE',
-        priority: riskScore >= 80 ? 'CRITICAL' : riskScore >= 60 ? 'HIGH' : 'MEDIUM',
-        status: 'OPEN',
-        sellerId: req.body.sellerId,
-        entityId: id,
-        entityType: 'PROFILE_UPDATE',
-        decision,
-        riskScore,
-        reasoning,
-        agentId,
-        createdAt: new Date().toISOString()
+        // Emit risk event
+        emitRiskEvent({
+          domain: 'profile_updates',
+          eventType: decision === 'ALLOW' ? 'PROFILE_UPDATE_APPROVED' : decision === 'LOCK' ? 'PROFILE_UPDATE_LOCKED' : 'PROFILE_UPDATE_STEP_UP',
+          entityId: id, sellerId: req.body.sellerId,
+          riskScore: decision === 'ALLOW' ? 0 : riskScore,
+          metadata: { decision, updateType: req.body.updateType }
+        });
+
+        // On LOCK: update seller status
+        if (decision === 'LOCK' && req.body.sellerId) {
+          const seller = db_ops.getById('sellers', 'seller_id', req.body.sellerId);
+          if (seller) {
+            db_ops.update('sellers', 'seller_id', req.body.sellerId, {
+              ...seller.data, status: 'UNDER_REVIEW', lockReason: reasoning, lockedAt: new Date().toISOString()
+            });
+          }
+        }
+
+        // Create case on STEP_UP or LOCK
+        if (decision === 'STEP_UP' || decision === 'LOCK') {
+          const caseId = 'CASE-' + randomUUID().substring(0, 8).toUpperCase();
+          db_ops.insert('cases', 'case_id', caseId, {
+            caseId, checkpoint: 'PROFILE_UPDATE',
+            priority: riskScore >= 80 ? 'CRITICAL' : riskScore >= 60 ? 'HIGH' : 'MEDIUM',
+            status: 'OPEN', sellerId: req.body.sellerId, entityId: id, entityType: 'PROFILE_UPDATE',
+            decision, riskScore, reasoning, agentId, createdAt: new Date().toISOString()
+          });
+        }
+
+        // Emit completion event with correlationId
+        try {
+          import('../../../gateway/websocket/event-bus.js').then(({ getEventBus }) => {
+            getEventBus().publish('agent:decision:complete', {
+              correlationId, sellerId: req.body.sellerId, entityId: id,
+              decision, riskScore, reasoning, timestamp: new Date().toISOString()
+            });
+          }).catch(() => {});
+        } catch {}
+
+        console.log(`[ProfileUpdatesService] Completed: ${id} → ${decision} (risk: ${riskScore})`);
+      })
+      .catch(error => {
+        console.error(`[ProfileUpdatesService] Agent error for ${id}:`, error.message);
+        db_ops.update(COLLECTION, id, {
+          ...record,
+          status: 'STEP_UP_REQUIRED',
+          riskScore: 50,
+          riskAssessment: { decision: 'STEP_UP', riskScore: 50, reasoning: `Agent error: ${error.message}`, agentId: 'PROFILE_MUTATION', evaluatedAt: new Date().toISOString() },
+          updatedAt: new Date().toISOString()
+        });
+        try {
+          import('../../../gateway/websocket/event-bus.js').then(({ getEventBus }) => {
+            getEventBus().publish('agent:decision:error', {
+              correlationId, sellerId: req.body.sellerId, entityId: id,
+              error: error.message, timestamp: new Date().toISOString()
+            });
+          }).catch(() => {});
+        } catch {}
       });
-    }
-
-    console.log(`[ProfileUpdatesService] ${id} → ${decision} (risk: ${riskScore})`);
-
-    res.status(201).json({ success: true, data: record });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

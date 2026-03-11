@@ -34,13 +34,17 @@ export default function Layout({ children, wsConnected }) {
         { name: 'Account Setup', href: '/account-setup' },
         { name: 'Item Setup', href: '/item-setup' },
         { name: 'Listings', href: '/listing' },
+        { name: 'Live Listing Review', href: '/listing/live' },
         { name: 'Pricing', href: '/pricing' },
         { name: 'Transaction', href: '/flow', phase: 'Live Operations' },
         { name: 'Payout', href: '/payout' },
+        { name: 'Live Payout Review', href: '/payout/live' },
         { name: 'Shipping', href: '/shipping' },
         { name: 'Returns', href: '/returns' },
+        { name: 'Live Return Review', href: '/returns/live' },
         { name: 'ATO', href: '/ato', phase: 'Security' },
-        { name: 'Profile Updates', href: '/profile-updates' }
+        { name: 'Profile Updates', href: '/profile-updates' },
+        { name: 'Live Profile Review', href: '/profile-updates/live' }
       ]
     },
     {

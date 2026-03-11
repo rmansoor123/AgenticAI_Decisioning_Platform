@@ -45,7 +45,7 @@ router.get('/payouts/:payoutId', (req, res) => {
   }
 });
 
-// Request payout — wired to PayoutRiskAgent
+// Request payout — async fire-and-forget with real-time TPAOR streaming
 router.post('/payouts', async (req, res) => {
   try {
     const { sellerId, amount, method } = req.body;
@@ -56,70 +56,20 @@ router.post('/payouts', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Seller not found' });
     }
 
-    // Get recent payouts for context
-    const recentPayouts = db_ops.getAll('payouts', 1000, 0)
-      .map(p => p.data)
-      .filter(p => p.sellerId === sellerId);
-
     const payoutId = `PAY-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+    const correlationId = `PAY-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
-    // Run PayoutRiskAgent
-    let decision = 'HOLD';
-    let riskScore = 50;
-    let reasoning = 'Default hold — agent evaluation pending';
-    let agentId = 'PAYOUT_RISK';
-    let agentResult = null;
-
-    try {
-      const agent = getPayoutRiskAgent();
-      agentResult = await agent.reason({
-        type: 'payout_risk_evaluation',
-        payoutId,
-        sellerId,
-        amount,
-        method: method || 'BANK_TRANSFER',
-        sellerData: seller.data,
-        recentPayouts,
-        submittedAt: new Date().toISOString()
-      }, {
-        entityId: payoutId,
-        evaluationType: 'payout_risk'
-      });
-
-      const rec = agentResult.result?.recommendation || agentResult.result?.decision;
-      decision = rec?.action || 'HOLD';
-      riskScore = agentResult.result?.overallRisk?.score ?? 50;
-      reasoning = agentResult.result?.reasoning || rec?.reason || 'Agent evaluation complete';
-      agentId = agentResult.result?.agentId || 'PAYOUT_RISK';
-    } catch (agentError) {
-      console.error(`[PayoutService] Agent error for ${payoutId}:`, agentError.message);
-      decision = 'HOLD';
-      riskScore = 50;
-      reasoning = `Agent error — defaulting to HOLD: ${agentError.message}`;
-    }
-
-    // Map agent decision to payout status
-    let payoutStatus;
-    if (decision === 'APPROVE') payoutStatus = 'PENDING';
-    else if (decision === 'REJECT') payoutStatus = 'REJECTED';
-    else payoutStatus = 'ON_HOLD'; // HOLD or any unknown decision
-
+    // Create payout immediately with EVALUATING status
     const payout = {
       payoutId,
       sellerId,
       amount,
       currency: 'USD',
       method: method || 'BANK_TRANSFER',
-      status: payoutStatus,
-      riskHold: payoutStatus === 'ON_HOLD',
-      holdReason: payoutStatus !== 'PENDING' ? reasoning : null,
-      riskAssessment: {
-        riskScore,
-        decision,
-        reasoning,
-        agentId,
-        evaluatedAt: new Date().toISOString()
-      },
+      status: 'EVALUATING',
+      riskHold: false,
+      holdReason: null,
+      riskAssessment: null,
       bankAccount: seller.data.bankAccount || {
         last4: '****',
         bankName: 'Unknown',
@@ -131,54 +81,110 @@ router.post('/payouts', async (req, res) => {
 
     db_ops.insert('payouts', 'payout_id', payout.payoutId, payout);
 
-    // Emit risk event
-    emitRiskEvent({
-      sellerId,
-      domain: 'payout',
-      eventType: decision === 'APPROVE' ? 'PAYOUT_APPROVED' : decision === 'REJECT' ? 'PAYOUT_REJECTED' : 'PAYOUT_HELD',
-      riskScore,
-      metadata: { amount, decision, payoutId }
-    });
-
-    // Create case on HOLD or REJECT
-    if (decision === 'HOLD' || decision === 'REJECT') {
-      const caseId = 'CASE-' + randomUUID().substring(0, 8).toUpperCase();
-      const caseData = {
-        caseId,
-        checkpoint: 'PAYOUT_RISK',
-        priority: riskScore >= 80 ? 'CRITICAL' : riskScore >= 60 ? 'HIGH' : 'MEDIUM',
-        status: 'OPEN',
-        sellerId,
-        entityId: payoutId,
-        entityType: 'PAYOUT',
-        decision,
-        riskScore,
-        reasoning,
-        agentId,
-        createdAt: new Date().toISOString()
-      };
-      db_ops.insert('cases', 'case_id', caseId, caseData);
-
-      // Non-blocking: triage the case
-      triageCase(caseData).catch(() => {});
-    }
-
-    // Emit completion event
-    try {
-      const { getEventBus } = await import('../../../gateway/websocket/event-bus.js');
-      getEventBus().publish('agent:decision:complete', {
-        sellerId, entityId: payoutId, decision, riskScore, reasoning,
-        timestamp: new Date().toISOString()
-      });
-    } catch {}
-
-    console.log(`[PayoutService] ${payoutId} → ${decision} (risk: ${riskScore})`);
-
-    res.status(201).json({
+    // Return HTTP 202 immediately
+    res.status(202).json({
       success: true,
-      data: payout,
-      riskAssessment: payout.riskAssessment
+      correlationId,
+      payoutId,
+      status: 'EVALUATING',
+      message: 'Agent evaluation started. Watch the Agent Flow panel for real-time progress.'
     });
+
+    // Fire-and-forget: run PayoutRiskAgent asynchronously
+    console.log(`[PayoutService] Evaluating payout: ${payoutId} (correlation: ${correlationId})`);
+
+    const recentPayouts = db_ops.getAll('payouts', 1000, 0)
+      .map(p => p.data)
+      .filter(p => p.sellerId === sellerId);
+
+    const agent = getPayoutRiskAgent();
+    agent.reason({
+      type: 'payout_risk_evaluation',
+      payoutId,
+      sellerId,
+      amount,
+      method: method || 'BANK_TRANSFER',
+      sellerData: seller.data,
+      recentPayouts,
+      submittedAt: new Date().toISOString()
+    }, {
+      entityId: payoutId,
+      evaluationType: 'payout_risk',
+      _correlationId: correlationId
+    })
+      .then(agentResult => {
+        const rec = agentResult.result?.recommendation || agentResult.result?.decision;
+        const decision = rec?.action || 'HOLD';
+        const riskScore = agentResult.result?.overallRisk?.score ?? 50;
+        const reasoning = agentResult.result?.reasoning || rec?.reason || 'Agent evaluation complete';
+        const agentId = agentResult.result?.agentId || 'PAYOUT_RISK';
+
+        // Map decision to status
+        let payoutStatus;
+        if (decision === 'APPROVE') payoutStatus = 'PENDING';
+        else if (decision === 'REJECT') payoutStatus = 'REJECTED';
+        else payoutStatus = 'ON_HOLD';
+
+        // Update payout with final decision
+        db_ops.update('payouts', 'payout_id', payoutId, {
+          ...payout,
+          status: payoutStatus,
+          riskHold: payoutStatus === 'ON_HOLD',
+          holdReason: payoutStatus !== 'PENDING' ? reasoning : null,
+          riskAssessment: { riskScore, decision, reasoning, agentId, evaluatedAt: new Date().toISOString() }
+        });
+
+        // Emit risk event
+        emitRiskEvent({
+          sellerId, domain: 'payout',
+          eventType: decision === 'APPROVE' ? 'PAYOUT_APPROVED' : decision === 'REJECT' ? 'PAYOUT_REJECTED' : 'PAYOUT_HELD',
+          riskScore, metadata: { amount, decision, payoutId }
+        });
+
+        // Create case on HOLD or REJECT
+        if (decision === 'HOLD' || decision === 'REJECT') {
+          const caseId = 'CASE-' + randomUUID().substring(0, 8).toUpperCase();
+          const caseData = {
+            caseId, checkpoint: 'PAYOUT_RISK',
+            priority: riskScore >= 80 ? 'CRITICAL' : riskScore >= 60 ? 'HIGH' : 'MEDIUM',
+            status: 'OPEN', sellerId, entityId: payoutId, entityType: 'PAYOUT',
+            decision, riskScore, reasoning, agentId, createdAt: new Date().toISOString()
+          };
+          db_ops.insert('cases', 'case_id', caseId, caseData);
+          triageCase(caseData).catch(() => {});
+        }
+
+        // Emit completion event with correlationId
+        try {
+          import('../../../gateway/websocket/event-bus.js').then(({ getEventBus }) => {
+            getEventBus().publish('agent:decision:complete', {
+              correlationId, sellerId, entityId: payoutId, decision, riskScore, reasoning,
+              timestamp: new Date().toISOString()
+            });
+          }).catch(() => {});
+        } catch {}
+
+        console.log(`[PayoutService] Completed: ${payoutId} → ${decision} (risk: ${riskScore})`);
+      })
+      .catch(error => {
+        console.error(`[PayoutService] Agent error for ${payoutId}:`, error.message);
+        // Default to HOLD on error
+        db_ops.update('payouts', 'payout_id', payoutId, {
+          ...payout,
+          status: 'ON_HOLD',
+          riskHold: true,
+          holdReason: `Agent error — defaulting to HOLD: ${error.message}`,
+          riskAssessment: { riskScore: 50, decision: 'HOLD', reasoning: `Agent error: ${error.message}`, agentId: 'PAYOUT_RISK', evaluatedAt: new Date().toISOString() }
+        });
+        try {
+          import('../../../gateway/websocket/event-bus.js').then(({ getEventBus }) => {
+            getEventBus().publish('agent:decision:error', {
+              correlationId, sellerId, entityId: payoutId, error: error.message,
+              timestamp: new Date().toISOString()
+            });
+          }).catch(() => {});
+        } catch {}
+      });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

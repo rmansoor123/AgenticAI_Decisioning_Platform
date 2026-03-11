@@ -70,105 +70,131 @@ router.get('/:id', (req, res) => {
   }
 });
 
-// POST / — Create return request, run ReturnsAbuseAgent
+// POST / — Create return request, async fire-and-forget with real-time TPAOR streaming
 router.post('/', async (req, res) => {
   try {
     const id = `RET-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+    const correlationId = `RET-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
-    // Run ReturnsAbuseAgent
-    let decision = 'INVESTIGATE';
-    let riskScore = 50;
-    let reasoning = 'Default investigate — agent evaluation pending';
-    let agentId = 'RETURNS_ABUSE';
-    let riskFactors = [];
-
-    try {
-      const agent = getReturnsAbuseAgent();
-      const agentResult = await agent.reason({
-        type: 'returns_abuse_evaluation',
-        returnId: id,
-        sellerId: req.body.sellerId,
-        orderId: req.body.orderId,
-        reason: req.body.reason,
-        refundAmount: req.body.refundAmount,
-        serialReturner: req.body.serialReturner,
-        emptyBox: req.body.emptyBox,
-        refundExceedsPurchase: req.body.refundExceedsPurchase,
-        wardrobing: req.body.wardrobing,
-        fundsWithdrawn: req.body.fundsWithdrawn,
-        submittedAt: new Date().toISOString()
-      }, {
-        entityId: id,
-        evaluationType: 'returns_abuse'
-      });
-
-      const rec = agentResult.result?.recommendation || agentResult.result?.decision;
-      decision = rec?.action || 'INVESTIGATE';
-      riskScore = agentResult.result?.overallRisk?.score ?? 50;
-      reasoning = agentResult.result?.reasoning || rec?.reason || 'Agent evaluation complete';
-      agentId = agentResult.result?.agentId || 'RETURNS_ABUSE';
-      riskFactors = agentResult.result?.riskFactors?.map(f => f.factor) || [];
-    } catch (agentError) {
-      console.error(`[ReturnsService] Agent error for ${id}:`, agentError.message);
-      decision = 'INVESTIGATE';
-      riskScore = 50;
-      reasoning = `Agent error — defaulting to INVESTIGATE: ${agentError.message}`;
-    }
-
-    // Map decision to status
-    let status;
-    if (decision === 'APPROVE') status = 'APPROVED';
-    else if (decision === 'DENY') status = 'DENIED';
-    else status = 'UNDER_INVESTIGATION'; // INVESTIGATE
-
+    // Store return immediately with EVALUATING status
     const record = {
       [ID_FIELD]: id,
       ...req.body,
-      status,
-      riskScore,
-      riskFactors,
-      riskAssessment: {
-        decision, riskScore, reasoning, agentId,
-        evaluatedAt: new Date().toISOString()
-      },
+      status: 'EVALUATING',
+      riskScore: 0,
+      riskFactors: [],
+      riskAssessment: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
 
     db_ops.insert(COLLECTION, record);
 
-    // Emit risk event
-    emitRiskEvent({
-      domain: 'returns',
-      eventType: decision === 'APPROVE' ? 'RETURN_APPROVED' : decision === 'DENY' ? 'RETURN_DENIED' : 'RETURN_INVESTIGATING',
-      entityId: id,
-      sellerId: req.body.sellerId,
-      riskScore: decision === 'APPROVE' ? 0 : riskScore,
-      metadata: { decision, returnId: id }
+    // Return HTTP 202 immediately
+    res.status(202).json({
+      success: true,
+      correlationId,
+      returnId: id,
+      status: 'EVALUATING',
+      message: 'Agent evaluation started. Watch the Agent Flow panel for real-time progress.'
     });
 
-    // Create case on INVESTIGATE or DENY
-    if (decision === 'INVESTIGATE' || decision === 'DENY') {
-      const caseId = 'CASE-' + randomUUID().substring(0, 8).toUpperCase();
-      db_ops.insert('cases', 'case_id', caseId, {
-        caseId,
-        checkpoint: 'RETURNS_REVIEW',
-        priority: riskScore >= 80 ? 'CRITICAL' : riskScore >= 60 ? 'HIGH' : 'MEDIUM',
-        status: 'OPEN',
-        sellerId: req.body.sellerId,
-        entityId: id,
-        entityType: 'RETURN',
-        decision,
-        riskScore,
-        reasoning,
-        agentId,
-        createdAt: new Date().toISOString()
+    // Fire-and-forget: run ReturnsAbuseAgent asynchronously
+    console.log(`[ReturnsService] Evaluating return: ${id} (correlation: ${correlationId})`);
+
+    const agent = getReturnsAbuseAgent();
+    agent.reason({
+      type: 'returns_abuse_evaluation',
+      returnId: id,
+      sellerId: req.body.sellerId,
+      orderId: req.body.orderId,
+      reason: req.body.reason,
+      refundAmount: req.body.refundAmount,
+      serialReturner: req.body.serialReturner,
+      emptyBox: req.body.emptyBox,
+      refundExceedsPurchase: req.body.refundExceedsPurchase,
+      wardrobing: req.body.wardrobing,
+      fundsWithdrawn: req.body.fundsWithdrawn,
+      submittedAt: new Date().toISOString()
+    }, {
+      entityId: id,
+      evaluationType: 'returns_abuse',
+      _correlationId: correlationId
+    })
+      .then(agentResult => {
+        const rec = agentResult.result?.recommendation || agentResult.result?.decision;
+        const decision = rec?.action || 'INVESTIGATE';
+        const riskScore = agentResult.result?.overallRisk?.score ?? 50;
+        const reasoning = agentResult.result?.reasoning || rec?.reason || 'Agent evaluation complete';
+        const agentId = agentResult.result?.agentId || 'RETURNS_ABUSE';
+        const riskFactors = agentResult.result?.riskFactors?.map(f => f.factor) || [];
+
+        // Map decision to status
+        let status;
+        if (decision === 'APPROVE') status = 'APPROVED';
+        else if (decision === 'DENY') status = 'DENIED';
+        else status = 'UNDER_INVESTIGATION';
+
+        // Update record with final decision
+        db_ops.update(COLLECTION, id, {
+          ...record,
+          status,
+          riskScore,
+          riskFactors,
+          riskAssessment: { decision, riskScore, reasoning, agentId, evaluatedAt: new Date().toISOString() },
+          updatedAt: new Date().toISOString()
+        });
+
+        // Emit risk event
+        emitRiskEvent({
+          domain: 'returns',
+          eventType: decision === 'APPROVE' ? 'RETURN_APPROVED' : decision === 'DENY' ? 'RETURN_DENIED' : 'RETURN_INVESTIGATING',
+          entityId: id, sellerId: req.body.sellerId,
+          riskScore: decision === 'APPROVE' ? 0 : riskScore,
+          metadata: { decision, returnId: id }
+        });
+
+        // Create case on INVESTIGATE or DENY
+        if (decision === 'INVESTIGATE' || decision === 'DENY') {
+          const caseId = 'CASE-' + randomUUID().substring(0, 8).toUpperCase();
+          db_ops.insert('cases', 'case_id', caseId, {
+            caseId, checkpoint: 'RETURNS_REVIEW',
+            priority: riskScore >= 80 ? 'CRITICAL' : riskScore >= 60 ? 'HIGH' : 'MEDIUM',
+            status: 'OPEN', sellerId: req.body.sellerId, entityId: id, entityType: 'RETURN',
+            decision, riskScore, reasoning, agentId, createdAt: new Date().toISOString()
+          });
+        }
+
+        // Emit completion event with correlationId
+        try {
+          import('../../../gateway/websocket/event-bus.js').then(({ getEventBus }) => {
+            getEventBus().publish('agent:decision:complete', {
+              correlationId, sellerId: req.body.sellerId, entityId: id,
+              decision, riskScore, reasoning, timestamp: new Date().toISOString()
+            });
+          }).catch(() => {});
+        } catch {}
+
+        console.log(`[ReturnsService] Completed: ${id} → ${decision} (risk: ${riskScore})`);
+      })
+      .catch(error => {
+        console.error(`[ReturnsService] Agent error for ${id}:`, error.message);
+        db_ops.update(COLLECTION, id, {
+          ...record,
+          status: 'UNDER_INVESTIGATION',
+          riskScore: 50,
+          riskAssessment: { decision: 'INVESTIGATE', riskScore: 50, reasoning: `Agent error: ${error.message}`, agentId: 'RETURNS_ABUSE', evaluatedAt: new Date().toISOString() },
+          updatedAt: new Date().toISOString()
+        });
+        try {
+          import('../../../gateway/websocket/event-bus.js').then(({ getEventBus }) => {
+            getEventBus().publish('agent:decision:error', {
+              correlationId, sellerId: req.body.sellerId, entityId: id,
+              error: error.message, timestamp: new Date().toISOString()
+            });
+          }).catch(() => {});
+        } catch {}
       });
-    }
-
-    console.log(`[ReturnsService] ${id} → ${decision} (risk: ${riskScore})`);
-
-    res.status(201).json({ success: true, data: record });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

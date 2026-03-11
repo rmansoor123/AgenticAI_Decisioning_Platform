@@ -32,6 +32,10 @@ import PromptLibrary from './pages/PromptLibrary'
 import FeedbackReview from './pages/FeedbackReview'
 import AutonomousAgents from './pages/AutonomousAgents'
 import RulesRepository from './pages/RulesRepository'
+import PayoutLive from './pages/PayoutLive'
+import ListingLive from './pages/ListingLive'
+import ReturnsLive from './pages/ReturnsLive'
+import ProfileUpdatesLive from './pages/ProfileUpdatesLive'
 
 const API_BASE = '/api'
 // Connect directly to backend WebSocket to avoid Vite HMR proxy conflict
@@ -167,7 +171,9 @@ function App() {
           <Route path="/experiments/simulation" element={<Experimentation />} />
           <Route path="/flow" element={<TransactionFlow />} />
           <Route path="/listing" element={<Listing />} />
+          <Route path="/listing/live" element={<ListingLive />} />
           <Route path="/payout" element={<Payout />} />
+          <Route path="/payout/live" element={<PayoutLive />} />
           <Route path="/ato" element={<ATO />} />
           <Route path="/shipping" element={<Shipping />} />
           <Route path="/agents" element={<AgenticAI />} />
@@ -184,8 +190,10 @@ function App() {
           <Route path="/item-setup" element={<ItemSetup />} />
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/profile-updates" element={<ProfileUpdates />} />
+          <Route path="/profile-updates/live" element={<ProfileUpdatesLive />} />
           <Route path="/flow-detail" element={<TransactionFlow />} />
           <Route path="/returns" element={<Returns />} />
+          <Route path="/returns/live" element={<ReturnsLive />} />
           <Route path="/streaming" element={<StreamingPipeline />} />
           <Route path="/rag-evaluation" element={<RAGEvaluation />} />
           <Route path="/prompt-library" element={<PromptLibrary />} />

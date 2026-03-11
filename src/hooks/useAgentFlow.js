@@ -68,7 +68,8 @@ export function useAgentFlow(correlationId) {
             confidence: decEvt.data.confidence,
             reasoning: decEvt.data.reasoning,
             riskScore: decEvt.data.riskScore,
-            sellerId: decEvt.data.sellerId
+            sellerId: decEvt.data.sellerId,
+            entityId: decEvt.data.entityId
           })
         }, 0)
       } else if (errEvt?.data) {
