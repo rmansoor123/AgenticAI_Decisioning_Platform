@@ -46,6 +46,7 @@ Every backend swapped via env var. Default config works with zero Docker.
 | Observability | `OBSERVABILITY_BACKEND` | `sqlite` | `langfuse`, `phoenix` |
 | Temporal Memory | `TEMPORAL_BACKEND` | `none` | `zep`, `memory` |
 | LLM | `LLM_PROVIDER` | `ollama` | `openai`, `anthropic` |
+| Analytics | `ANALYTICS_BACKEND` | `sqlite` | `pinot` |
 
 **Import pattern — always use factories, never import backends directly:**
 ```js
@@ -54,6 +55,7 @@ import { getMemoryBackend } from '../agents/core/memory-factory.js';
 import { getCacheBackend } from '../agents/core/cache-factory.js';
 import { getGraphBackend } from '../graph/graph-factory.js';
 import { getObservabilityTraceCollector, getObservabilityMetricsCollector, getObservabilityDecisionLogger } from '../agents/core/observability-factory.js';
+import { getAnalyticsBackend } from '../agents/core/analytics-factory.js';
 ```
 
 ### LLM Providers
@@ -82,6 +84,7 @@ Native Ollama: ~1s per call (Apple Silicon). Docker Ollama: ~90s per call (CPU-o
 | weaviate | semitechnologies/weaviate:latest | 8081 | Vector DB (alt) |
 | ollama | ollama/ollama:latest | 11434 | Local LLM (qwen2.5:7b default) |
 | phoenix | arizephoenix/phoenix:latest | 6006 | Arize eval observability |
+| pinot | apachepinot/pinot:latest | 9000/8099 | OLAP analytics (risk event trends) |
 
 ### Agent Reasoning Loop (TPAOR)
 Every agent in `base-agent.js` follows this exact sequence:
@@ -244,7 +247,7 @@ Every agent MUST:
 }
 ```
 
-### Specialized Agents (10 total)
+### Specialized Agents (23 total)
 
 **SellerOnboardingAgent** ✅ WIRED
 - File: `backend/agents/specialized/seller-onboarding-agent.js`
@@ -301,17 +304,110 @@ Every agent MUST:
 - Key signals: multi-field change, device fingerprint change, bank change + payout within 72h
 - ATO signal: bank change + payout request within 72h
 
-**CrossDomainCorrelationAgent** ❌ NOT SCHEDULED
+**CrossDomainCorrelationAgent** ✅ AUTONOMOUS
 - File: `backend/agents/specialized/cross-domain-agent.js`
 - Extends: `AutonomousAgent` | ID: `CROSS_DOMAIN_CORRELATION`
 - Role: Fraud ring detection, seller network analysis, aggregate risk scoring
 - Uses: Neo4j graph (GRAPH_BACKEND=neo4j) or in-memory graph (default)
-- Runs on-demand today — needs autonomous scheduling every 6h
+- Auto-started on server boot (6h scan interval)
 
-**PolicyEvolutionAgent** ❌ NOT WIRED
+**PolicyEvolutionAgent** ✅ AUTONOMOUS
 - File: `backend/agents/specialized/policy-evolution-agent.js`
 - Extends: `AutonomousAgent` | ID: `POLICY_EVOLUTION`
 - Role: Monitor policy effectiveness, propose policy updates
+- Auto-started on server boot
+
+**ATODetectionAgent** ✅ WIRED
+- File: `backend/agents/specialized/ato-detection-agent.js`
+- Extends: `BaseAgent` | ID: `ATO_DETECTION`
+- Decisions: `ALLOW` / `CHALLENGE` / `BLOCK`
+- Route: `POST /api/ato/evaluate`
+- Key signals: device trust, impossible travel, login velocity, credential patterns, session risk
+- Domain weight: 0.14 (highest)
+
+**ShippingRiskAgent** ✅ WIRED
+- File: `backend/agents/specialized/shipping-risk-agent.js`
+- Extends: `BaseAgent` | ID: `SHIPPING_RISK`
+- Decisions: `APPROVE` / `FLAG` / `HOLD`
+- Route: `POST /api/shipping`
+- Key signals: address mismatch, freight forwarding, shipping velocity, empty box, carrier risk
+
+**AccountSetupAgent** ✅ WIRED
+- File: `backend/agents/specialized/account-setup-agent.js`
+- Extends: `BaseAgent` | ID: `ACCOUNT_SETUP`
+- Decisions: `APPROVE` / `REVIEW` / `REJECT`
+- Route: `POST /api/account-setup`
+- Key signals: bank verification, tax ID cross-reference, shared payment detection
+
+**ItemSetupAgent** ✅ WIRED
+- File: `backend/agents/specialized/item-setup-agent.js`
+- Extends: `BaseAgent` | ID: `ITEM_SETUP`
+- Decisions: `APPROVE` / `FLAG` / `REJECT`
+- Route: `POST /api/item-setup`
+- Key signals: restricted categories, weight anomalies, duplicate products, compliance
+
+**PricingRiskAgent** ✅ WIRED
+- File: `backend/agents/specialized/pricing-risk-agent.js`
+- Extends: `BaseAgent` | ID: `PRICING_RISK`
+- Decisions: `APPROVE` / `FLAG` / `REJECT`
+- Route: `POST /api/pricing`
+- Key signals: below-cost pricing, price manipulation, arbitrage patterns, change velocity
+
+**TransactionRiskAgent** ✅ WIRED
+- File: `backend/agents/specialized/transaction-risk-agent.js`
+- Extends: `BaseAgent` | ID: `TRANSACTION_RISK`
+- Decisions: `APPROVE` / `CHALLENGE` / `BLOCK`
+- Route: `POST /api/transaction`
+- Key signals: velocity anomalies, device/IP/account triangle, card testing, cross-merchant
+
+**PaymentRiskAgent** ✅ WIRED
+- File: `backend/agents/specialized/payment-risk-agent.js`
+- Extends: `BaseAgent` | ID: `PAYMENT_RISK`
+- Decisions: `APPROVE` / `CHALLENGE` / `BLOCK`
+- Route: `POST /api/payment`
+- Key signals: payment method analysis, chargeback risk, fraud pattern matching
+
+**ComplianceAgent** ✅ WIRED
+- File: `backend/agents/specialized/compliance-agent.js`
+- Extends: `BaseAgent` | ID: `COMPLIANCE_AML`
+- Decisions: `APPROVE` / `REVIEW` / `BLOCK`
+- Route: `POST /api/compliance`
+- Key signals: AML/structuring, sanctions screening, KYC compliance
+
+**NetworkIntelligenceAgent** ✅ WIRED
+- File: `backend/agents/specialized/network-intelligence-agent.js`
+- Extends: `BaseAgent` | ID: `NETWORK_INTELLIGENCE`
+- Decisions: `CLEAR` / `FLAG` / `BLOCK`
+- Route: `POST /api/network`
+- Key signals: fraud ring detection, link analysis, collusion patterns
+
+**ReviewIntegrityAgent** ✅ WIRED
+- File: `backend/agents/specialized/review-integrity-agent.js`
+- Extends: `BaseAgent` | ID: `REVIEW_INTEGRITY`
+- Decisions: `APPROVE` / `FLAG` / `REMOVE`
+- Route: `POST /api/review`
+- Key signals: fake review detection, reviewer account patterns, manipulation tactics
+
+**BehavioralAnalyticsAgent** ✅ WIRED
+- File: `backend/agents/specialized/behavioral-analytics-agent.js`
+- Extends: `BaseAgent` | ID: `BEHAVIORAL_ANALYTICS`
+- Decisions: `NORMAL` / `FLAG` / `CHALLENGE`
+- Route: `POST /api/behavioral`
+- Key signals: bot detection, off-hours activity, session anomalies, device reputation
+
+**BuyerTrustAgent** ✅ WIRED
+- File: `backend/agents/specialized/buyer-trust-agent.js`
+- Extends: `BaseAgent` | ID: `BUYER_TRUST`
+- Decisions: `APPROVE` / `FLAG` / `RESTRICT`
+- Route: `POST /api/buyer-trust`
+- Key signals: first-purchase risk, chargeback history, multi-account detection, velocity
+
+**PolicyEnforcementAgent** ✅ WIRED
+- File: `backend/agents/specialized/policy-enforcement-agent.js`
+- Extends: `BaseAgent` | ID: `POLICY_ENFORCEMENT`
+- Decisions: `CLEAR` / `WARN` / `RESTRICT`
+- Route: `POST /api/policy`
+- Key signals: metrics gaming, search manipulation, repeat offenders, cross-service violations
 
 ### Core Agent Modules
 | Module | Import From | Use For |
@@ -335,7 +431,8 @@ Every agent MUST:
 | Self-correction | `../core/self-correction.js` | Outcome feedback + correction cycles |
 | Threshold manager | `../core/threshold-manager.js` | Adaptive risk thresholds |
 | Outcome simulator | `../core/outcome-simulator.js` | Simulated outcomes for closed-loop learning |
-| Agent orchestrator | `../core/agent-orchestrator.js` | Multi-agent workflows, consensus, escalation |
+| Agent orchestrator | `../core/agent-orchestrator.js` | Multi-agent workflows, consensus, escalation, batch execution |
+| Active learning | `../core/active-learning.js` | Proactive human feedback requests on uncertain decisions |
 | Agent messenger | `../core/agent-messenger.js` | Inter-agent communication + help requests |
 | Consensus engine | `../core/consensus-engine.js` | Multi-agent voting |
 
@@ -350,9 +447,10 @@ Python FastAPI at `backend/evaluation/`, port 8000.
 | BrainTrust | Golden dataset regression |
 | Phoenix | Arize trace observability |
 
-**RAGAS only applies to retrieval agents**: SellerOnboardingAgent,
-FraudInvestigationAgent, CrossDomainCorrelationAgent. Never apply to PayoutRiskAgent,
-AlertTriageAgent, or RuleOptimizationAgent — they don't do retrieval.
+**RAGAS applies to all agents**: Retrieval agents provide tool evidence as contexts.
+Non-retrieval agents synthesize contexts from chain-of-thought, risk factors, and
+decision evidence — enabling RAGAS faithfulness + answer relevancy evaluation across
+all 23 agents. Context precision/recall remain most meaningful for retrieval agents.
 
 **Eval service routers** (10 files in `backend/evaluation/routers/`):
 `evaluate`, `dashboard`, `ingest`, `search`, `vector_search`, `retrieval_eval`, `memory`, `letta_memory`, `phoenix`, `braintrust`
@@ -367,7 +465,7 @@ transaction → agent evaluates risk → decision enforced → risk profile upda
 → case created if flagged → agent learns from outcome.
 ```
 ONBOARD → SETUP → LIST → PRICE → TRANSACT → SHIP → PAYOUT → RETURN → PROFILE
-  ✅         ❌      ✅      ❌       ❌          ❌      ✅        ✅       ✅
+  ✅         ✅      ✅      ✅       ✅          ✅      ✅        ✅       ✅
 ```
 
 **Stage 1 — Onboarding** ✅ COMPLETE
@@ -378,55 +476,63 @@ ONBOARD → SETUP → LIST → PRICE → TRANSACT → SHIP → PAYOUT → RETURN
 - Decision: APPROVE → activated | REVIEW → manual KYC | REJECT → blocked
 - Risk weight: 0.12
 
-**Stage 2 — Account Setup** ❌ NEEDS AGENT
+**Stage 2 — Account Setup** ✅ WIRED
 - Service: `backend/services/business/account-setup/`
-- Wire to SellerOnboardingAgent (same agent, different checkpoint)
-- Key signals: bank account country mismatch, prepaid card detection, tax ID cross-ref
+- Agent: AccountSetupAgent | Route: `POST /api/account-setup`
+- Key signals: bank verification, tax ID cross-reference, shared payment detection, account age
 
 **Stage 3 — Listing** ✅ WIRED
 - Service: `backend/services/business/seller-listing/`
-- Agent: ListingIntelligenceAgent (exists, not wired)
+- Agent: ListingIntelligenceAgent | Route: `POST /api/listing/listings`
 - Key signals: counterfeit (luxury brand + new seller + price 60% below market),
   listing velocity (500 in 24h), price anomaly (10x market = money laundering),
   prohibited items, stolen product images
 - Decision: APPROVE / FLAG / REJECT | Risk weight: 0.07
 
-**Stage 4 — Transaction** ❌ NEEDS NEW SERVICE + AGENT
-- Service: `transaction-processing/` (to build)
-- Agent: TransactionRiskAgent (to build)
-- Architecture: two-tier — rule engine <10ms for clear signals, agent <500ms for ambiguous
-- Key signals: velocity, device/IP/account triangle, card testing, cross-merchant patterns
+**Stage 4 — Pricing** ✅ WIRED
+- Service: `backend/services/business/pricing/`
+- Agent: PricingRiskAgent | Route: `POST /api/pricing`
+- Key signals: below-cost pricing, price manipulation, arbitrage patterns, change velocity
+- Decision: APPROVE / FLAG / REJECT | Risk weight: 0.08
 
-**Stage 5 — Shipping** ❌ NEEDS AGENT
+**Stage 5 — Transaction** ✅ WIRED
+- Service: `backend/services/business/transaction/`
+- Agent: TransactionRiskAgent | Route: `POST /api/transaction`
+- Key signals: velocity anomalies, device/IP/account triangle, card testing, cross-merchant
+- Decision: APPROVE / CHALLENGE / BLOCK | Risk weight: 0.08
+
+**Stage 6 — Shipping** ✅ WIRED
 - Service: `backend/services/business/seller-shipping/`
+- Agent: ShippingRiskAgent | Route: `POST /api/shipping`
 - Key signals: address mismatch, freight forwarding, empty box pattern, velocity spike
+- Decision: APPROVE / FLAG / HOLD | Risk weight: 0.10
 
-**Stage 6 — Payout** ✅ WIRED
+**Stage 7 — Payout** ✅ WIRED
 - Service: `backend/services/business/seller-payout/`
-- Agent: PayoutRiskAgent (exists, not wired) | Route: `POST /api/payout/payouts`
+- Agent: PayoutRiskAgent | Route: `POST /api/payout/payouts`
 - Key signals: payout velocity, bank change recency (<7 days = high risk),
   dispute ratio, first payout flag (4x higher fraud risk), payout vs account age
 - Decision: APPROVE / HOLD / REJECT | Risk weight: 0.12
 - HOLD → case created | REJECT → blocked, review required
 
-**Stage 7 — Returns** ✅ WIRED
+**Stage 8 — Returns** ✅ WIRED
 - Service: `backend/services/business/returns/`
-- Agent: ReturnsAbuseAgent (exists, not wired)
+- Agent: ReturnsAbuseAgent | Route: `POST /api/returns`
 - Key signals: return rate 3x category baseline, day-29 timing pattern,
   buyer-seller collusion, wardrobing, empty box claims
 - Decision: APPROVE / INVESTIGATE / DENY | Risk weight: 0.07
 
-**Stage 8 — Profile Updates** ✅ WIRED
+**Stage 9 — Profile Updates** ✅ WIRED
 - Service: `backend/services/business/profile-updates/`
-- Agent: ProfileMutationAgent (exists, not wired)
+- Agent: ProfileMutationAgent | Route: `POST /api/profile-updates`
 - Key signals: 2+ critical fields changed in one session, device fingerprint change,
   geographic impossibility, bank change + payout within 72h (ATO-to-cashout)
 - Decision: ALLOW / STEP_UP / LOCK | Risk weight: 0.07
 - STEP_UP → MFA challenge | LOCK → account frozen, ATO case created
 
-**Stage 9 — Escalation (cross-cutting)**
+**Escalation (cross-cutting)**
 - Service: `backend/services/case-queue/`
-- Agent: AlertTriageAgent (not wired)
+- Agent: AlertTriageAgent | Route: `POST /api/cases`
 - Receives HOLD/REJECT cases from all other stages
 - Prioritizes, routes to analysts, recommends resolution, learns from corrections
 
@@ -437,20 +543,15 @@ the full event history. CrossDomainCorrelationAgent monitors trends across all d
 
 ### Build Priority for Full Journey Coverage
 ```
-Sprint 1 — Wire existing agents ✅ COMPLETE:
-  ✅ Wire PayoutRiskAgent → seller-payout
-  ✅ Wire ListingIntelligenceAgent → seller-listing
-  ✅ Wire ReturnsAbuseAgent → returns
-  ✅ Wire ProfileMutationAgent → profile-updates
-  ✅ Wire AlertTriageAgent → case-queue + POST /cases endpoint
-
-Sprint 2 — New high-value services:
-  Build TransactionRiskAgent + transaction-processing (two-tier architecture)
-  Build NetworkIntelligenceAgent + network-intelligence (Neo4j graph)
-
-Sprint 3 — Remaining feedback loop:
-  Schedule CrossDomainCorrelationAgent autonomously (every 6h)
-
+Sprint 1 — Wire existing agents ✅ COMPLETE
+Sprint 2 — New high-value services ✅ COMPLETE
+  ✅ TransactionRiskAgent + PaymentRiskAgent + ComplianceAgent
+  ✅ NetworkIntelligenceAgent + ReviewIntegrityAgent
+  ✅ BehavioralAnalyticsAgent + BuyerTrustAgent + PolicyEnforcementAgent
+  ✅ ATODetectionAgent + ShippingRiskAgent + AccountSetupAgent + ItemSetupAgent + PricingRiskAgent
+Sprint 3 — Autonomous scheduling ✅ COMPLETE
+  ✅ CrossDomainCorrelationAgent (6h), PayoutRisk (10m), ListingIntelligence (15m)
+  ✅ ProfileMutation (10m), ReturnsAbuse (20m), PolicyEvolution, RuleOptimization
 Sprint 4 — Journey monitoring:
   Add journeyStage field to sellers table
   Build seller timeline UI (API already exists)
@@ -509,20 +610,28 @@ GET  /    GET /:id    POST /          runs ProfileMutationAgent
 PATCH /:id/status    GET /stats
 ```
 
-**Seller ATO** ❌ — `/api/ato`
+**Seller ATO** ✅ AGENT WIRED — `/api/ato`
 ```
 GET  /events
 GET  /events/:eventId
-POST /evaluate                      needs agent wiring
+POST /evaluate                      runs ATODetectionAgent
 GET  /sellers/:sellerId/events
 GET  /stats
 GET  /device/:fingerprint/trust
 ```
 
-**Seller Shipping** ❌ — `/api/shipping` — standard CRUD
-**Account Setup** ❌ — `/api/account-setup` — standard CRUD
-**Item Setup** ❌ — `/api/item-setup` — standard CRUD
-**Pricing** ❌ — `/api/pricing` — standard CRUD
+**Seller Shipping** ✅ AGENT WIRED — `/api/shipping`
+**Account Setup** ✅ AGENT WIRED — `/api/account-setup`
+**Item Setup** ✅ AGENT WIRED — `/api/item-setup`
+**Pricing** ✅ AGENT WIRED — `/api/pricing`
+**Transaction** ✅ AGENT WIRED — `/api/transaction`
+**Payment** ✅ AGENT WIRED — `/api/payment`
+**Compliance** ✅ AGENT WIRED — `/api/compliance`
+**Network Intelligence** ✅ AGENT WIRED — `/api/network`
+**Review Integrity** ✅ AGENT WIRED — `/api/review`
+**Behavioral Analytics** ✅ AGENT WIRED — `/api/behavioral`
+**Buyer Trust** ✅ AGENT WIRED — `/api/buyer-trust`
+**Policy Enforcement** ✅ AGENT WIRED — `/api/policy`
 ```
 GET /    GET /stats    GET /:id    POST /    PATCH /:id/status
 ```
@@ -574,7 +683,22 @@ GET  /api/agents/profile-mutation/status
 GET  /api/agents/policy-evolution/status
 ```
 
-**Other Platform APIs** (34 total route mounts in server.js)
+**Analytics** — `/api/analytics`
+```
+GET /risk-trends                    risk score trends by domain/time
+GET /agent-performance              per-agent latency + success metrics
+GET /velocity                       event velocity by seller/device
+GET /decision-distribution          decision breakdown by agent/action
+GET /health                         analytics backend health
+```
+
+**Active Learning** — `/api/active-learning`
+```
+GET  /stats                         active learning manager status + counts
+POST /configure                     update confidence thresholds + triggers
+```
+
+**Other Platform APIs** (48+ total route mounts in server.js)
 ```
 /api/decisions          decision engine execution
 /api/rules              fraud rules management (106 rules, lifecycle: TESTING→SHADOW→ACTIVE)
@@ -646,23 +770,30 @@ policy:violation                          hard policy triggered
 - Integration tests in `__tests__/` directories
 - Run: `node backend/agents/core/__tests__/reflect-and-eval.test.js`
 - No test framework — standalone Node.js scripts with simple assert functions
+- Coverage: `cd backend && npm run test:coverage` (c8, V8 native coverage)
+- CI: `.github/workflows/test.yml` — runs tests + coverage, uploads artifact
 
 ### Known Issues
-- **Mem0 async/await bug:** `base-agent.js` calls memory methods synchronously but Mem0 backend is async — Promises never awaited, silently falls back to SQLite
+- ~~**Mem0 async/await bug:** Fixed — `base-agent.js` now properly awaits async memory methods (queryLongTerm, saveLongTerm, saveTemporalFact)~~
 
 ---
 
 ## Roadmap Priorities
 1. ~~Wire 4 existing agents — payout, listing, returns, profile-updates~~ ✅ DONE
-2. Build TransactionRiskAgent + transaction-processing (two-tier: rules <10ms, agent <500ms)
-3. Build NetworkIntelligenceAgent + network-intelligence (Neo4j fraud rings)
+2. ~~Build TransactionRiskAgent + transaction-processing~~ ✅ DONE
+3. ~~Build NetworkIntelligenceAgent + network-intelligence~~ ✅ DONE
 4. ~~Wire AlertTriageAgent → case-queue (closes human feedback loop)~~ ✅ DONE
-5. Schedule CrossDomainCorrelationAgent autonomously every 6h
+5. ~~Schedule CrossDomainCorrelationAgent autonomously every 6h~~ ✅ DONE
 6. Seller journey timeline UI (`GET /api/risk-profile/:id/timeline` already exists)
-7. Self-improving rule loop — RuleOptimizationAgent running nightly autonomously
-8. Fix Mem0 async/await mismatch in base-agent.js
+7. ~~Self-improving rule loop — RuleOptimizationAgent running nightly autonomously~~ ✅ DONE
+8. ~~Fix Mem0 async/await mismatch in base-agent.js~~ ✅ DONE
 9. Citation-grounded reasoning: every claim linked to specific tool evidence
 10. Golden test suite: 100+ labeled cases for regression testing
+
+### Kubernetes
+- Manifests: `k8s/base/` (Kustomize) with `k8s/overlays/dev/` and `k8s/overlays/prod/`
+- Deploy dev: `kubectl apply -k k8s/overlays/dev`
+- Deploy prod: `kubectl apply -k k8s/overlays/prod`
 
 ## Documentation
 - Design docs: `docs/plans/YYYY-MM-DD-<topic>-{design|plan}.md`

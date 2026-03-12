@@ -7,7 +7,12 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "USE_LLM=false node backend/agents/core/__tests__/run-all-tests.js",
+    "test:quick": "USE_LLM=false node backend/agents/core/__tests__/run-all-tests.js --quick",
+    "test:golden": "USE_LLM=false node backend/agents/core/__tests__/golden-test-suite.test.js",
+    "test:analytics": "USE_LLM=false node backend/agents/core/__tests__/analytics-backend.test.js",
+    "test:coverage": "cd backend && npm run test:coverage"
   },
   "dependencies": {
     "lucide-react": "^0.563.0",

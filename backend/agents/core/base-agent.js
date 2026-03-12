@@ -69,7 +69,20 @@ const AGENT_PROMPT_MAP = {
   'PAYOUT_RISK': 'payout-risk',
   'LISTING_INTELLIGENCE': 'listing-intelligence',
   'PROFILE_MUTATION': 'profile-mutation',
-  'RETURNS_ABUSE': 'returns-abuse'
+  'RETURNS_ABUSE': 'returns-abuse',
+  'ATO_DETECTION': 'ato-detection',
+  'SHIPPING_RISK': 'shipping-risk',
+  'ACCOUNT_SETUP': 'account-setup',
+  'ITEM_SETUP': 'item-setup',
+  'PRICING_RISK': 'pricing-risk',
+  'TRANSACTION_RISK': 'transaction-risk',
+  'PAYMENT_RISK': 'payment-risk',
+  'COMPLIANCE_AML': 'compliance',
+  'NETWORK_INTELLIGENCE': 'network-intelligence',
+  'REVIEW_INTEGRITY': 'review-integrity',
+  'BEHAVIORAL_ANALYTICS': 'behavioral-analytics',
+  'BUYER_TRUST': 'buyer-trust',
+  'POLICY_ENFORCEMENT': 'policy-enforcement'
 };
 
 export class BaseAgent {
@@ -775,7 +788,7 @@ export class BaseAgent {
       // Save investigation episode for replay
       try {
         const episodeDecision = thought.result?.recommendation?.action || thought.result?.decision;
-        this.memoryStore.saveEpisode(this.agentId, {
+        Promise.resolve(this.memoryStore.saveEpisode(this.agentId, {
           input: this.sanitizeInput(input),
           decision: episodeDecision,
           riskScore: thought.result?.riskScore || thought.result?.overallRisk?.score || null,
@@ -788,7 +801,7 @@ export class BaseAgent {
           })),
           reflection: thought.reflection || null,
           chainOfThought: thought.chainOfThought,
-        });
+        })).catch(() => {});
       } catch (e) {
         // Episodic memory save is non-fatal
       }
@@ -952,7 +965,11 @@ export class BaseAgent {
   // Analyze input and context — LLM-enhanced with structured prompts
   async think(input, context) {
     // Gather advisory context for the LLM
-    const recentMemory = this.memoryStore.getShortTerm(this.agentId, this.sessionId).slice(0, 5);
+    let recentMemory = [];
+    try {
+      const mem = this.memoryStore.getShortTerm(this.agentId, this.sessionId);
+      recentMemory = (mem instanceof Promise ? await mem : mem).slice(0, 5);
+    } catch (_) { /* memory retrieval failed */ }
     const patternMatches = this.checkPatterns(input);
     // Try dual retrieval (vector + TF-IDF)
     const queryText = typeof input === 'string' ? input : JSON.stringify(input).slice(0, 200);
@@ -985,7 +1002,7 @@ export class BaseAgent {
         if (parsed?.understanding) {
           return {
             ...parsed,
-            relevantMemory: this.retrieveRelevantMemory(input),
+            relevantMemory: await this.retrieveRelevantMemory(input),
             availableTools: Array.from(this.tools.keys()),
             patternMatches,
             llmEnhanced: true
@@ -1002,7 +1019,7 @@ export class BaseAgent {
       key_risks: [],
       confidence: 0.5,
       suggested_approach: 'default',
-      relevantMemory: this.retrieveRelevantMemory(input),
+      relevantMemory: await this.retrieveRelevantMemory(input),
       availableTools: Array.from(this.tools.keys()),
       patternMatches
     };
@@ -1012,7 +1029,10 @@ export class BaseAgent {
   async plan(analysis, context) {
     // Gather long-term memory for lessons learned
     const queryText = analysis.understanding || JSON.stringify(context).slice(0, 200);
-    const longTermMemory = this.memoryStore.queryLongTerm(this.agentId, queryText, 3);
+    let longTermMemory = [];
+    try {
+      longTermMemory = await this.memoryStore.queryLongTerm(this.agentId, queryText, 3) || [];
+    } catch (_) { /* memory retrieval failed */ }
 
     // Try LLM-enhanced planning
     if (this.llmClient?.enabled) {
@@ -1377,14 +1397,14 @@ Select follow-up tools to investigate the concerns.`;
       this.consolidateToLongTerm(removed);
     }
 
-    // Persist to short-term memory store
-    this.memoryStore.saveShortTerm(this.agentId, this.sessionId, {
+    // Persist to short-term memory store (fire-and-forget for async backends like Mem0)
+    Promise.resolve(this.memoryStore.saveShortTerm(this.agentId, this.sessionId, {
       timestamp: thought.timestamp,
       type: thought.actions?.[0]?.action?.type || 'reasoning',
       summary: thought.result?.summary || 'Action completed',
       key_facts: this.extractKeyFacts(thought),
       success: thought.result?.success
-    });
+    })).catch(() => {});
 
     // Save structured insight to long-term memory
     const decision = thought.result?.recommendation?.action || thought.result?.decision;
@@ -1400,7 +1420,7 @@ Select follow-up tools to investigate the concerns.`;
         actionCount: thought.actions?.length || 0,
         wasUnusual: isUnusual,
         timestamp: thought.timestamp
-      }, importance);
+      }, importance).catch?.(() => {});
     }
 
     // Save temporal fact if entity ID present in context (fire-and-forget)
@@ -1411,11 +1431,12 @@ Select follow-up tools to investigate the concerns.`;
         const entityType = thought.result?.sellerId ? 'seller'
           : thought.result?.transactionId ? 'transaction' : 'entity';
         try {
-          Promise.resolve(this.temporalMemory.saveTemporalFact(entityId, entityType, {
+          const saveResult = this.temporalMemory.saveTemporalFact(entityId, entityType, {
             text: `${decision}: ${thought.result?.summary || ''}`,
             confidence: thought.result?.confidence || 0.5,
             riskScore: thought.result?.overallRisk?.score || thought.result?.riskScore || 0,
-          }, { agentId: this.agentId })).catch(() => {});
+          }, { agentId: this.agentId });
+          if (saveResult?.catch) saveResult.catch(() => {});
         } catch (_) { /* fire-and-forget */ }
       }
     }
@@ -1423,18 +1444,21 @@ Select follow-up tools to investigate the concerns.`;
     // Periodically consolidate pattern memory (every 20 decisions)
     if (this.thoughtLog.length % 20 === 0 && this.thoughtLog.length > 0) {
       const topPatterns = this.patternMemory.getTopPatterns(50);
-      this.memoryStore.consolidatePatterns(this.agentId, topPatterns);
+      Promise.resolve(this.memoryStore.consolidatePatterns(this.agentId, topPatterns)).catch(() => {});
     }
   }
 
-  retrieveRelevantMemory(input) {
+  async retrieveRelevantMemory(input) {
     const inputStr = JSON.stringify(input).toLowerCase();
     // Check in-memory first (fast)
     const inMemory = this.memory.shortTerm
       .filter(m => JSON.stringify(m).toLowerCase().includes(inputStr.slice(0, 50)))
       .slice(-5);
-    // Also check persistent long-term memory
-    const longTerm = this.memoryStore.queryLongTerm(this.agentId, inputStr.slice(0, 100), 3);
+    // Query persistent long-term memory (properly awaited for async backends like Mem0)
+    let longTerm = [];
+    try {
+      longTerm = await this.memoryStore.queryLongTerm(this.agentId, inputStr.slice(0, 100), 3) || [];
+    } catch (_) { /* memory retrieval failed */ }
 
     // Include temporal history if available
     let temporal = [];
@@ -1442,8 +1466,7 @@ Select follow-up tools to investigate the concerns.`;
       const entityId = input?.sellerId || input?.transactionId || input?.entityId || null;
       if (entityId) {
         try {
-          const result = this.temporalMemory.queryTemporalHistory(entityId, inputStr.slice(0, 100), 5);
-          temporal = result instanceof Promise ? [] : result; // sync only for in-memory
+          temporal = await this.temporalMemory.queryTemporalHistory(entityId, inputStr.slice(0, 100), 5) || [];
         } catch (_) { /* temporal unavailable */ }
       }
     }
@@ -1610,7 +1633,7 @@ Select follow-up tools to investigate the concerns.`;
         ? `Decision ${originalDecision.action} at risk ${originalDecision.riskScore} was WRONG (outcome: ${outcome})`
         : `Decision ${originalDecision.action} at risk ${originalDecision.riskScore} was correct (outcome: ${outcome})`,
       timestamp: new Date().toISOString()
-    }, importance);
+    }, importance).catch?.(() => {});
 
     // 4. Emit feedback event
     this.emitEvent('agent:feedback:processed', {
@@ -1646,11 +1669,11 @@ Select follow-up tools to investigate the concerns.`;
     const key = `memory_${Date.now()}`;
     this.memory.longTerm.set(key, memory);
 
-    // Also persist to long-term memory store
+    // Also persist to long-term memory store (fire-and-forget for async backends)
     this.memoryStore.saveLongTerm(this.agentId, 'insight', {
       ...memory,
       consolidatedAt: new Date().toISOString()
-    }, 0.5);
+    }, 0.5).catch?.(() => {});
   }
 
   // ============================================================================

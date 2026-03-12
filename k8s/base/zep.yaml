@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zep
+  namespace: fraud-detection
+  labels:
+    app: fraud-detection
+    component: zep
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fraud-detection
+      component: zep
+  template:
+    metadata:
+      labels:
+        app: fraud-detection
+        component: zep
+    spec:
+      containers:
+        - name: zep
+          image: ghcr.io/getzep/zep:latest
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z postgres.fraud-detection.svc.cluster.local 5432; do sleep 2; done']
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zep
+  namespace: fraud-detection
+spec:
+  selector:
+    app: fraud-detection
+    component: zep
+  ports:
+    - port: 8200
+      targetPort: 8000

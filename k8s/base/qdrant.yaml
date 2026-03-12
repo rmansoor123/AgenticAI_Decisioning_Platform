@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: qdrant
+  namespace: fraud-detection
+  labels:
+    app: fraud-detection
+    component: qdrant
+spec:
+  serviceName: qdrant
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fraud-detection
+      component: qdrant
+  template:
+    metadata:
+      labels:
+        app: fraud-detection
+        component: qdrant
+    spec:
+      containers:
+        - name: qdrant
+          image: qdrant/qdrant:latest
+          ports:
+            - containerPort: 6333
+              name: rest
+            - containerPort: 6334
+              name: grpc
+          volumeMounts:
+            - name: qdrantdata
+              mountPath: /qdrant/storage
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          readinessProbe:
+            tcpSocket:
+              port: 6333
+            initialDelaySeconds: 5
+            periodSeconds: 10
+  volumeClaimTemplates:
+    - metadata:
+        name: qdrantdata
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant
+  namespace: fraud-detection
+spec:
+  selector:
+    app: fraud-detection
+    component: qdrant
+  ports:
+    - port: 6333
+      targetPort: 6333
+      name: rest
+    - port: 6334
+      targetPort: 6334
+      name: grpc
+  clusterIP: None

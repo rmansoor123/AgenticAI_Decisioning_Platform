@@ -17,6 +17,7 @@ export class RuleOptimizationAgent extends BaseAgent {
     super({
       name: 'Rule Optimization Agent',
       role: 'RULE_OPTIMIZER',
+      agentId: 'RULE_OPTIMIZER',
       capabilities: [
         'rule_analysis',
         'performance_monitoring',
@@ -367,6 +368,12 @@ ${recommendations.slice(0, 5).map((r, i) => `${i + 1}. [${r.priority}] ${r.descr
     this.status = 'IDLE';
     return result;
   }
+}
+
+let ruleOptInstance = null;
+export function getRuleOptimizationAgent() {
+  if (!ruleOptInstance) ruleOptInstance = new RuleOptimizationAgent();
+  return ruleOptInstance;
 }
 
 export default RuleOptimizationAgent;

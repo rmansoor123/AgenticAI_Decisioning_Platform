@@ -212,7 +212,7 @@ export class AutonomousAgent extends BaseAgent {
       this._recordCycle(entry);
 
       // Record metrics
-      this.metricsCollector.recordExecution(this.agentId, duration, true);
+      this.metricsCollector?.recordExecution(this.agentId, duration, true);
 
       this.emitEvent('agent:autonomous:cycle:complete', {
         agentId: this.agentId,
@@ -239,7 +239,7 @@ export class AutonomousAgent extends BaseAgent {
       this._recordCycle(entry);
 
       // Record metrics
-      this.metricsCollector.recordExecution(this.agentId, duration, false);
+      this.metricsCollector?.recordExecution(this.agentId, duration, false);
 
       this.emitEvent('agent:autonomous:cycle:error', {
         agentId: this.agentId,

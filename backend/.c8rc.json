@@ -1,0 +1,14 @@
+{
+  "all": true,
+  "src": ["agents", "services", "gateway", "shared"],
+  "exclude": [
+    "**/__tests__/**",
+    "**/node_modules/**",
+    "**/synthetic-data/**",
+    "evaluation/**"
+  ],
+  "reporter": ["text", "lcov", "json-summary"],
+  "report-dir": "coverage",
+  "clean": true,
+  "skip-full": false
+}

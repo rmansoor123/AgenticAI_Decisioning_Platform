@@ -11,6 +11,11 @@ import RuleOptimizationAgent from './specialized/rule-optimization-agent.js';
 import AlertTriageAgent from './specialized/alert-triage-agent.js';
 import SellerOnboardingAgent from './specialized/seller-onboarding-agent.js';
 import { getEvalTracker } from './core/eval-tracker.js';
+import { getATODetectionAgent } from './specialized/ato-detection-agent.js';
+import { getShippingRiskAgent } from './specialized/shipping-risk-agent.js';
+import { getAccountSetupAgent } from './specialized/account-setup-agent.js';
+import { getItemSetupAgent } from './specialized/item-setup-agent.js';
+import { getPricingRiskAgent } from './specialized/pricing-risk-agent.js';
 
 // Initialize agents
 const fraudInvestigator = new FraudInvestigationAgent();
@@ -18,12 +23,22 @@ const ruleOptimizer = new RuleOptimizationAgent();
 const alertTriage = new AlertTriageAgent();
 const sellerOnboarding = new SellerOnboardingAgent();
 const evalTracker = getEvalTracker();
+const atoDetection = getATODetectionAgent();
+const shippingRisk = getShippingRiskAgent();
+const accountSetup = getAccountSetupAgent();
+const itemSetup = getItemSetupAgent();
+const pricingRisk = getPricingRiskAgent();
 
 // Register agents with orchestrator
 orchestrator.registerAgent(fraudInvestigator);
 orchestrator.registerAgent(ruleOptimizer);
 orchestrator.registerAgent(alertTriage);
 orchestrator.registerAgent(sellerOnboarding);
+orchestrator.registerAgent(atoDetection);
+orchestrator.registerAgent(shippingRisk);
+orchestrator.registerAgent(accountSetup);
+orchestrator.registerAgent(itemSetup);
+orchestrator.registerAgent(pricingRisk);
 
 // Define standard workflows
 orchestrator.defineWorkflow('fraud_investigation', {
@@ -116,6 +131,11 @@ export {
   ruleOptimizer,
   alertTriage,
   sellerOnboarding,
+  atoDetection,
+  shippingRisk,
+  accountSetup,
+  itemSetup,
+  pricingRisk,
   evalTracker
 };
 
@@ -127,6 +147,11 @@ export default {
     fraudInvestigator,
     ruleOptimizer,
     alertTriage,
-    sellerOnboarding
+    sellerOnboarding,
+    atoDetection,
+    shippingRisk,
+    accountSetup,
+    itemSetup,
+    pricingRisk
   }
 };

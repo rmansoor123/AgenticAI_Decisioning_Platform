@@ -152,7 +152,7 @@ services:
     volumes:
       - ollamadata:/root/.ollama
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      test: ["CMD", "ollama", "list"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -169,6 +169,21 @@ services:
       timeout: 5s
       retries: 5
 
+  pinot:
+    image: apachepinot/pinot:latest
+    command: QuickStart -type batch
+    ports:
+      - "9000:9000"
+      - "8099:8099"
+    volumes:
+      - pinotdata:/opt/pinot/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
 volumes:
   pgdata:
   redisdata:
@@ -179,3 +194,4 @@ volumes:
   weaviatedata:
   ollamadata:
   phoenixdata:
+  pinotdata:

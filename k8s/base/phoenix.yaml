@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: phoenix
+  namespace: fraud-detection
+  labels:
+    app: fraud-detection
+    component: phoenix
+spec:
+  serviceName: phoenix
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fraud-detection
+      component: phoenix
+  template:
+    metadata:
+      labels:
+        app: fraud-detection
+        component: phoenix
+    spec:
+      containers:
+        - name: phoenix
+          image: arizephoenix/phoenix:latest
+          ports:
+            - containerPort: 6006
+          volumeMounts:
+            - name: phoenixdata
+              mountPath: /root/.phoenix
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 6006
+            initialDelaySeconds: 15
+            periodSeconds: 10
+  volumeClaimTemplates:
+    - metadata:
+        name: phoenixdata
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: phoenix
+  namespace: fraud-detection
+spec:
+  selector:
+    app: fraud-detection
+    component: phoenix
+  ports:
+    - port: 6006
+      targetPort: 6006
+  clusterIP: None

@@ -27,16 +27,19 @@ async def evaluate_single(req: EvaluateRequest, background_tasks: BackgroundTask
         agent_id=req.agent_id,
     )
 
-    # RAGAS evaluation
-    try:
-        ragas_scores = evaluate_with_ragas(
-            query=req.query,
-            retrieved_contexts=req.retrieved_contexts,
-            agent_response=req.agent_response,
-            ground_truth=req.ground_truth,
-        )
-    except Exception:
-        ragas_scores = {}
+    # RAGAS evaluation — requires non-empty retrieved_contexts
+    ragas_scores = {}
+    if req.retrieved_contexts and len(req.retrieved_contexts) > 0:
+        try:
+            ragas_scores = evaluate_with_ragas(
+                query=req.query,
+                retrieved_contexts=req.retrieved_contexts,
+                agent_response=req.agent_response,
+                ground_truth=req.ground_truth,
+            )
+        except Exception as e:
+            import logging
+            logging.warning(f"RAGAS evaluation failed for agent {req.agent_id}: {e}")
 
     # DeepEval evaluation
     deepeval_scores = []

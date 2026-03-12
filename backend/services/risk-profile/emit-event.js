@@ -4,17 +4,26 @@ const HALF_LIFE_DAYS = 30;
 const DE_ESCALATION_COOLDOWN_MS = 48 * 60 * 60 * 1000;
 
 const DOMAIN_WEIGHTS = {
-  onboarding: 0.12,
-  ato: 0.14,
-  payout: 0.12,
-  listing: 0.07,
-  shipping: 0.10,
-  transaction: 0.08,
-  account_setup: 0.08,
-  item_setup: 0.07,
-  pricing: 0.08,
-  profile_updates: 0.07,
-  returns: 0.07
+  // Core seller lifecycle (original 11 domains, rebalanced)
+  onboarding:         0.10,
+  ato:                0.12,
+  payout:             0.10,
+  listing:            0.06,
+  shipping:           0.08,
+  transaction:        0.07,
+  account_setup:      0.06,
+  item_setup:         0.05,
+  pricing:            0.06,
+  profile_updates:    0.06,
+  returns:            0.06,
+  // Extended domains (7 new)
+  payment:            0.05,
+  compliance:         0.04,
+  network:            0.03,
+  review:             0.02,
+  behavioral:         0.02,
+  buyer_trust:        0.01,
+  policy_enforcement: 0.01
 };
 
 function calculateDecayedScore(originalScore, createdAt) {
@@ -117,6 +126,14 @@ export function emitRiskEvent({ sellerId, domain, eventType, riskScore, metadata
     };
 
     db_ops.insert('risk_events', 'event_id', eventId, event);
+
+    // Fire-and-forget: push to event bus for analytics ingestion
+    try {
+      import('../../gateway/websocket/event-bus.js').then(({ getEventBus }) => {
+        getEventBus().publish('risk:event', event, { source: 'emit-event' });
+      }).catch(() => {});
+    } catch (_) { /* analytics ingestion is best-effort */ }
+
     recalculateProfile(sellerId);
     return event;
   } catch (error) {

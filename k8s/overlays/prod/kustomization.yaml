@@ -1,0 +1,56 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+# Prod: higher replicas, more resources
+patches:
+  - patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: backend
+      spec:
+        replicas: 3
+        template:
+          spec:
+            containers:
+              - name: backend
+                resources:
+                  requests:
+                    cpu: 500m
+                    memory: 1Gi
+                  limits:
+                    cpu: "2"
+                    memory: 4Gi
+  - patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: frontend
+      spec:
+        replicas: 3
+  - patch: |
+      apiVersion: autoscaling/v2
+      kind: HorizontalPodAutoscaler
+      metadata:
+        name: backend-hpa
+      spec:
+        minReplicas: 3
+        maxReplicas: 12
+
+# Prod config uses all production backends
+configMapGenerator:
+  - name: fraud-detection-config
+    behavior: merge
+    literals:
+      - USE_LLM=true
+      - LLM_PROVIDER=anthropic
+      - DB_BACKEND=postgres
+      - MEMORY_BACKEND=mem0
+      - CACHE_BACKEND=redis
+      - GRAPH_BACKEND=neo4j
+      - OBSERVABILITY_BACKEND=langfuse
+      - ANALYTICS_BACKEND=pinot
+      - TEMPORAL_BACKEND=zep

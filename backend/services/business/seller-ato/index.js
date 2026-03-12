@@ -1,7 +1,9 @@
 import express from 'express';
+import { randomUUID } from 'crypto';
 import { db_ops } from '../../../shared/common/database.js';
 import { generateATOEvent } from '../../../shared/synthetic-data/generators.js';
 import { emitRiskEvent } from '../../risk-profile/emit-event.js';
+import { getATODetectionAgent } from '../../../agents/specialized/ato-detection-agent.js';
 
 const router = express.Router();
 
@@ -44,67 +46,131 @@ router.get('/events/:eventId', (req, res) => {
   }
 });
 
-// Evaluate ATO risk for a login/action
-router.post('/evaluate', (req, res) => {
+// Evaluate ATO risk for a login/action — async fire-and-forget with real-time TPAOR streaming
+router.post('/evaluate', async (req, res) => {
   try {
     const { sellerId, eventType, deviceInfo, location, sessionData } = req.body;
 
-    // Get seller's historical data
     const seller = db_ops.getById('sellers', 'seller_id', sellerId);
-    const recentEvents = db_ops.getAll('ato_events', 100, 0)
-      .map(e => e.data)
-      .filter(e => e.sellerId === sellerId);
+    if (!seller) {
+      return res.status(404).json({ success: false, error: 'Seller not found' });
+    }
 
-    // Perform ATO risk evaluation
-    const evaluation = performATOEvaluation({
-      sellerId,
-      eventType,
-      deviceInfo,
-      location,
-      sessionData,
-      sellerData: seller?.data,
-      recentEvents
-    });
+    const eventId = `ATO-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+    const correlationId = `ATO-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
-    // Store the event
+    // Create event immediately with EVALUATING status
     const event = {
-      eventId: `ATO-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`,
+      eventId,
       sellerId,
       eventType,
-      riskLevel: evaluation.riskLevel,
-      riskScore: evaluation.riskScore,
-      signals: evaluation.signals,
+      riskLevel: 'PENDING',
+      riskScore: null,
+      signals: {},
       deviceInfo,
       location,
-      outcome: evaluation.decision,
+      outcome: 'EVALUATING',
       timestamp: new Date().toISOString()
     };
 
     db_ops.insert('ato_events', 'event_id', event.eventId, event);
 
-    // Emit risk events for ATO
-    emitRiskEvent({
-      sellerId, domain: 'ato', eventType: 'ATO_EVENT',
-      riskScore: evaluation.riskScore,
-      metadata: { signals: evaluation.signals, decision: evaluation.decision }
-    });
-    if (evaluation.decision === 'BLOCKED') {
-      emitRiskEvent({ sellerId, domain: 'ato', eventType: 'ATO_BLOCKED', riskScore: 75, metadata: {} });
-    }
-    if (evaluation.signals.impossibleTravel) {
-      emitRiskEvent({ sellerId, domain: 'ato', eventType: 'ATO_IMPOSSIBLE_TRAVEL', riskScore: 70, metadata: {} });
-    }
-    if (evaluation.signals.bruteForce) {
-      emitRiskEvent({ sellerId, domain: 'ato', eventType: 'ATO_BRUTE_FORCE', riskScore: 60, metadata: {} });
-    }
-
-    res.json({
+    // Return HTTP 202 immediately
+    res.status(202).json({
       success: true,
-      data: {
-        event,
-        evaluation
-      }
+      correlationId,
+      eventId,
+      status: 'EVALUATING',
+      message: 'Agent evaluation started. Watch the Agent Flow panel for real-time progress.'
     });
+
+    // Fire-and-forget: run ATODetectionAgent asynchronously
+    console.log(`[ATOService] Evaluating event: ${eventId} (correlation: ${correlationId})`);
+
+    const agent = getATODetectionAgent();
+    agent.reason({
+      type: 'ato_detection',
+      eventId,
+      sellerId,
+      eventType,
+      deviceFingerprint: deviceInfo?.fingerprint,
+      location,
+      sessionData,
+      sellerData: seller.data,
+      submittedAt: new Date().toISOString()
+    }, {
+      entityId: eventId,
+      evaluationType: 'ato_detection',
+      _correlationId: correlationId
+    })
+      .then(agentResult => {
+        const rec = agentResult.result?.recommendation || agentResult.result?.decision;
+        const decision = rec?.action || 'BLOCK';
+        const riskScore = agentResult.result?.overallRisk?.score ?? 75;
+        const reasoning = agentResult.result?.reasoning || rec?.reason || 'Agent evaluation complete';
+        const agentId = agentResult.result?.agentId || 'ATO_DETECTION';
+
+        let outcome;
+        if (decision === 'ALLOW') outcome = 'ALLOWED';
+        else if (decision === 'CHALLENGE') outcome = 'CHALLENGED';
+        else outcome = 'BLOCKED';
+
+        const riskLevel = riskScore >= 66 ? 'CRITICAL' : riskScore >= 40 ? 'HIGH' : riskScore >= 20 ? 'MEDIUM' : 'LOW';
+
+        db_ops.update('ato_events', 'event_id', eventId, {
+          ...event,
+          riskLevel,
+          riskScore,
+          outcome,
+          riskAssessment: { riskScore, decision, reasoning, agentId, evaluatedAt: new Date().toISOString() }
+        });
+
+        emitRiskEvent({
+          sellerId, domain: 'ato',
+          eventType: decision === 'ALLOW' ? 'ATO_ALLOWED' : decision === 'CHALLENGE' ? 'ATO_CHALLENGED' : 'ATO_BLOCKED',
+          riskScore, metadata: { decision, eventId, eventType }
+        });
+
+        if (decision === 'BLOCK' || decision === 'CHALLENGE') {
+          const caseId = 'CASE-' + randomUUID().substring(0, 8).toUpperCase();
+          const caseData = {
+            caseId, checkpoint: 'ATO_DETECTION',
+            priority: riskScore >= 80 ? 'CRITICAL' : riskScore >= 60 ? 'HIGH' : 'MEDIUM',
+            status: 'OPEN', sellerId, entityId: eventId, entityType: 'ATO_EVENT',
+            decision, riskScore, reasoning, agentId, createdAt: new Date().toISOString()
+          };
+          db_ops.insert('cases', 'case_id', caseId, caseData);
+        }
+
+        try {
+          import('../../../gateway/websocket/event-bus.js').then(({ getEventBus }) => {
+            getEventBus().publish('agent:decision:complete', {
+              correlationId, sellerId, entityId: eventId, decision, riskScore, reasoning,
+              timestamp: new Date().toISOString()
+            });
+          }).catch(() => {});
+        } catch {}
+
+        console.log(`[ATOService] Completed: ${eventId} → ${decision} (risk: ${riskScore})`);
+      })
+      .catch(error => {
+        console.error(`[ATOService] Agent error for ${eventId}:`, error.message);
+        db_ops.update('ato_events', 'event_id', eventId, {
+          ...event,
+          riskLevel: 'HIGH',
+          riskScore: 75,
+          outcome: 'BLOCKED',
+          riskAssessment: { riskScore: 75, decision: 'BLOCK', reasoning: `Agent error — defaulting to BLOCK: ${error.message}`, agentId: 'ATO_DETECTION', evaluatedAt: new Date().toISOString() }
+        });
+        try {
+          import('../../../gateway/websocket/event-bus.js').then(({ getEventBus }) => {
+            getEventBus().publish('agent:decision:error', {
+              correlationId, sellerId, entityId: eventId, error: error.message,
+              timestamp: new Date().toISOString()
+            });
+          }).catch(() => {});
+        } catch {}
+      });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

@@ -1,0 +1,50 @@
+{
+  "schema": {
+    "schemaName": "agent_metrics_rt",
+    "dimensionFieldSpecs": [
+      { "name": "agentId", "dataType": "STRING" }
+    ],
+    "metricFieldSpecs": [
+      { "name": "executionCount", "dataType": "LONG" },
+      { "name": "avgLatencyMs", "dataType": "DOUBLE" },
+      { "name": "successRate", "dataType": "DOUBLE" }
+    ],
+    "dateTimeFieldSpecs": [
+      {
+        "name": "timestamp",
+        "dataType": "TIMESTAMP",
+        "format": "1:MILLISECONDS:TIMESTAMP",
+        "granularity": "1:MILLISECONDS"
+      }
+    ]
+  },
+  "table": {
+    "tableName": "agent_metrics_rt",
+    "tableType": "REALTIME",
+    "segmentsConfig": {
+      "timeColumnName": "timestamp",
+      "schemaName": "agent_metrics_rt",
+      "replicasPerPartition": "1",
+      "retentionTimeUnit": "DAYS",
+      "retentionTimeValue": "30"
+    },
+    "tableIndexConfig": {
+      "invertedIndexColumns": ["agentId"],
+      "rangeIndexColumns": ["timestamp"],
+      "loadMode": "MMAP"
+    },
+    "tenants": {
+      "broker": "DefaultTenant",
+      "server": "DefaultTenant"
+    },
+    "ingestionConfig": {
+      "batchIngestionConfig": {
+        "segmentIngestionType": "APPEND",
+        "segmentIngestionFrequency": "HOURLY"
+      }
+    },
+    "metadata": {
+      "customConfigs": {}
+    }
+  }
+}

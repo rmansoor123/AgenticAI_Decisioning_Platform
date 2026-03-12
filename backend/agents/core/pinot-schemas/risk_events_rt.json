@@ -1,0 +1,52 @@
+{
+  "schema": {
+    "schemaName": "risk_events_rt",
+    "dimensionFieldSpecs": [
+      { "name": "eventId", "dataType": "STRING" },
+      { "name": "sellerId", "dataType": "STRING" },
+      { "name": "domain", "dataType": "STRING" },
+      { "name": "eventType", "dataType": "STRING" },
+      { "name": "deviceFingerprint", "dataType": "STRING" }
+    ],
+    "metricFieldSpecs": [
+      { "name": "riskScore", "dataType": "DOUBLE" }
+    ],
+    "dateTimeFieldSpecs": [
+      {
+        "name": "createdAt",
+        "dataType": "TIMESTAMP",
+        "format": "1:MILLISECONDS:TIMESTAMP",
+        "granularity": "1:MILLISECONDS"
+      }
+    ]
+  },
+  "table": {
+    "tableName": "risk_events_rt",
+    "tableType": "REALTIME",
+    "segmentsConfig": {
+      "timeColumnName": "createdAt",
+      "schemaName": "risk_events_rt",
+      "replicasPerPartition": "1",
+      "retentionTimeUnit": "DAYS",
+      "retentionTimeValue": "90"
+    },
+    "tableIndexConfig": {
+      "invertedIndexColumns": ["sellerId", "domain", "eventType"],
+      "rangeIndexColumns": ["createdAt"],
+      "loadMode": "MMAP"
+    },
+    "tenants": {
+      "broker": "DefaultTenant",
+      "server": "DefaultTenant"
+    },
+    "ingestionConfig": {
+      "batchIngestionConfig": {
+        "segmentIngestionType": "APPEND",
+        "segmentIngestionFrequency": "HOURLY"
+      }
+    },
+    "metadata": {
+      "customConfigs": {}
+    }
+  }
+}

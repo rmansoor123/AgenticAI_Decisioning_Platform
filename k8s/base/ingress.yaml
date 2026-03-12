@@ -1,0 +1,54 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fraud-detection-ingress
+  namespace: fraud-detection
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/websocket-services: "backend"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: fraud-detection.local
+      http:
+        paths:
+          # Backend API + WebSocket
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 3001
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 3001
+          # Langfuse UI
+          - path: /langfuse
+            pathType: Prefix
+            backend:
+              service:
+                name: langfuse
+                port:
+                  number: 3000
+          # Phoenix UI
+          - path: /phoenix
+            pathType: Prefix
+            backend:
+              service:
+                name: phoenix
+                port:
+                  number: 6006
+          # Frontend (catch-all)
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80

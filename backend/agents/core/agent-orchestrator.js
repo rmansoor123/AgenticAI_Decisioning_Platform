@@ -643,6 +643,107 @@ class AgentOrchestrator {
     return { success: true, agentId };
   }
 
+  // ============================================================================
+  // BATCH EXECUTION — run multiple agent tasks concurrently
+  // ============================================================================
+
+  /**
+   * Execute a batch of agent tasks concurrently with configurable concurrency.
+   *
+   * @param {Array<{agentId: string, input: Object}>} tasks - Tasks to execute
+   * @param {Object} options
+   * @param {number} options.concurrency - Max concurrent agents (default: 5)
+   * @param {number} options.timeoutMs - Per-task timeout (default: 60000)
+   * @param {boolean} options.stopOnError - Abort remaining on first error (default: false)
+   * @returns {Array<{agentId, status, result, error, durationMs}>}
+   */
+  async executeBatch(tasks, options = {}) {
+    const {
+      concurrency = 5,
+      timeoutMs = 60000,
+      stopOnError = false
+    } = options;
+
+    const batchId = `BATCH-${Date.now().toString(36).toUpperCase()}`;
+    this.log('BATCH_STARTED', { batchId, taskCount: tasks.length, concurrency });
+
+    const results = new Array(tasks.length);
+    let aborted = false;
+    let completed = 0;
+
+    // Process tasks in chunks of `concurrency`
+    for (let i = 0; i < tasks.length; i += concurrency) {
+      if (aborted) break;
+
+      const chunk = tasks.slice(i, i + concurrency);
+      const chunkPromises = chunk.map(async (task, chunkIdx) => {
+        const globalIdx = i + chunkIdx;
+        if (aborted) {
+          results[globalIdx] = { agentId: task.agentId, status: 'SKIPPED', result: null, error: 'Batch aborted', durationMs: 0 };
+          return;
+        }
+
+        const agent = this.getAgent(task.agentId);
+        if (!agent) {
+          results[globalIdx] = { agentId: task.agentId, status: 'FAILED', result: null, error: `Agent not found: ${task.agentId}`, durationMs: 0 };
+          return;
+        }
+
+        const startTime = Date.now();
+        try {
+          // Race between agent execution and timeout
+          const result = await Promise.race([
+            agent.reason(task.input, { batch: true, batchId }),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs)
+            )
+          ]);
+
+          const durationMs = Date.now() - startTime;
+          results[globalIdx] = { agentId: task.agentId, status: 'COMPLETED', result, error: null, durationMs };
+          completed++;
+        } catch (error) {
+          const durationMs = Date.now() - startTime;
+          results[globalIdx] = { agentId: task.agentId, status: 'FAILED', result: null, error: error.message, durationMs };
+          if (stopOnError) aborted = true;
+        }
+      });
+
+      await Promise.allSettled(chunkPromises);
+    }
+
+    // Fill any remaining skipped slots
+    for (let i = 0; i < results.length; i++) {
+      if (!results[i]) {
+        results[i] = { agentId: tasks[i].agentId, status: 'SKIPPED', result: null, error: 'Not executed', durationMs: 0 };
+      }
+    }
+
+    this.log('BATCH_COMPLETED', {
+      batchId,
+      total: tasks.length,
+      completed,
+      failed: results.filter(r => r.status === 'FAILED').length,
+      skipped: results.filter(r => r.status === 'SKIPPED').length
+    });
+
+    return { batchId, results };
+  }
+
+  /**
+   * Fan-out: send the same input to multiple agents concurrently and collect results.
+   * Useful for cross-domain analysis where each agent evaluates independently.
+   *
+   * @param {string[]} agentIds - Agents to fan out to
+   * @param {Object} input - Shared input for all agents
+   * @param {Object} options - Same as executeBatch options
+   * @returns {Object} { batchId, results }
+   */
+  async fanOut(agentIds, input, options = {}) {
+    const tasks = agentIds.map(agentId => ({ agentId, input }));
+    return this.executeBatch(tasks, options);
+  }
+
   /**
    * Get list of available agent types for spawning.
    */

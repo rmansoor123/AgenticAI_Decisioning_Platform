@@ -36,6 +36,20 @@ import PayoutLive from './pages/PayoutLive'
 import ListingLive from './pages/ListingLive'
 import ReturnsLive from './pages/ReturnsLive'
 import ProfileUpdatesLive from './pages/ProfileUpdatesLive'
+import ATOLive from './pages/ATOLive'
+import ShippingLive from './pages/ShippingLive'
+import AccountSetupLive from './pages/AccountSetupLive'
+import ItemSetupLive from './pages/ItemSetupLive'
+import PricingLive from './pages/PricingLive'
+import SellerJourney from './pages/SellerJourney'
+import TransactionLive from './pages/TransactionLive'
+import PaymentLive from './pages/PaymentLive'
+import ComplianceLive from './pages/ComplianceLive'
+import NetworkLive from './pages/NetworkLive'
+import ReviewLive from './pages/ReviewLive'
+import BehavioralLive from './pages/BehavioralLive'
+import BuyerTrustLive from './pages/BuyerTrustLive'
+import PolicyLive from './pages/PolicyLive'
 
 const API_BASE = '/api'
 // Connect directly to backend WebSocket to avoid Vite HMR proxy conflict
@@ -175,7 +189,9 @@ function App() {
           <Route path="/payout" element={<Payout />} />
           <Route path="/payout/live" element={<PayoutLive />} />
           <Route path="/ato" element={<ATO />} />
+          <Route path="/ato/live" element={<ATOLive />} />
           <Route path="/shipping" element={<Shipping />} />
+          <Route path="/shipping/live" element={<ShippingLive />} />
           <Route path="/agents" element={<AgenticAI />} />
           <Route path="/onboarding" element={<Onboarding />} />
           <Route path="/onboarding/form" element={<SellerOnboardingForm />} />
@@ -187,8 +203,11 @@ function App() {
           <Route path="/case-queue" element={<CaseQueue />} />
           <Route path="/risk-profiles" element={<SellerRiskProfile />} />
           <Route path="/account-setup" element={<AccountSetup />} />
+          <Route path="/account-setup/live" element={<AccountSetupLive />} />
           <Route path="/item-setup" element={<ItemSetup />} />
+          <Route path="/item-setup/live" element={<ItemSetupLive />} />
           <Route path="/pricing" element={<Pricing />} />
+          <Route path="/pricing/live" element={<PricingLive />} />
           <Route path="/profile-updates" element={<ProfileUpdates />} />
           <Route path="/profile-updates/live" element={<ProfileUpdatesLive />} />
           <Route path="/flow-detail" element={<TransactionFlow />} />
@@ -200,6 +219,15 @@ function App() {
           <Route path="/feedback-review" element={<FeedbackReview />} />
           <Route path="/autonomous" element={<AutonomousAgents />} />
           <Route path="/rules-repository" element={<RulesRepository />} />
+          <Route path="/seller-journey" element={<SellerJourney />} />
+          <Route path="/transaction/live" element={<TransactionLive />} />
+          <Route path="/payment/live" element={<PaymentLive />} />
+          <Route path="/compliance/live" element={<ComplianceLive />} />
+          <Route path="/network/live" element={<NetworkLive />} />
+          <Route path="/review/live" element={<ReviewLive />} />
+          <Route path="/behavioral/live" element={<BehavioralLive />} />
+          <Route path="/buyer-trust/live" element={<BuyerTrustLive />} />
+          <Route path="/policy/live" element={<PolicyLive />} />
         </Routes>
       </Layout>
     </BrowserRouter>

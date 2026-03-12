@@ -49,6 +49,7 @@ export class SellerOnboardingAgent extends BaseAgent {
     super({
       name: 'Seller Onboarding Agent',
       role: 'SELLER_ONBOARDING',
+      agentId: 'SELLER_ONBOARDING',
       capabilities: [
         'kyc_verification',
         'business_verification',

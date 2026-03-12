@@ -72,13 +72,36 @@ class EvalTracker {
   _buildEvalPayload(agentId, decisionId, input, evidence, result, chainOfThought) {
     const query = typeof input === 'string' ? input : JSON.stringify(input).slice(0, 500);
 
-    const retrievedContexts = (evidence || [])
+    // Populate retrieved_contexts from tool evidence
+    const toolContexts = (evidence || [])
       .filter(a => a.result?.data)
       .map(a => {
         const toolName = a.action?.type || 'unknown';
         return `[${toolName}] ${JSON.stringify(a.result.data).slice(0, 300)}`;
       })
       .slice(0, 10);
+
+    // For non-retrieval agents: synthesize contexts from chain-of-thought + risk factors
+    // so RAGAS can still evaluate faithfulness and answer relevancy
+    if (toolContexts.length === 0) {
+      if (chainOfThought?.steps) {
+        for (const step of chainOfThought.steps.slice(0, 5)) {
+          if (step.summary || step.result) {
+            toolContexts.push(`[${step.phase || 'reasoning'}] ${step.summary || JSON.stringify(step.result).slice(0, 300)}`);
+          }
+        }
+      }
+      if (result?.riskFactors) {
+        toolContexts.push(`[risk_factors] ${JSON.stringify(result.riskFactors).slice(0, 500)}`);
+      }
+      if (result?.evidence) {
+        for (const e of (Array.isArray(result.evidence) ? result.evidence : []).slice(0, 5)) {
+          toolContexts.push(`[${e.source || 'evidence'}] ${JSON.stringify(e.data || e).slice(0, 300)}`);
+        }
+      }
+    }
+
+    const retrievedContexts = toolContexts;
 
     const agentResponse = [
       `Decision: ${result?.recommendation?.action || result?.decision || 'UNKNOWN'}`,

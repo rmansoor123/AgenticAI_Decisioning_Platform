@@ -1,0 +1,87 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-tests:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    env:
+      USE_LLM: "false"
+      ANALYTICS_BACKEND: sqlite
+      MEMORY_BACKEND: sqlite
+      CACHE_BACKEND: memory
+      GRAPH_BACKEND: memory
+      OBSERVABILITY_BACKEND: sqlite
+      VECTOR_BACKEND: pinecone
+      DB_BACKEND: sqlite
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: backend/package.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm install --ignore-scripts
+
+      - name: Run tests with coverage
+        working-directory: backend
+        run: npm run test:coverage:full
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: backend/coverage/
+          retention-days: 14
+
+      - name: Coverage summary
+        if: always()
+        working-directory: backend
+        run: |
+          if [ -f coverage/coverage-summary.json ]; then
+            node -e "
+              const c = JSON.parse(require('fs').readFileSync('coverage/coverage-summary.json', 'utf8'));
+              const t = c.total;
+              console.log('## Coverage Summary');
+              console.log('| Metric | % |');
+              console.log('|--------|---|');
+              console.log('| Lines | ' + t.lines.pct + '% |');
+              console.log('| Branches | ' + t.branches.pct + '% |');
+              console.log('| Functions | ' + t.functions.pct + '% |');
+              console.log('| Statements | ' + t.statements.pct + '% |');
+            " >> $GITHUB_STEP_SUMMARY
+          fi
+
+  frontend-build:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build

@@ -1,7 +1,9 @@
 import express from 'express';
+import { randomUUID } from 'crypto';
 import { db_ops } from '../../../shared/common/database.js';
 import { generateShipment } from '../../../shared/synthetic-data/generators.js';
 import { emitRiskEvent } from '../../risk-profile/emit-event.js';
+import { getShippingRiskAgent } from '../../../agents/specialized/shipping-risk-agent.js';
 
 const router = express.Router();
 
@@ -44,31 +46,110 @@ router.get('/shipments/:shipmentId', (req, res) => {
   }
 });
 
-// Create shipment
-router.post('/shipments', (req, res) => {
+// Create shipment — async fire-and-forget with real-time TPAOR streaming
+router.post('/shipments', async (req, res) => {
   try {
-    const shipmentData = req.body.shipmentId ? req.body : generateShipment(req.body.sellerId, req.body.transactionId);
+    const { sellerId, address, carrier, weight, value, category, transactionId } = req.body;
 
-    // Perform shipping risk assessment
-    const riskAssessment = performShippingRiskAssessment(shipmentData);
-    shipmentData.riskAssessment = riskAssessment;
-    shipmentData.status = 'PENDING';
-
-    db_ops.insert('shipments', 'shipment_id', shipmentData.shipmentId, shipmentData);
-
-    // Emit risk events for shipping
-    if (riskAssessment.riskLevel === 'HIGH' || riskAssessment?.riskScore >= 50) {
-      emitRiskEvent({
-        sellerId: shipmentData.sellerId, domain: 'shipping', eventType: 'SHIPPING_FLAGGED',
-        riskScore: riskAssessment?.riskScore || 50, metadata: { shipmentId: shipmentData.shipmentId }
-      });
+    const seller = db_ops.getById('sellers', 'seller_id', sellerId || req.body.sellerId);
+    if (!seller) {
+      return res.status(404).json({ success: false, error: 'Seller not found' });
     }
 
-    res.status(201).json({
+    const shipmentData = req.body.shipmentId ? req.body : generateShipment(sellerId || req.body.sellerId, transactionId);
+    const shipmentId = shipmentData.shipmentId;
+    const correlationId = `SHP-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+
+    shipmentData.status = 'EVALUATING';
+    shipmentData.riskAssessment = null;
+    db_ops.insert('shipments', 'shipment_id', shipmentId, shipmentData);
+
+    res.status(202).json({
       success: true,
-      data: shipmentData,
-      riskAssessment
+      correlationId,
+      shipmentId,
+      status: 'EVALUATING',
+      message: 'Agent evaluation started. Watch the Agent Flow panel for real-time progress.'
     });
+
+    console.log(`[ShippingService] Evaluating shipment: ${shipmentId} (correlation: ${correlationId})`);
+
+    const agent = getShippingRiskAgent();
+    agent.reason({
+      type: 'shipping_risk_evaluation',
+      shipmentId,
+      sellerId: sellerId || req.body.sellerId,
+      address: address || shipmentData.destination,
+      destination: shipmentData.destination,
+      carrier: carrier || shipmentData.carrier,
+      weight: weight || shipmentData.weight,
+      value: value || shipmentData.value,
+      category,
+      sellerData: seller.data,
+      submittedAt: new Date().toISOString()
+    }, {
+      entityId: shipmentId,
+      evaluationType: 'shipping_risk',
+      _correlationId: correlationId
+    })
+      .then(agentResult => {
+        const rec = agentResult.result?.recommendation || agentResult.result?.decision;
+        const decision = rec?.action || 'FLAG';
+        const riskScore = agentResult.result?.overallRisk?.score ?? 50;
+        const reasoning = agentResult.result?.reasoning || rec?.reason || 'Agent evaluation complete';
+        const agentId = agentResult.result?.agentId || 'SHIPPING_RISK';
+
+        let shipmentStatus;
+        if (decision === 'APPROVE') shipmentStatus = 'SHIPPED';
+        else if (decision === 'HOLD') shipmentStatus = 'ON_HOLD';
+        else shipmentStatus = 'FLAGGED';
+
+        db_ops.update('shipments', 'shipment_id', shipmentId, {
+          ...shipmentData,
+          status: shipmentStatus,
+          riskAssessment: { riskScore, decision, reasoning, agentId, evaluatedAt: new Date().toISOString() }
+        });
+
+        emitRiskEvent({
+          sellerId: sellerId || req.body.sellerId, domain: 'shipping',
+          eventType: decision === 'APPROVE' ? 'SHIPPING_APPROVED' : decision === 'HOLD' ? 'SHIPPING_HELD' : 'SHIPPING_FLAGGED',
+          riskScore, metadata: { decision, shipmentId }
+        });
+
+        if (decision === 'HOLD' || decision === 'FLAG') {
+          const caseId = 'CASE-' + randomUUID().substring(0, 8).toUpperCase();
+          db_ops.insert('cases', 'case_id', caseId, {
+            caseId, checkpoint: 'SHIPPING_RISK',
+            priority: riskScore >= 80 ? 'CRITICAL' : riskScore >= 60 ? 'HIGH' : 'MEDIUM',
+            status: 'OPEN', sellerId: sellerId || req.body.sellerId, entityId: shipmentId, entityType: 'SHIPMENT',
+            decision, riskScore, reasoning, agentId, createdAt: new Date().toISOString()
+          });
+        }
+
+        try {
+          import('../../../gateway/websocket/event-bus.js').then(({ getEventBus }) => {
+            getEventBus().publish('agent:decision:complete', {
+              correlationId, sellerId: sellerId || req.body.sellerId, entityId: shipmentId, decision, riskScore, reasoning,
+              timestamp: new Date().toISOString()
+            });
+          }).catch(() => {});
+        } catch {}
+
+        console.log(`[ShippingService] Completed: ${shipmentId} → ${decision} (risk: ${riskScore})`);
+      })
+      .catch(error => {
+        console.error(`[ShippingService] Agent error for ${shipmentId}:`, error.message);
+        db_ops.update('shipments', 'shipment_id', shipmentId, {
+          ...shipmentData,
+          status: 'FLAGGED',
+          riskAssessment: { riskScore: 50, decision: 'FLAG', reasoning: `Agent error — defaulting to FLAG: ${error.message}`, agentId: 'SHIPPING_RISK', evaluatedAt: new Date().toISOString() }
+        });
+        try {
+          import('../../../gateway/websocket/event-bus.js').then(({ getEventBus }) => {
+            getEventBus().publish('agent:decision:error', { correlationId, sellerId: sellerId || req.body.sellerId, entityId: shipmentId, error: error.message, timestamp: new Date().toISOString() });
+          }).catch(() => {});
+        } catch {}
+      });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

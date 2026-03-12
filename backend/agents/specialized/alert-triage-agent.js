@@ -16,6 +16,7 @@ export class AlertTriageAgent extends BaseAgent {
     super({
       name: 'Alert Triage Agent',
       role: 'ALERT_TRIAGE',
+      agentId: 'ALERT_TRIAGE',
       capabilities: [
         'alert_prioritization',
         'alert_grouping',

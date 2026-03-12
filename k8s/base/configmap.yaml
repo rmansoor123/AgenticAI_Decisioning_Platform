@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fraud-detection-config
+  namespace: fraud-detection
+data:
+  # Backend config
+  USE_LLM: "true"
+  LLM_PROVIDER: "ollama"
+  DB_BACKEND: "postgres"
+  MEMORY_BACKEND: "sqlite"
+  CACHE_BACKEND: "redis"
+  VECTOR_BACKEND: "pinecone"
+  GRAPH_BACKEND: "neo4j"
+  OBSERVABILITY_BACKEND: "langfuse"
+  ANALYTICS_BACKEND: "pinot"
+  TEMPORAL_BACKEND: "zep"
+
+  # Service URLs (internal K8s DNS)
+  POSTGRES_HOST: "postgres.fraud-detection.svc.cluster.local"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "fraud_detection"
+  REDIS_URL: "redis://redis.fraud-detection.svc.cluster.local:6379"
+  NEO4J_URI: "bolt://neo4j.fraud-detection.svc.cluster.local:7687"
+  OLLAMA_BASE_URL: "http://ollama.fraud-detection.svc.cluster.local:11434"
+  LANGFUSE_BASE_URL: "http://langfuse.fraud-detection.svc.cluster.local:3000"
+  ZEP_API_URL: "http://zep.fraud-detection.svc.cluster.local:8000"
+  QDRANT_URL: "http://qdrant.fraud-detection.svc.cluster.local:6333"
+  PINOT_BROKER_URL: "http://pinot.fraud-detection.svc.cluster.local:8099"
+  PINOT_CONTROLLER_URL: "http://pinot.fraud-detection.svc.cluster.local:9000"
+  PHOENIX_COLLECTOR_ENDPOINT: "http://phoenix.fraud-detection.svc.cluster.local:6006"

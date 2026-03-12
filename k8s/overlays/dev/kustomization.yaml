@@ -1,0 +1,54 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+# Dev: single replica, smaller resource limits
+patches:
+  - patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: backend
+      spec:
+        replicas: 1
+        template:
+          spec:
+            containers:
+              - name: backend
+                resources:
+                  requests:
+                    cpu: 100m
+                    memory: 256Mi
+                  limits:
+                    cpu: 500m
+                    memory: 1Gi
+  - patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: frontend
+      spec:
+        replicas: 1
+  - patch: |
+      apiVersion: autoscaling/v2
+      kind: HorizontalPodAutoscaler
+      metadata:
+        name: backend-hpa
+      spec:
+        minReplicas: 1
+        maxReplicas: 2
+
+# Override config for dev
+configMapGenerator:
+  - name: fraud-detection-config
+    behavior: merge
+    literals:
+      - USE_LLM=false
+      - DB_BACKEND=sqlite
+      - MEMORY_BACKEND=sqlite
+      - CACHE_BACKEND=memory
+      - GRAPH_BACKEND=memory
+      - OBSERVABILITY_BACKEND=sqlite
+      - ANALYTICS_BACKEND=sqlite

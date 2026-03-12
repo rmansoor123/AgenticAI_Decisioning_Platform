@@ -1,8 +1,10 @@
 /**
  * Golden Test Suite — Labeled regression test cases for agent decisions.
  *
- * 60 labeled cases across 4 agent types (Seller Onboarding, Fraud Investigation,
- * Alert Triage, Rule Optimization). Each case has:
+ * 116 labeled cases across 12 agent types (Seller Onboarding, Fraud Investigation,
+ * Alert Triage, Rule Optimization, Transaction Risk, Payment Risk, Compliance AML,
+ * Network Intelligence, Review Integrity, Behavioral Analytics, Buyer Trust,
+ * Policy Enforcement). Each case has:
  *   - input: simulated seller/transaction data
  *   - expectedDecision: the correct action (APPROVE/REJECT/REVIEW/BLOCK/MONITOR)
  *   - expectedMinRisk / expectedMaxRisk: acceptable risk score range
@@ -1130,6 +1132,1027 @@ const GOLDEN_CASES = [
     expectedDecision: 'DISABLE',
     expectedMinRisk: 0,
     expectedMaxRisk: 55
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // TRANSACTION RISK — 7 cases (APPROVE / CHALLENGE / BLOCK)
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    id: 'TR-001',
+    agent: 'TRANSACTION_RISK',
+    description: 'Normal purchase — returning customer, domestic, moderate amount',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      transactionId: 'TXN-GOLDEN01',
+      amount: 149.99,
+      currency: 'USD',
+      buyerHistory: { previousOrders: 12, accountAgeDays: 450 },
+      deviceFingerprint: 'DEV-STABLE-001',
+      ipCountry: 'US',
+      shippingCountry: 'US'
+    },
+    expectedDecision: 'APPROVE',
+    expectedMinRisk: 5,
+    expectedMaxRisk: 25
+  },
+  {
+    id: 'TR-002',
+    agent: 'TRANSACTION_RISK',
+    description: 'Low-value repeat buyer — clean history',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      transactionId: 'TXN-GOLDEN02',
+      amount: 24.99,
+      currency: 'USD',
+      buyerHistory: { previousOrders: 50, accountAgeDays: 730 },
+      deviceFingerprint: 'DEV-STABLE-002',
+      ipCountry: 'US',
+      shippingCountry: 'US'
+    },
+    expectedDecision: 'APPROVE',
+    expectedMinRisk: 0,
+    expectedMaxRisk: 15
+  },
+  {
+    id: 'TR-003',
+    agent: 'TRANSACTION_RISK',
+    description: 'New buyer, moderate amount, cross-border',
+    input: {
+      sellerId: 'SLR-GOLDEN02',
+      transactionId: 'TXN-GOLDEN03',
+      amount: 350.00,
+      currency: 'USD',
+      buyerHistory: { previousOrders: 1, accountAgeDays: 10 },
+      deviceFingerprint: 'DEV-NEW-001',
+      ipCountry: 'NG',
+      shippingCountry: 'US'
+    },
+    expectedDecision: 'CHALLENGE',
+    expectedMinRisk: 35,
+    expectedMaxRisk: 55
+  },
+  {
+    id: 'TR-004',
+    agent: 'TRANSACTION_RISK',
+    description: 'Velocity spike — 5 transactions in 10 minutes',
+    input: {
+      sellerId: 'SLR-GOLDEN03',
+      transactionId: 'TXN-GOLDEN04',
+      amount: 200.00,
+      currency: 'USD',
+      buyerHistory: { previousOrders: 3, accountAgeDays: 30 },
+      deviceFingerprint: 'DEV-BURST-001',
+      ipCountry: 'US',
+      shippingCountry: 'US',
+      riskSignals: ['VELOCITY_SPIKE', 'RAPID_FIRE']
+    },
+    expectedDecision: 'CHALLENGE',
+    expectedMinRisk: 40,
+    expectedMaxRisk: 55
+  },
+  {
+    id: 'TR-005',
+    agent: 'TRANSACTION_RISK',
+    description: 'High-value, new device, IP mismatch — likely stolen card',
+    input: {
+      sellerId: 'SLR-GOLDEN04',
+      transactionId: 'TXN-GOLDEN05',
+      amount: 4999.99,
+      currency: 'USD',
+      buyerHistory: { previousOrders: 0, accountAgeDays: 1 },
+      deviceFingerprint: 'DEV-UNKNOWN-001',
+      ipCountry: 'RU',
+      shippingCountry: 'US',
+      riskSignals: ['HIGH_AMOUNT', 'NEW_DEVICE', 'IP_MISMATCH']
+    },
+    expectedDecision: 'BLOCK',
+    expectedMinRisk: 75,
+    expectedMaxRisk: 95
+  },
+  {
+    id: 'TR-006',
+    agent: 'TRANSACTION_RISK',
+    description: 'Card testing pattern — $1 charge from new account',
+    input: {
+      sellerId: 'SLR-GOLDEN05',
+      transactionId: 'TXN-GOLDEN06',
+      amount: 1.00,
+      currency: 'USD',
+      buyerHistory: { previousOrders: 0, accountAgeDays: 0 },
+      deviceFingerprint: 'DEV-BOT-001',
+      ipCountry: 'US',
+      shippingCountry: 'US',
+      riskSignals: ['CARD_TESTING', 'NEW_ACCOUNT', 'VELOCITY_SPIKE']
+    },
+    expectedDecision: 'BLOCK',
+    expectedMinRisk: 70,
+    expectedMaxRisk: 95
+  },
+  {
+    id: 'TR-007',
+    agent: 'TRANSACTION_RISK',
+    description: 'Edge: established buyer, large amount, minor geo flag',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      transactionId: 'TXN-GOLDEN07',
+      amount: 1200.00,
+      currency: 'USD',
+      buyerHistory: { previousOrders: 25, accountAgeDays: 365 },
+      deviceFingerprint: 'DEV-STABLE-001',
+      ipCountry: 'CA',
+      shippingCountry: 'US',
+      riskSignals: ['CROSS_BORDER']
+    },
+    expectedDecision: 'CHALLENGE',
+    expectedMinRisk: 40,
+    expectedMaxRisk: 60
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // PAYMENT RISK — 7 cases (APPROVE / CHALLENGE / BLOCK)
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    id: 'PR-001',
+    agent: 'PAYMENT_RISK',
+    description: 'Normal credit card — trusted BIN, domestic billing',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      paymentId: 'PAY-GOLDEN01',
+      amount: 89.99,
+      cardBin: '411111',
+      paymentType: 'credit',
+      currency: 'USD',
+      billingCountry: 'US',
+      deviceFingerprint: 'DEV-STABLE-001'
+    },
+    expectedDecision: 'APPROVE',
+    expectedMinRisk: 5,
+    expectedMaxRisk: 20
+  },
+  {
+    id: 'PR-002',
+    agent: 'PAYMENT_RISK',
+    description: 'Debit card, small amount, repeat buyer',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      paymentId: 'PAY-GOLDEN02',
+      amount: 15.00,
+      cardBin: '520000',
+      paymentType: 'debit',
+      currency: 'USD',
+      billingCountry: 'US',
+      deviceFingerprint: 'DEV-STABLE-002'
+    },
+    expectedDecision: 'APPROVE',
+    expectedMinRisk: 0,
+    expectedMaxRisk: 15
+  },
+  {
+    id: 'PR-003',
+    agent: 'PAYMENT_RISK',
+    description: 'Prepaid card, moderate amount, new device',
+    input: {
+      sellerId: 'SLR-GOLDEN02',
+      paymentId: 'PAY-GOLDEN03',
+      amount: 450.00,
+      cardBin: '400000',
+      paymentType: 'prepaid',
+      currency: 'USD',
+      billingCountry: 'US',
+      deviceFingerprint: 'DEV-NEW-002',
+      riskSignals: ['PREPAID_CARD', 'NEW_DEVICE']
+    },
+    expectedDecision: 'CHALLENGE',
+    expectedMinRisk: 35,
+    expectedMaxRisk: 55
+  },
+  {
+    id: 'PR-004',
+    agent: 'PAYMENT_RISK',
+    description: 'Cross-border billing mismatch, high amount',
+    input: {
+      sellerId: 'SLR-GOLDEN03',
+      paymentId: 'PAY-GOLDEN04',
+      amount: 2500.00,
+      cardBin: '370000',
+      paymentType: 'credit',
+      currency: 'USD',
+      billingCountry: 'VN',
+      deviceFingerprint: 'DEV-UNKNOWN-002',
+      riskSignals: ['BILLING_MISMATCH', 'HIGH_AMOUNT']
+    },
+    expectedDecision: 'CHALLENGE',
+    expectedMinRisk: 40,
+    expectedMaxRisk: 55
+  },
+  {
+    id: 'PR-005',
+    agent: 'PAYMENT_RISK',
+    description: 'BIN attack — rapid sequential BINs from same device',
+    input: {
+      sellerId: 'SLR-GOLDEN04',
+      paymentId: 'PAY-GOLDEN05',
+      amount: 1.00,
+      cardBin: '601100',
+      paymentType: 'credit',
+      currency: 'USD',
+      billingCountry: 'US',
+      deviceFingerprint: 'DEV-BOT-002',
+      riskSignals: ['BIN_ATTACK', 'CARD_TESTING', 'VELOCITY_SPIKE']
+    },
+    expectedDecision: 'BLOCK',
+    expectedMinRisk: 80,
+    expectedMaxRisk: 95
+  },
+  {
+    id: 'PR-006',
+    agent: 'PAYMENT_RISK',
+    description: 'Stolen card indicators — AVS fail, CVV fail',
+    input: {
+      sellerId: 'SLR-GOLDEN05',
+      paymentId: 'PAY-GOLDEN06',
+      amount: 3200.00,
+      cardBin: '411111',
+      paymentType: 'credit',
+      currency: 'USD',
+      billingCountry: 'US',
+      deviceFingerprint: 'DEV-UNKNOWN-003',
+      riskSignals: ['AVS_FAIL', 'CVV_FAIL', 'HIGH_AMOUNT', 'NEW_DEVICE']
+    },
+    expectedDecision: 'BLOCK',
+    expectedMinRisk: 75,
+    expectedMaxRisk: 95
+  },
+  {
+    id: 'PR-007',
+    agent: 'PAYMENT_RISK',
+    description: 'Edge: high amount but long-standing card, minor flag',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      paymentId: 'PAY-GOLDEN07',
+      amount: 1800.00,
+      cardBin: '411111',
+      paymentType: 'credit',
+      currency: 'EUR',
+      billingCountry: 'DE',
+      deviceFingerprint: 'DEV-STABLE-001',
+      riskSignals: ['CROSS_BORDER']
+    },
+    expectedDecision: 'CHALLENGE',
+    expectedMinRisk: 40,
+    expectedMaxRisk: 60
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // COMPLIANCE AML — 7 cases (APPROVE / REVIEW / BLOCK)
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    id: 'CA-001',
+    agent: 'COMPLIANCE_AML',
+    description: 'Standard business, low volume, no flags',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      checkType: 'standard',
+      transactionVolume: 25000,
+      linkedAccounts: 1,
+      jurisdiction: 'US',
+      cryptoActivity: false
+    },
+    expectedDecision: 'APPROVE',
+    expectedMinRisk: 5,
+    expectedMaxRisk: 20
+  },
+  {
+    id: 'CA-002',
+    agent: 'COMPLIANCE_AML',
+    description: 'Low-volume seller, clean jurisdiction',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      checkType: 'periodic',
+      transactionVolume: 5000,
+      linkedAccounts: 0,
+      jurisdiction: 'CA',
+      cryptoActivity: false
+    },
+    expectedDecision: 'APPROVE',
+    expectedMinRisk: 0,
+    expectedMaxRisk: 15
+  },
+  {
+    id: 'CA-003',
+    agent: 'COMPLIANCE_AML',
+    description: 'High volume with crypto activity, needs review',
+    input: {
+      sellerId: 'SLR-GOLDEN02',
+      checkType: 'enhanced',
+      transactionVolume: 500000,
+      linkedAccounts: 5,
+      jurisdiction: 'US',
+      cryptoActivity: true,
+      riskSignals: ['HIGH_VOLUME', 'CRYPTO_ACTIVITY']
+    },
+    expectedDecision: 'REVIEW',
+    expectedMinRisk: 35,
+    expectedMaxRisk: 55
+  },
+  {
+    id: 'CA-004',
+    agent: 'COMPLIANCE_AML',
+    description: 'Structuring pattern — many just-under-threshold transactions',
+    input: {
+      sellerId: 'SLR-GOLDEN03',
+      checkType: 'triggered',
+      transactionVolume: 180000,
+      linkedAccounts: 3,
+      jurisdiction: 'US',
+      cryptoActivity: false,
+      riskSignals: ['STRUCTURING_PATTERN', 'THRESHOLD_AVOIDANCE']
+    },
+    expectedDecision: 'REVIEW',
+    expectedMinRisk: 40,
+    expectedMaxRisk: 55
+  },
+  {
+    id: 'CA-005',
+    agent: 'COMPLIANCE_AML',
+    description: 'Sanctions-listed jurisdiction, high volume',
+    input: {
+      sellerId: 'SLR-GOLDEN04',
+      checkType: 'enhanced',
+      transactionVolume: 1000000,
+      linkedAccounts: 8,
+      jurisdiction: 'IR',
+      cryptoActivity: true,
+      riskSignals: ['SANCTIONED_JURISDICTION', 'HIGH_VOLUME', 'CRYPTO_ACTIVITY', 'SHELL_COMPANY']
+    },
+    expectedDecision: 'BLOCK',
+    expectedMinRisk: 80,
+    expectedMaxRisk: 95
+  },
+  {
+    id: 'CA-006',
+    agent: 'COMPLIANCE_AML',
+    description: 'Money laundering indicators — layered transfers',
+    input: {
+      sellerId: 'SLR-GOLDEN05',
+      checkType: 'triggered',
+      transactionVolume: 750000,
+      linkedAccounts: 12,
+      jurisdiction: 'VG',
+      cryptoActivity: true,
+      riskSignals: ['LAYERING', 'MULTIPLE_JURISDICTIONS', 'SHELL_COMPANY']
+    },
+    expectedDecision: 'BLOCK',
+    expectedMinRisk: 70,
+    expectedMaxRisk: 95
+  },
+  {
+    id: 'CA-007',
+    agent: 'COMPLIANCE_AML',
+    description: 'Edge: moderate volume, single linked account, crypto',
+    input: {
+      sellerId: 'SLR-GOLDEN02',
+      checkType: 'standard',
+      transactionVolume: 100000,
+      linkedAccounts: 1,
+      jurisdiction: 'GB',
+      cryptoActivity: true,
+      riskSignals: ['CRYPTO_ACTIVITY']
+    },
+    expectedDecision: 'REVIEW',
+    expectedMinRisk: 40,
+    expectedMaxRisk: 60
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // NETWORK INTELLIGENCE — 7 cases (CLEAR / FLAG / BLOCK)
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    id: 'NI-001',
+    agent: 'NETWORK_INTELLIGENCE',
+    description: 'Isolated seller, no shared infrastructure',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      scanType: 'standard',
+      linkedSellers: [],
+      sharedInfrastructure: [],
+      deviceFingerprints: ['DEV-UNIQUE-001'],
+      bankAccounts: ['BA-UNIQUE-001']
+    },
+    expectedDecision: 'CLEAR',
+    expectedMinRisk: 0,
+    expectedMaxRisk: 15
+  },
+  {
+    id: 'NI-002',
+    agent: 'NETWORK_INTELLIGENCE',
+    description: 'Single connection to trusted seller',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      scanType: 'standard',
+      linkedSellers: ['SLR-TRUSTED-001'],
+      sharedInfrastructure: ['shared_warehouse'],
+      deviceFingerprints: ['DEV-UNIQUE-002'],
+      bankAccounts: ['BA-UNIQUE-002']
+    },
+    expectedDecision: 'CLEAR',
+    expectedMinRisk: 5,
+    expectedMaxRisk: 25
+  },
+  {
+    id: 'NI-003',
+    agent: 'NETWORK_INTELLIGENCE',
+    description: 'Shared device fingerprint with flagged seller',
+    input: {
+      sellerId: 'SLR-GOLDEN02',
+      scanType: 'triggered',
+      linkedSellers: ['SLR-FLAGGED-001'],
+      sharedInfrastructure: ['shared_ip_range'],
+      deviceFingerprints: ['DEV-SHARED-001', 'DEV-SHARED-002'],
+      bankAccounts: ['BA-SHARED-001'],
+      riskSignals: ['SHARED_DEVICE', 'FLAGGED_CONNECTION']
+    },
+    expectedDecision: 'FLAG',
+    expectedMinRisk: 35,
+    expectedMaxRisk: 55
+  },
+  {
+    id: 'NI-004',
+    agent: 'NETWORK_INTELLIGENCE',
+    description: 'Multiple shared bank accounts across sellers',
+    input: {
+      sellerId: 'SLR-GOLDEN03',
+      scanType: 'triggered',
+      linkedSellers: ['SLR-SUSPECT-001', 'SLR-SUSPECT-002'],
+      sharedInfrastructure: ['shared_ip', 'shared_hosting'],
+      deviceFingerprints: ['DEV-SHARED-003'],
+      bankAccounts: ['BA-SHARED-001', 'BA-SHARED-002'],
+      riskSignals: ['SHARED_BANK_ACCOUNTS', 'MULTI_SELLER_LINK']
+    },
+    expectedDecision: 'FLAG',
+    expectedMinRisk: 40,
+    expectedMaxRisk: 55
+  },
+  {
+    id: 'NI-005',
+    agent: 'NETWORK_INTELLIGENCE',
+    description: 'Fraud ring pattern — dense cluster of connected sellers',
+    input: {
+      sellerId: 'SLR-GOLDEN04',
+      scanType: 'deep',
+      linkedSellers: ['SLR-RING-001', 'SLR-RING-002', 'SLR-RING-003', 'SLR-RING-004'],
+      sharedInfrastructure: ['shared_ip', 'shared_bank', 'shared_device', 'shared_address'],
+      deviceFingerprints: ['DEV-RING-001'],
+      bankAccounts: ['BA-RING-001'],
+      riskSignals: ['FRAUD_RING', 'DENSE_CLUSTER', 'SHARED_INFRASTRUCTURE']
+    },
+    expectedDecision: 'BLOCK',
+    expectedMinRisk: 80,
+    expectedMaxRisk: 95
+  },
+  {
+    id: 'NI-006',
+    agent: 'NETWORK_INTELLIGENCE',
+    description: 'Mule network indicators — rapid account creation',
+    input: {
+      sellerId: 'SLR-GOLDEN05',
+      scanType: 'deep',
+      linkedSellers: ['SLR-MULE-001', 'SLR-MULE-002', 'SLR-MULE-003'],
+      sharedInfrastructure: ['shared_ip', 'shared_phone', 'shared_bank'],
+      deviceFingerprints: ['DEV-MULE-001', 'DEV-MULE-002'],
+      bankAccounts: ['BA-MULE-001'],
+      riskSignals: ['MULE_NETWORK', 'RAPID_CREATION', 'IDENTITY_REUSE']
+    },
+    expectedDecision: 'BLOCK',
+    expectedMinRisk: 75,
+    expectedMaxRisk: 95
+  },
+  {
+    id: 'NI-007',
+    agent: 'NETWORK_INTELLIGENCE',
+    description: 'Edge: shared warehouse only — common for legitimate sellers',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      scanType: 'standard',
+      linkedSellers: ['SLR-LEGIT-001', 'SLR-LEGIT-002'],
+      sharedInfrastructure: ['shared_warehouse'],
+      deviceFingerprints: ['DEV-UNIQUE-003'],
+      bankAccounts: ['BA-UNIQUE-003'],
+      riskSignals: ['SHARED_WAREHOUSE']
+    },
+    expectedDecision: 'FLAG',
+    expectedMinRisk: 40,
+    expectedMaxRisk: 60
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // REVIEW INTEGRITY — 7 cases (APPROVE / FLAG / REMOVE)
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    id: 'RI-001',
+    agent: 'REVIEW_INTEGRITY',
+    description: 'Genuine review — verified purchase, natural language',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      reviewId: 'RVW-GOLDEN01',
+      reviewerAccount: 'RVWR-TRUSTED-001',
+      rating: 4,
+      reviewText: 'Good quality, shipping was a bit slow but product works well.',
+      purchaseVerified: true,
+      reviewerHistory: { totalReviews: 15, accountAgeDays: 500 }
+    },
+    expectedDecision: 'APPROVE',
+    expectedMinRisk: 0,
+    expectedMaxRisk: 15
+  },
+  {
+    id: 'RI-002',
+    agent: 'REVIEW_INTEGRITY',
+    description: 'Verified purchase, detailed review, established reviewer',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      reviewId: 'RVW-GOLDEN02',
+      reviewerAccount: 'RVWR-TRUSTED-002',
+      rating: 5,
+      reviewText: 'Excellent product. Used it for 3 weeks, battery life is outstanding.',
+      purchaseVerified: true,
+      reviewerHistory: { totalReviews: 45, accountAgeDays: 900 }
+    },
+    expectedDecision: 'APPROVE',
+    expectedMinRisk: 0,
+    expectedMaxRisk: 10
+  },
+  {
+    id: 'RI-003',
+    agent: 'REVIEW_INTEGRITY',
+    description: 'Incentivized review — same-day account, generic text',
+    input: {
+      sellerId: 'SLR-GOLDEN02',
+      reviewId: 'RVW-GOLDEN03',
+      reviewerAccount: 'RVWR-NEW-001',
+      rating: 5,
+      reviewText: 'Great product! Highly recommend! Five stars!',
+      purchaseVerified: false,
+      reviewerHistory: { totalReviews: 1, accountAgeDays: 1 },
+      riskSignals: ['INCENTIVIZED', 'GENERIC_TEXT', 'NEW_ACCOUNT']
+    },
+    expectedDecision: 'FLAG',
+    expectedMinRisk: 35,
+    expectedMaxRisk: 55
+  },
+  {
+    id: 'RI-004',
+    agent: 'REVIEW_INTEGRITY',
+    description: 'Suspicious review burst — 20 five-star reviews in 1 hour',
+    input: {
+      sellerId: 'SLR-GOLDEN03',
+      reviewId: 'RVW-GOLDEN04',
+      reviewerAccount: 'RVWR-BURST-001',
+      rating: 5,
+      reviewText: 'Amazing product, best ever!',
+      purchaseVerified: false,
+      reviewerHistory: { totalReviews: 0, accountAgeDays: 0 },
+      riskSignals: ['REVIEW_BURST', 'FAKE_ACCOUNT', 'NO_PURCHASE']
+    },
+    expectedDecision: 'FLAG',
+    expectedMinRisk: 45,
+    expectedMaxRisk: 55
+  },
+  {
+    id: 'RI-005',
+    agent: 'REVIEW_INTEGRITY',
+    description: 'Review farm — identical text across multiple products',
+    input: {
+      sellerId: 'SLR-GOLDEN04',
+      reviewId: 'RVW-GOLDEN05',
+      reviewerAccount: 'RVWR-FARM-001',
+      rating: 5,
+      reviewText: 'Perfect item received quickly love it will buy again',
+      purchaseVerified: false,
+      reviewerHistory: { totalReviews: 200, accountAgeDays: 30 },
+      riskSignals: ['REVIEW_FARM', 'DUPLICATE_TEXT', 'SUSPICIOUS_VELOCITY', 'NO_PURCHASE']
+    },
+    expectedDecision: 'REMOVE',
+    expectedMinRisk: 75,
+    expectedMaxRisk: 95
+  },
+  {
+    id: 'RI-006',
+    agent: 'REVIEW_INTEGRITY',
+    description: 'Competitor sabotage — coordinated 1-star reviews',
+    input: {
+      sellerId: 'SLR-GOLDEN05',
+      reviewId: 'RVW-GOLDEN06',
+      reviewerAccount: 'RVWR-SABO-001',
+      rating: 1,
+      reviewText: 'Terrible product do not buy scam',
+      purchaseVerified: false,
+      reviewerHistory: { totalReviews: 50, accountAgeDays: 10 },
+      riskSignals: ['COORDINATED_ATTACK', 'NO_PURCHASE', 'SUSPICIOUS_PATTERN']
+    },
+    expectedDecision: 'REMOVE',
+    expectedMinRisk: 70,
+    expectedMaxRisk: 95
+  },
+  {
+    id: 'RI-007',
+    agent: 'REVIEW_INTEGRITY',
+    description: 'Edge: unverified purchase but detailed review from old account',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      reviewId: 'RVW-GOLDEN07',
+      reviewerAccount: 'RVWR-OLD-001',
+      rating: 3,
+      reviewText: 'Decent product but overpriced. The material quality could be better for the price point.',
+      purchaseVerified: false,
+      reviewerHistory: { totalReviews: 30, accountAgeDays: 600 }
+    },
+    expectedDecision: 'FLAG',
+    expectedMinRisk: 40,
+    expectedMaxRisk: 60
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // BEHAVIORAL ANALYTICS — 7 cases (NORMAL / FLAG / CHALLENGE)
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    id: 'BA-001',
+    agent: 'BEHAVIORAL_ANALYTICS',
+    description: 'Normal browsing session — human-like patterns',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      sessionId: 'SESS-GOLDEN01',
+      clickRate: 2.3,
+      typingSpeed: 42,
+      browsingRatio: 0.65,
+      deviceFingerprint: 'DEV-STABLE-001',
+      actionTimestamps: [1000, 3500, 5200, 8100, 12000]
+    },
+    expectedDecision: 'NORMAL',
+    expectedMinRisk: 0,
+    expectedMaxRisk: 15
+  },
+  {
+    id: 'BA-002',
+    agent: 'BEHAVIORAL_ANALYTICS',
+    description: 'Slow browsing, long dwell time — normal cautious user',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      sessionId: 'SESS-GOLDEN02',
+      clickRate: 0.8,
+      typingSpeed: 25,
+      browsingRatio: 0.85,
+      deviceFingerprint: 'DEV-STABLE-002',
+      actionTimestamps: [2000, 8000, 15000, 25000]
+    },
+    expectedDecision: 'NORMAL',
+    expectedMinRisk: 0,
+    expectedMaxRisk: 20
+  },
+  {
+    id: 'BA-003',
+    agent: 'BEHAVIORAL_ANALYTICS',
+    description: 'Slightly elevated click rate, new device',
+    input: {
+      sellerId: 'SLR-GOLDEN02',
+      sessionId: 'SESS-GOLDEN03',
+      clickRate: 8.5,
+      typingSpeed: 80,
+      browsingRatio: 0.3,
+      deviceFingerprint: 'DEV-NEW-003',
+      actionTimestamps: [100, 200, 350, 500, 700, 900, 1100, 1300],
+      riskSignals: ['ELEVATED_CLICK_RATE', 'NEW_DEVICE']
+    },
+    expectedDecision: 'FLAG',
+    expectedMinRisk: 35,
+    expectedMaxRisk: 55
+  },
+  {
+    id: 'BA-004',
+    agent: 'BEHAVIORAL_ANALYTICS',
+    description: 'Off-hours activity with unusual navigation',
+    input: {
+      sellerId: 'SLR-GOLDEN03',
+      sessionId: 'SESS-GOLDEN04',
+      clickRate: 5.0,
+      typingSpeed: 60,
+      browsingRatio: 0.15,
+      deviceFingerprint: 'DEV-NEW-004',
+      actionTimestamps: [50, 150, 250, 350, 450, 550],
+      riskSignals: ['OFF_HOURS', 'LOW_BROWSING_RATIO']
+    },
+    expectedDecision: 'FLAG',
+    expectedMinRisk: 40,
+    expectedMaxRisk: 55
+  },
+  {
+    id: 'BA-005',
+    agent: 'BEHAVIORAL_ANALYTICS',
+    description: 'Bot pattern — perfect timing, zero variance',
+    input: {
+      sellerId: 'SLR-GOLDEN04',
+      sessionId: 'SESS-GOLDEN05',
+      clickRate: 50.0,
+      typingSpeed: 200,
+      browsingRatio: 0.01,
+      deviceFingerprint: 'DEV-BOT-003',
+      actionTimestamps: [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000],
+      riskSignals: ['BOT_PATTERN', 'ZERO_VARIANCE', 'IMPOSSIBLE_SPEED']
+    },
+    expectedDecision: 'CHALLENGE',
+    expectedMinRisk: 80,
+    expectedMaxRisk: 95
+  },
+  {
+    id: 'BA-006',
+    agent: 'BEHAVIORAL_ANALYTICS',
+    description: 'Scripted automation — headless browser detected',
+    input: {
+      sellerId: 'SLR-GOLDEN05',
+      sessionId: 'SESS-GOLDEN06',
+      clickRate: 30.0,
+      typingSpeed: 150,
+      browsingRatio: 0.0,
+      deviceFingerprint: 'DEV-HEADLESS-001',
+      actionTimestamps: [50, 100, 150, 200, 250, 300, 350, 400],
+      riskSignals: ['HEADLESS_BROWSER', 'AUTOMATION', 'NO_BROWSING']
+    },
+    expectedDecision: 'CHALLENGE',
+    expectedMinRisk: 75,
+    expectedMaxRisk: 95
+  },
+  {
+    id: 'BA-007',
+    agent: 'BEHAVIORAL_ANALYTICS',
+    description: 'Edge: fast typer but otherwise normal — power user',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      sessionId: 'SESS-GOLDEN07',
+      clickRate: 4.0,
+      typingSpeed: 95,
+      browsingRatio: 0.45,
+      deviceFingerprint: 'DEV-STABLE-001',
+      actionTimestamps: [500, 1200, 2100, 3500, 5000, 6800]
+    },
+    expectedDecision: 'FLAG',
+    expectedMinRisk: 40,
+    expectedMaxRisk: 60
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // BUYER TRUST — 7 cases (APPROVE / FLAG / RESTRICT)
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    id: 'BT-001',
+    agent: 'BUYER_TRUST',
+    description: 'Trusted buyer — long history, no chargebacks',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      buyerId: 'BUY-GOLDEN01',
+      purchaseAmount: 120.00,
+      isFirstPurchase: false,
+      chargebackHistory: 0,
+      disputeCount: 0,
+      accountAgeDays: 730,
+      deviceFingerprint: 'DEV-STABLE-001'
+    },
+    expectedDecision: 'APPROVE',
+    expectedMinRisk: 0,
+    expectedMaxRisk: 15
+  },
+  {
+    id: 'BT-002',
+    agent: 'BUYER_TRUST',
+    description: 'Repeat buyer, small purchase, clean record',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      buyerId: 'BUY-GOLDEN02',
+      purchaseAmount: 29.99,
+      isFirstPurchase: false,
+      chargebackHistory: 0,
+      disputeCount: 0,
+      accountAgeDays: 365,
+      deviceFingerprint: 'DEV-STABLE-002'
+    },
+    expectedDecision: 'APPROVE',
+    expectedMinRisk: 0,
+    expectedMaxRisk: 15
+  },
+  {
+    id: 'BT-003',
+    agent: 'BUYER_TRUST',
+    description: 'First-time buyer, moderate amount',
+    input: {
+      sellerId: 'SLR-GOLDEN02',
+      buyerId: 'BUY-GOLDEN03',
+      purchaseAmount: 350.00,
+      isFirstPurchase: true,
+      chargebackHistory: 0,
+      disputeCount: 0,
+      accountAgeDays: 7,
+      deviceFingerprint: 'DEV-NEW-005',
+      riskSignals: ['FIRST_PURCHASE', 'NEW_ACCOUNT']
+    },
+    expectedDecision: 'FLAG',
+    expectedMinRisk: 35,
+    expectedMaxRisk: 55
+  },
+  {
+    id: 'BT-004',
+    agent: 'BUYER_TRUST',
+    description: 'Buyer with elevated dispute history',
+    input: {
+      sellerId: 'SLR-GOLDEN03',
+      buyerId: 'BUY-GOLDEN04',
+      purchaseAmount: 200.00,
+      isFirstPurchase: false,
+      chargebackHistory: 2,
+      disputeCount: 5,
+      accountAgeDays: 180,
+      deviceFingerprint: 'DEV-KNOWN-001',
+      riskSignals: ['HIGH_DISPUTE_RATE', 'CHARGEBACK_HISTORY']
+    },
+    expectedDecision: 'FLAG',
+    expectedMinRisk: 40,
+    expectedMaxRisk: 55
+  },
+  {
+    id: 'BT-005',
+    agent: 'BUYER_TRUST',
+    description: 'Serial chargeback abuser — many chargebacks filed',
+    input: {
+      sellerId: 'SLR-GOLDEN04',
+      buyerId: 'BUY-GOLDEN05',
+      purchaseAmount: 500.00,
+      isFirstPurchase: false,
+      chargebackHistory: 8,
+      disputeCount: 15,
+      accountAgeDays: 90,
+      deviceFingerprint: 'DEV-ABUSER-001',
+      riskSignals: ['SERIAL_CHARGEBACK', 'HIGH_DISPUTE_RATE', 'ABUSE_PATTERN']
+    },
+    expectedDecision: 'RESTRICT',
+    expectedMinRisk: 75,
+    expectedMaxRisk: 95
+  },
+  {
+    id: 'BT-006',
+    agent: 'BUYER_TRUST',
+    description: 'Friendly fraud pattern — chargebacks after delivery confirmed',
+    input: {
+      sellerId: 'SLR-GOLDEN05',
+      buyerId: 'BUY-GOLDEN06',
+      purchaseAmount: 800.00,
+      isFirstPurchase: false,
+      chargebackHistory: 5,
+      disputeCount: 8,
+      accountAgeDays: 200,
+      deviceFingerprint: 'DEV-FRAUD-001',
+      riskSignals: ['FRIENDLY_FRAUD', 'POST_DELIVERY_CHARGEBACK', 'PATTERN_ABUSE']
+    },
+    expectedDecision: 'RESTRICT',
+    expectedMinRisk: 70,
+    expectedMaxRisk: 95
+  },
+  {
+    id: 'BT-007',
+    agent: 'BUYER_TRUST',
+    description: 'Edge: first purchase, high amount, but trusted device',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      buyerId: 'BUY-GOLDEN07',
+      purchaseAmount: 999.00,
+      isFirstPurchase: true,
+      chargebackHistory: 0,
+      disputeCount: 0,
+      accountAgeDays: 60,
+      deviceFingerprint: 'DEV-STABLE-001',
+      riskSignals: ['FIRST_PURCHASE', 'HIGH_AMOUNT']
+    },
+    expectedDecision: 'FLAG',
+    expectedMinRisk: 40,
+    expectedMaxRisk: 60
+  },
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // POLICY ENFORCEMENT — 7 cases (CLEAR / WARN / RESTRICT)
+  // ──────────────────────────────────────────────────────────────────────────
+  {
+    id: 'PE-001',
+    agent: 'POLICY_ENFORCEMENT',
+    description: 'Clean seller — no violations, high compliance',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      violationType: 'none',
+      sellerMetrics: { salesCount: 500, avgRating: 4.8, responseTime: 2 },
+      linkedAccounts: [],
+      complianceScore: 95,
+      priorViolations: 0
+    },
+    expectedDecision: 'CLEAR',
+    expectedMinRisk: 0,
+    expectedMaxRisk: 10
+  },
+  {
+    id: 'PE-002',
+    agent: 'POLICY_ENFORCEMENT',
+    description: 'Good seller, minor metric dip',
+    input: {
+      sellerId: 'SLR-GOLDEN01',
+      violationType: 'none',
+      sellerMetrics: { salesCount: 200, avgRating: 4.2, responseTime: 6 },
+      linkedAccounts: [],
+      complianceScore: 80,
+      priorViolations: 0
+    },
+    expectedDecision: 'CLEAR',
+    expectedMinRisk: 5,
+    expectedMaxRisk: 25
+  },
+  {
+    id: 'PE-003',
+    agent: 'POLICY_ENFORCEMENT',
+    description: 'First minor policy violation — warning appropriate',
+    input: {
+      sellerId: 'SLR-GOLDEN02',
+      violationType: 'late_shipping',
+      sellerMetrics: { salesCount: 100, avgRating: 3.8, responseTime: 12 },
+      linkedAccounts: [],
+      complianceScore: 65,
+      priorViolations: 1,
+      riskSignals: ['LATE_SHIPPING', 'DECLINING_METRICS']
+    },
+    expectedDecision: 'WARN',
+    expectedMinRisk: 35,
+    expectedMaxRisk: 55
+  },
+  {
+    id: 'PE-004',
+    agent: 'POLICY_ENFORCEMENT',
+    description: 'Repeated policy violations — metrics gaming detected',
+    input: {
+      sellerId: 'SLR-GOLDEN03',
+      violationType: 'metrics_gaming',
+      sellerMetrics: { salesCount: 50, avgRating: 4.9, responseTime: 1 },
+      linkedAccounts: ['SLR-SHILL-001'],
+      complianceScore: 50,
+      priorViolations: 3,
+      riskSignals: ['METRICS_GAMING', 'SHILL_ACTIVITY', 'REPEAT_VIOLATION']
+    },
+    expectedDecision: 'WARN',
+    expectedMinRisk: 45,
+    expectedMaxRisk: 55
+  },
+  {
+    id: 'PE-005',
+    agent: 'POLICY_ENFORCEMENT',
+    description: 'Severe policy breach — counterfeit goods reported',
+    input: {
+      sellerId: 'SLR-GOLDEN04',
+      violationType: 'counterfeit_goods',
+      sellerMetrics: { salesCount: 300, avgRating: 3.2, responseTime: 24 },
+      linkedAccounts: [],
+      complianceScore: 20,
+      priorViolations: 5,
+      riskSignals: ['COUNTERFEIT', 'BRAND_INFRINGEMENT', 'REPEAT_OFFENDER']
+    },
+    expectedDecision: 'RESTRICT',
+    expectedMinRisk: 75,
+    expectedMaxRisk: 95
+  },
+  {
+    id: 'PE-006',
+    agent: 'POLICY_ENFORCEMENT',
+    description: 'Prohibited items + search manipulation',
+    input: {
+      sellerId: 'SLR-GOLDEN05',
+      violationType: 'prohibited_items',
+      sellerMetrics: { salesCount: 80, avgRating: 3.0, responseTime: 48 },
+      linkedAccounts: ['SLR-FRONT-001', 'SLR-FRONT-002'],
+      complianceScore: 10,
+      priorViolations: 7,
+      riskSignals: ['PROHIBITED_ITEMS', 'SEARCH_MANIPULATION', 'LINKED_ACCOUNTS', 'SERIAL_VIOLATOR']
+    },
+    expectedDecision: 'RESTRICT',
+    expectedMinRisk: 80,
+    expectedMaxRisk: 95
+  },
+  {
+    id: 'PE-007',
+    agent: 'POLICY_ENFORCEMENT',
+    description: 'Edge: low compliance score but no prior violations',
+    input: {
+      sellerId: 'SLR-GOLDEN02',
+      violationType: 'slow_response',
+      sellerMetrics: { salesCount: 30, avgRating: 3.5, responseTime: 18 },
+      linkedAccounts: [],
+      complianceScore: 55,
+      priorViolations: 0,
+      riskSignals: ['SLOW_RESPONSE', 'LOW_COMPLIANCE']
+    },
+    expectedDecision: 'WARN',
+    expectedMinRisk: 40,
+    expectedMaxRisk: 60
   }
 ];
 
@@ -1149,7 +2172,7 @@ const GOLDEN_CASES = [
  *    In hardcoded fallback mode, the generic BaseAgent can't produce
  *    domain-specific decisions, so we record baseline results instead.
  *
- * The 60 labeled cases serve as the ground truth dataset for:
+ * The 116 labeled cases serve as the ground truth dataset for:
  *   - Regression testing when prompts or logic change
  *   - Accuracy benchmarking when LLM is enabled
  *   - Training data for confidence calibration
@@ -1166,22 +2189,30 @@ async function runTests() {
   }
 
   console.log('Golden Test Suite — Labeled Regression Tests');
-  console.log(`${GOLDEN_CASES.length} labeled cases across 4 agent types\n`);
+  console.log(`${GOLDEN_CASES.length} labeled cases across 12 agent types\n`);
 
   // ── Part 1: Dataset Integrity ──
   console.log('Part 1: Dataset integrity');
   {
-    assert(GOLDEN_CASES.length === 60, `60 golden cases (got ${GOLDEN_CASES.length})`);
+    assert(GOLDEN_CASES.length >= 100, `100+ golden cases (got ${GOLDEN_CASES.length})`);
 
     const ids = new Set(GOLDEN_CASES.map(c => c.id));
     assert(ids.size === GOLDEN_CASES.length, 'all IDs are unique');
 
     const agents = new Set(GOLDEN_CASES.map(c => c.agent));
-    assert(agents.size === 4, '4 agent types covered');
+    assert(agents.size === 12, `12 agent types covered (got ${agents.size})`);
     assert(agents.has('SELLER_ONBOARDING'), 'has SELLER_ONBOARDING cases');
     assert(agents.has('FRAUD_INVESTIGATOR'), 'has FRAUD_INVESTIGATOR cases');
     assert(agents.has('ALERT_TRIAGE'), 'has ALERT_TRIAGE cases');
     assert(agents.has('RULE_OPTIMIZER'), 'has RULE_OPTIMIZER cases');
+    assert(agents.has('TRANSACTION_RISK'), 'has TRANSACTION_RISK cases');
+    assert(agents.has('PAYMENT_RISK'), 'has PAYMENT_RISK cases');
+    assert(agents.has('COMPLIANCE_AML'), 'has COMPLIANCE_AML cases');
+    assert(agents.has('NETWORK_INTELLIGENCE'), 'has NETWORK_INTELLIGENCE cases');
+    assert(agents.has('REVIEW_INTEGRITY'), 'has REVIEW_INTEGRITY cases');
+    assert(agents.has('BEHAVIORAL_ANALYTICS'), 'has BEHAVIORAL_ANALYTICS cases');
+    assert(agents.has('BUYER_TRUST'), 'has BUYER_TRUST cases');
+    assert(agents.has('POLICY_ENFORCEMENT'), 'has POLICY_ENFORCEMENT cases');
 
     for (const tc of GOLDEN_CASES) {
       assert(tc.id && tc.agent && tc.description && tc.input, `${tc.id} has required fields`);
@@ -1190,10 +2221,16 @@ async function runTests() {
       assert(tc.expectedMinRisk <= tc.expectedMaxRisk, `${tc.id} min <= max risk`);
     }
 
-    // Check distribution per agent
+    // Check distribution per agent — original 4 have 15 cases, new 8 have 7 cases
+    const expectedCounts = {
+      SELLER_ONBOARDING: 15, FRAUD_INVESTIGATOR: 15, ALERT_TRIAGE: 15, RULE_OPTIMIZER: 15,
+      TRANSACTION_RISK: 7, PAYMENT_RISK: 7, COMPLIANCE_AML: 7, NETWORK_INTELLIGENCE: 7,
+      REVIEW_INTEGRITY: 7, BEHAVIORAL_ANALYTICS: 7, BUYER_TRUST: 7, POLICY_ENFORCEMENT: 7
+    };
     for (const agentType of agents) {
       const count = GOLDEN_CASES.filter(c => c.agent === agentType).length;
-      assert(count === 15, `${agentType} has 15 cases (got ${count})`);
+      const expected = expectedCounts[agentType] || 7;
+      assert(count === expected, `${agentType} has ${expected} cases (got ${count})`);
     }
 
     // Check decision distribution — each agent type should have diverse expected decisions
@@ -1288,7 +2325,7 @@ async function runTests() {
     const errors = baseline.filter(b => b.actualDecision === 'ERROR').length;
 
     assert(errors === 0, `no errors (got ${errors})`);
-    assert(totalCases === 60, `all 60 cases executed`);
+    assert(totalCases >= 100, `100+ cases executed (got ${totalCases})`);
 
     console.log(`\n  Decision accuracy: ${decisionMatches}/${totalCases} (${((decisionMatches/totalCases)*100).toFixed(1)}%)`);
     console.log(`  Risk score in range: ${riskMatches}/${riskEvaluated} evaluated`);

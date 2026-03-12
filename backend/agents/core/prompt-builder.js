@@ -11,7 +11,8 @@ const SECTION_TEMPLATES = {
   shortTermMemory: (content) => `<recent_context>\n${content}\n</recent_context>`,
   ragResults: (content) => `<historical_cases>\n${content}\n</historical_cases>`,
   longTermMemory: (content) => `<learned_patterns>\n${content}\n</learned_patterns>`,
-  domainContext: (content) => `<domain_context>\n${content}\n</domain_context>`
+  domainContext: (content) => `<domain_context>\n${content}\n</domain_context>`,
+  crossAgentContext: (content) => `<cross_agent_context>\n${content}\n</cross_agent_context>`
 };
 
 export class PromptBuilder {

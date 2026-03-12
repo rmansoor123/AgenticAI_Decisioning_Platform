@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pinot
+  namespace: fraud-detection
+  labels:
+    app: fraud-detection
+    component: pinot
+spec:
+  serviceName: pinot
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fraud-detection
+      component: pinot
+  template:
+    metadata:
+      labels:
+        app: fraud-detection
+        component: pinot
+    spec:
+      containers:
+        - name: pinot
+          image: apachepinot/pinot:latest
+          command: ["QuickStart", "-type", "batch"]
+          ports:
+            - containerPort: 9000
+              name: controller
+            - containerPort: 8099
+              name: broker
+          volumeMounts:
+            - name: pinotdata
+              mountPath: /opt/pinot/data
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+  volumeClaimTemplates:
+    - metadata:
+        name: pinotdata
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pinot
+  namespace: fraud-detection
+spec:
+  selector:
+    app: fraud-detection
+    component: pinot
+  ports:
+    - port: 9000
+      targetPort: 9000
+      name: controller
+    - port: 8099
+      targetPort: 8099
+      name: broker
+  clusterIP: None

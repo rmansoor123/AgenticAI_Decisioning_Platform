@@ -24,6 +24,7 @@ export class FraudInvestigationAgent extends BaseAgent {
     super({
       name: 'Fraud Investigation Agent',
       role: 'FRAUD_INVESTIGATOR',
+      agentId: 'FRAUD_INVESTIGATOR',
       capabilities: [
         'transaction_analysis',
         'pattern_detection',

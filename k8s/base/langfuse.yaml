@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse
+  namespace: fraud-detection
+  labels:
+    app: fraud-detection
+    component: langfuse
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fraud-detection
+      component: langfuse
+  template:
+    metadata:
+      labels:
+        app: fraud-detection
+        component: langfuse
+    spec:
+      containers:
+        - name: langfuse
+          image: langfuse/langfuse:2
+          ports:
+            - containerPort: 3000
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres.fraud-detection.svc.cluster.local:5432/langfuse"
+            - name: NEXTAUTH_URL
+              value: "http://langfuse.fraud-detection.svc.cluster.local:3000"
+            - name: NEXTAUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: fraud-detection-secrets
+                  key: NEXTAUTH_SECRET
+            - name: SALT
+              value: "change-me-in-production"
+          envFrom:
+            - secretRef:
+                name: fraud-detection-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /api/public/health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z postgres.fraud-detection.svc.cluster.local 5432; do sleep 2; done']
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse
+  namespace: fraud-detection
+spec:
+  selector:
+    app: fraud-detection
+    component: langfuse
+  ports:
+    - port: 3000
+      targetPort: 3000

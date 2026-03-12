@@ -343,6 +343,7 @@ import feedbackRouter from '../services/feedback/index.js';
 import { getEvalTracker } from '../agents/core/eval-tracker.js';
 import riskProfileRouter from '../services/risk-profile/index.js';
 import observabilityRouter from '../services/observability/index.js';
+import analyticsRouter from '../services/analytics/index.js';
 import caseQueueRouter from '../services/case-queue/index.js';
 import streamingRouter from '../services/streaming/index.js';
 import graphRouter from '../services/graph/index.js';
@@ -353,6 +354,15 @@ import profileUpdatesRouter from '../services/business/profile-updates/index.js'
 import returnsRouter from '../services/business/returns/index.js';
 import crossDomainRouter, { setCrossDomainAgent } from '../services/autonomous/cross-domain-router.js';
 import policyEvolutionRouter, { setPolicyEvolutionAgent } from '../services/autonomous/policy-evolution-router.js';
+import ruleOptimizationRouter, { setRuleOptimizationAgent } from '../services/autonomous/rule-optimization-router.js';
+import transactionProcessingRouter from '../services/business/transaction-processing/index.js';
+import paymentProcessingRouter from '../services/business/payment-processing/index.js';
+import complianceAmlRouter from '../services/business/compliance-aml/index.js';
+import networkIntelligenceRouter from '../services/business/network-intelligence/index.js';
+import reviewIntegrityRouter from '../services/business/review-integrity/index.js';
+import behavioralAnalyticsRouter from '../services/business/behavioral-analytics/index.js';
+import buyerTrustRouter from '../services/business/buyer-trust/index.js';
+import policyEnforcementRouter from '../services/business/policy-enforcement/index.js';
 import payoutRiskRouter, { setPayoutRiskAgent } from '../services/autonomous/payout-risk-router.js';
 import listingIntelligenceRouter, { setListingIntelligenceAgent } from '../services/autonomous/listing-intelligence-router.js';
 import profileMutationRouter, { setProfileMutationAgent } from '../services/autonomous/profile-mutation-router.js';
@@ -422,6 +432,20 @@ import { getPayoutRiskAgent } from '../agents/specialized/payout-risk-agent.js';
 import { getListingIntelligenceAgent } from '../agents/specialized/listing-intelligence-agent.js';
 import { getProfileMutationAgent } from '../agents/specialized/profile-mutation-agent.js';
 import { getReturnsAbuseAgent } from '../agents/specialized/returns-abuse-agent.js';
+import { getATODetectionAgent } from '../agents/specialized/ato-detection-agent.js';
+import { getShippingRiskAgent } from '../agents/specialized/shipping-risk-agent.js';
+import { getAccountSetupAgent } from '../agents/specialized/account-setup-agent.js';
+import { getItemSetupAgent } from '../agents/specialized/item-setup-agent.js';
+import { getPricingRiskAgent } from '../agents/specialized/pricing-risk-agent.js';
+import { getRuleOptimizationAgent } from '../agents/specialized/rule-optimization-agent.js';
+import { getTransactionRiskAgent } from '../agents/specialized/transaction-risk-agent.js';
+import { getPaymentRiskAgent } from '../agents/specialized/payment-risk-agent.js';
+import { getComplianceAgent } from '../agents/specialized/compliance-agent.js';
+import { getNetworkIntelligenceAgent } from '../agents/specialized/network-intelligence-agent.js';
+import { getReviewIntegrityAgent } from '../agents/specialized/review-integrity-agent.js';
+import { getBehavioralAnalyticsAgent } from '../agents/specialized/behavioral-analytics-agent.js';
+import { getBuyerTrustAgent } from '../agents/specialized/buyer-trust-agent.js';
+import { getPolicyEnforcementAgent } from '../agents/specialized/policy-enforcement-agent.js';
 import { orchestrator } from '../agents/core/agent-orchestrator.js';
 
 const crossDomainAgent = getCrossDomainAgent();
@@ -430,14 +454,43 @@ const payoutRiskAgent = getPayoutRiskAgent();
 const listingIntelligenceAgent = getListingIntelligenceAgent();
 const profileMutationAgent = getProfileMutationAgent();
 const returnsAbuseAgent = getReturnsAbuseAgent();
+const atoDetectionAgent = getATODetectionAgent();
+const shippingRiskAgent = getShippingRiskAgent();
+const accountSetupAgent = getAccountSetupAgent();
+const itemSetupAgent = getItemSetupAgent();
+const pricingRiskAgent = getPricingRiskAgent();
+const ruleOptimizationAgent = getRuleOptimizationAgent();
+const transactionRiskAgent = getTransactionRiskAgent();
+const paymentRiskAgent = getPaymentRiskAgent();
+const complianceAgent = getComplianceAgent();
+const networkIntelligenceAgent = getNetworkIntelligenceAgent();
+const reviewIntegrityAgent = getReviewIntegrityAgent();
+const behavioralAnalyticsAgent = getBehavioralAnalyticsAgent();
+const buyerTrustAgent = getBuyerTrustAgent();
+const policyEnforcementAgent = getPolicyEnforcementAgent();
 orchestrator.registerAgent(crossDomainAgent);
 orchestrator.registerAgent(policyEvolutionAgent);
 orchestrator.registerAgent(payoutRiskAgent);
 orchestrator.registerAgent(listingIntelligenceAgent);
 orchestrator.registerAgent(profileMutationAgent);
 orchestrator.registerAgent(returnsAbuseAgent);
+orchestrator.registerAgent(atoDetectionAgent);
+orchestrator.registerAgent(shippingRiskAgent);
+orchestrator.registerAgent(accountSetupAgent);
+orchestrator.registerAgent(itemSetupAgent);
+orchestrator.registerAgent(pricingRiskAgent);
+orchestrator.registerAgent(ruleOptimizationAgent);
+orchestrator.registerAgent(transactionRiskAgent);
+orchestrator.registerAgent(paymentRiskAgent);
+orchestrator.registerAgent(complianceAgent);
+orchestrator.registerAgent(networkIntelligenceAgent);
+orchestrator.registerAgent(reviewIntegrityAgent);
+orchestrator.registerAgent(behavioralAnalyticsAgent);
+orchestrator.registerAgent(buyerTrustAgent);
+orchestrator.registerAgent(policyEnforcementAgent);
 setCrossDomainAgent(crossDomainAgent);
 setPolicyEvolutionAgent(policyEvolutionAgent);
+setRuleOptimizationAgent(ruleOptimizationAgent);
 setPayoutRiskAgent(payoutRiskAgent);
 setListingIntelligenceAgent(listingIntelligenceAgent);
 setProfileMutationAgent(profileMutationAgent);
@@ -445,7 +498,9 @@ setReturnsAbuseAgent(returnsAbuseAgent);
 // Autonomous agents are registered but NOT auto-started to avoid
 // consuming LLM API quota and causing rate limits during interactive
 // seller evaluations. Start them on-demand via their REST endpoints.
-console.log('Autonomous agents registered (not auto-started): Cross-Domain Correlation, Policy Evolution, Payout Risk, Listing Intelligence, Profile Mutation, Returns Abuse');
+// Exception: CrossDomainCorrelationAgent runs on a 6h schedule for fraud ring detection.
+console.log('Autonomous agents registered: Cross-Domain Correlation (6h schedule), Policy Evolution (30m schedule), Rule Optimization (24h schedule), Payout Risk, Listing Intelligence, Profile Mutation, Returns Abuse');
+console.log('Request-driven agents registered: ATO Detection, Shipping Risk, Account Setup, Item Setup, Pricing Risk, Transaction Risk, Payment Risk, Compliance, Network Intelligence, Review Integrity, Behavioral Analytics, Buyer Trust, Policy Enforcement');
 
 // ============================================================================
 // API ROUTES
@@ -488,7 +543,8 @@ app.get('/api/health', (req, res) => {
       'profile-updates': 'running',
       'returns': 'running',
       'streaming': 'running',
-      'graph': 'running'
+      'graph': 'running',
+      'analytics': 'running'
     }
   });
 });
@@ -623,6 +679,15 @@ app.get('/api', (req, res) => {
       '/api/pricing': 'Pricing Service',
       '/api/profile-updates': 'Profile Updates Service',
       '/api/returns': 'Returns Service',
+      // Extended Business Services
+      '/api/transaction': 'Transaction Processing Service',
+      '/api/payment': 'Payment Processing Service',
+      '/api/compliance': 'Compliance & AML Service',
+      '/api/network': 'Network Intelligence Service',
+      '/api/review': 'Review Integrity Service',
+      '/api/behavioral': 'Behavioral Analytics Service',
+      '/api/buyer-trust': 'Buyer Trust Service',
+      '/api/policy': 'Policy Enforcement Service',
       // Streaming & Graph
       '/api/streaming': 'Streaming Engine (Topics, Consumer Groups, Feature Store)',
       '/api/graph': 'Graph Database (Network Analysis, Clusters, Fraud Rings)',
@@ -647,6 +712,16 @@ app.use('/api/item-setup', itemSetupRouter);
 app.use('/api/pricing', pricingRouter);
 app.use('/api/profile-updates', profileUpdatesRouter);
 app.use('/api/returns', returnsRouter);
+
+// Extended Business Services
+app.use('/api/transaction', transactionProcessingRouter);
+app.use('/api/payment', paymentProcessingRouter);
+app.use('/api/compliance', complianceAmlRouter);
+app.use('/api/network', networkIntelligenceRouter);
+app.use('/api/review', reviewIntegrityRouter);
+app.use('/api/behavioral', behavioralAnalyticsRouter);
+app.use('/api/buyer-trust', buyerTrustRouter);
+app.use('/api/policy', policyEnforcementRouter);
 
 // Data Platform
 app.use('/api/data/ingestion', dataIngestionRouter);
@@ -750,6 +825,28 @@ app.use('/api/risk-profile', riskProfileRouter);
 // Observability
 app.use('/api/observability', observabilityRouter);
 
+// Analytics
+app.use('/api/analytics', analyticsRouter);
+
+// Active Learning
+app.get('/api/active-learning/stats', async (req, res) => {
+  try {
+    const { getActiveLearningManager } = await import('../agents/core/active-learning.js');
+    res.json({ success: true, data: getActiveLearningManager().getStats() });
+  } catch (e) {
+    res.json({ success: true, data: { error: e.message } });
+  }
+});
+app.post('/api/active-learning/configure', async (req, res) => {
+  try {
+    const { getActiveLearningManager } = await import('../agents/core/active-learning.js');
+    getActiveLearningManager().configure(req.body);
+    res.json({ success: true, data: getActiveLearningManager().getStats() });
+  } catch (e) {
+    res.json({ success: false, error: e.message });
+  }
+});
+
 // Case Queue
 app.use('/api/cases', caseQueueRouter);
 
@@ -766,6 +863,7 @@ app.use('/api/agents/payout-risk', payoutRiskRouter);
 app.use('/api/agents/listing-intelligence', listingIntelligenceRouter);
 app.use('/api/agents/profile-mutation', profileMutationRouter);
 app.use('/api/agents/returns-abuse', returnsAbuseRouter);
+app.use('/api/agents/rule-optimization', ruleOptimizationRouter);
 
 // ============================================================================
 // METRICS & DASHBOARD ENDPOINTS
@@ -914,6 +1012,14 @@ eventBus.subscribe('*', (event) => {
 import { getEventPersister } from '../agents/core/event-persister.js';
 getEventPersister().start(eventBus);
 
+// Start analytics ingestion bridge (buffers events → analytics backend)
+import { getAnalyticsIngestionBridge } from '../agents/core/analytics-ingestion-bridge.js';
+getAnalyticsIngestionBridge().start(eventBus);
+
+// Start active learning manager (creates cases for human review on uncertain decisions)
+import { getActiveLearningManager } from '../agents/core/active-learning.js';
+getActiveLearningManager().start();
+
 // Broadcast function for backward compatibility
 function broadcast(data) {
   wsManager.broadcast(data);
@@ -1028,6 +1134,72 @@ server.listen(PORT, () => {
 ║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
   `);
+
+  // Auto-start autonomous agents after server is ready
+  setTimeout(() => {
+    // CrossDomainCorrelationAgent — 6h fraud ring detection scans
+    try {
+      crossDomainAgent.start();
+      console.log('CrossDomainCorrelationAgent auto-started (6h scan interval)');
+    } catch (err) {
+      console.error('Failed to auto-start CrossDomainCorrelationAgent:', err.message);
+    }
+
+    // PolicyEvolutionAgent — 30min policy effectiveness monitoring
+    try {
+      policyEvolutionAgent.start();
+      console.log('PolicyEvolutionAgent auto-started (30m scan interval)');
+    } catch (err) {
+      console.error('Failed to auto-start PolicyEvolutionAgent:', err.message);
+    }
+
+    // PayoutRiskAgent — 10min payout fraud scan loop
+    try {
+      payoutRiskAgent.start();
+      console.log('PayoutRiskAgent auto-started (10m scan interval)');
+    } catch (err) {
+      console.error('Failed to auto-start PayoutRiskAgent:', err.message);
+    }
+
+    // ListingIntelligenceAgent — 15min listing scan loop
+    try {
+      listingIntelligenceAgent.start();
+      console.log('ListingIntelligenceAgent auto-started (15m scan interval)');
+    } catch (err) {
+      console.error('Failed to auto-start ListingIntelligenceAgent:', err.message);
+    }
+
+    // ProfileMutationAgent — 10min profile change scan loop
+    try {
+      profileMutationAgent.start();
+      console.log('ProfileMutationAgent auto-started (10m scan interval)');
+    } catch (err) {
+      console.error('Failed to auto-start ProfileMutationAgent:', err.message);
+    }
+
+    // ReturnsAbuseAgent — 20min returns abuse scan loop
+    try {
+      returnsAbuseAgent.start();
+      console.log('ReturnsAbuseAgent auto-started (20m scan interval)');
+    } catch (err) {
+      console.error('Failed to auto-start ReturnsAbuseAgent:', err.message);
+    }
+
+    // RuleOptimizationAgent — nightly rule performance analysis (24h interval)
+    // Extends BaseAgent (not AutonomousAgent), so we schedule it with setInterval
+    const RULE_OPT_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+    const runRuleOptimization = async () => {
+      try {
+        const input = { mode: 'scheduled', timestamp: new Date().toISOString() };
+        await ruleOptimizationAgent.reason(input);
+        console.log('RuleOptimizationAgent scheduled run completed');
+      } catch (err) {
+        console.error('RuleOptimizationAgent scheduled run failed:', err.message);
+      }
+    };
+    setInterval(runRuleOptimization, RULE_OPT_INTERVAL_MS);
+    console.log('RuleOptimizationAgent scheduled (24h interval, first run in 24h)');
+  }, 5000); // 5s delay ensures event bus + DB are ready
 });
 
 export default app;

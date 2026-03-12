@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: fraud-detection
+  labels:
+    app: fraud-detection
+    component: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fraud-detection
+      component: backend
+  template:
+    metadata:
+      labels:
+        app: fraud-detection
+        component: backend
+    spec:
+      containers:
+        - name: backend
+          image: fraud-detection-backend:latest
+          ports:
+            - containerPort: 3001
+              name: http
+          envFrom:
+            - configMapRef:
+                name: fraud-detection-config
+            - secretRef:
+                name: fraud-detection-secrets
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3001
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3001
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z postgres.fraud-detection.svc.cluster.local 5432; do sleep 2; done']
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: fraud-detection
+spec:
+  selector:
+    app: fraud-detection
+    component: backend
+  ports:
+    - port: 3001
+      targetPort: 3001
+      name: http
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend-hpa
+  namespace: fraud-detection
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80

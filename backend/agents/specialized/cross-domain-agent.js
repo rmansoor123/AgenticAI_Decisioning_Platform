@@ -49,7 +49,7 @@ export class CrossDomainCorrelationAgent extends AutonomousAgent {
         'sequence_matching',
         'coordinated_behavior_detection'
       ],
-      scanIntervalMs: 300000, // 5 minutes
+      scanIntervalMs: 21600000, // 6 hours
       eventAccelerationThreshold: 3,
       subscribedTopics: ['risk:event:created', 'decision:made', 'case:resolved']
     });

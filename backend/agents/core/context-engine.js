@@ -14,6 +14,7 @@ import { getSelfQueryEngine } from './self-query.js';
 import { getQueryDecomposer } from './query-decomposer.js';
 import { getNeuralReranker } from './neural-reranker.js';
 import { vectorSearch } from './vector-backend.js';
+import { db_ops } from '../../shared/common/database.js';
 
 const DEFAULT_TOKEN_BUDGET = 4000;
 
@@ -23,7 +24,8 @@ const SOURCE_BUDGETS = {
   shortTermMemory: { priority: 3, maxTokens: 500 },
   ragResults:      { priority: 4, maxTokens: 800 },
   longTermMemory:  { priority: 5, maxTokens: 400 },
-  domainContext:   { priority: 6, maxTokens: 300 }
+  domainContext:   { priority: 6, maxTokens: 300 },
+  crossAgentContext: { priority: 7, maxTokens: 300 }
 };
 
 // Map domain names to valid knowledge base namespaces
@@ -301,10 +303,68 @@ class ContextEngine {
       }
     }
 
+    // 7. Cross-agent context (seller risk profile + recent agent decisions across all domains)
+    if (sellerId) {
+      try {
+        const riskProfile = db_ops.getById('seller_risk_profiles', 'seller_id', sellerId);
+        if (riskProfile) {
+          const p = typeof riskProfile.data === 'string' ? JSON.parse(riskProfile.data) : (riskProfile.data || riskProfile);
+          const compositeScore = Math.round(p.compositeScore || p.composite_score || 0);
+          const tier = p.tier || 'LOW';
+          const domainScores = p.domainScores || p.domain_scores || {};
+          const activeActions = p.activeActions || p.active_actions || [];
+
+          // Format non-zero domain scores sorted descending
+          const scoreParts = Object.entries(domainScores)
+            .filter(([, v]) => v > 0)
+            .sort((a, b) => b[1] - a[1])
+            .map(([d, v]) => `${d}: ${Math.round(v)}`)
+            .join(', ');
+
+          const actionsPart = activeActions.length > 0
+            ? `\nActive actions: ${activeActions.join(', ')}`
+            : '';
+
+          // Query last 5 risk events for this seller
+          let recentDecisions = '';
+          try {
+            const eventsRows = db_ops.query(
+              'risk_events',
+              "json_extract(data,'$.sellerId') = ?",
+              [sellerId],
+              5
+            );
+            if (eventsRows && eventsRows.length > 0) {
+              const lines = eventsRows.map(row => {
+                const e = typeof row.data === 'string' ? JSON.parse(row.data) : (row.data || row);
+                const d = e.domain || 'unknown';
+                const et = e.eventType || e.event_type || 'unknown';
+                const score = Math.round(e.riskScore || e.risk_score || e.score || 0);
+                const ts = e.timestamp || row.created_at;
+                const hoursAgo = ts ? Math.round((Date.now() - new Date(ts).getTime()) / 3600000) : '?';
+                return `- [${d}] ${et} (score: ${score}) ${hoursAgo}h ago`;
+              });
+              recentDecisions = `\nRecent agent decisions:\n${lines.join('\n')}`;
+            }
+          } catch (e) {
+            // Risk events query failed; skip
+          }
+
+          const crossCtx = `Seller ${sellerId} cross-domain risk profile:\nComposite: ${compositeScore} | Tier: ${tier}\nDomain scores: ${scoreParts || 'none'}${actionsPart}\nTotal events: ${(p.totalEvents || p.total_events || 0)}${recentDecisions}`;
+
+          sections.crossAgentContext = this.promptBuilder.truncateToTokenBudget(crossCtx, SOURCE_BUDGETS.crossAgentContext.maxTokens);
+          totalTokens += this.promptBuilder.estimateTokens(sections.crossAgentContext);
+          sourceMeta.crossAgentContext = { included: true, tokens: this.promptBuilder.estimateTokens(sections.crossAgentContext) };
+        }
+      } catch (e) {
+        // Cross-agent context retrieval failed; skip gracefully
+      }
+    }
+
     // ── Global context reranking ──
     // Build context items from non-system, non-task sections for reranking
     const contextRanker = getContextRanker();
-    const rerankedSources = ['shortTermMemory', 'ragResults', 'longTermMemory', 'domainContext'];
+    const rerankedSources = ['shortTermMemory', 'ragResults', 'longTermMemory', 'domainContext', 'crossAgentContext'];
     const contextItems = rerankedSources
       .filter(key => sections[key])
       .map(key => ({

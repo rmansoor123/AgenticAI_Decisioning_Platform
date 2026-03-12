@@ -1,0 +1,60 @@
+{
+  "schema": {
+    "schemaName": "agent_decisions_rt",
+    "dimensionFieldSpecs": [
+      { "name": "decisionId", "dataType": "STRING" },
+      { "name": "agentId", "dataType": "STRING" },
+      { "name": "sellerId", "dataType": "STRING" },
+      { "name": "action", "dataType": "STRING" },
+      { "name": "success", "dataType": "STRING" }
+    ],
+    "metricFieldSpecs": [
+      { "name": "riskScore", "dataType": "DOUBLE" },
+      { "name": "latencyMs", "dataType": "DOUBLE" }
+    ],
+    "dateTimeFieldSpecs": [
+      {
+        "name": "createdAt",
+        "dataType": "TIMESTAMP",
+        "format": "1:MILLISECONDS:TIMESTAMP",
+        "granularity": "1:MILLISECONDS"
+      }
+    ]
+  },
+  "table": {
+    "tableName": "agent_decisions_rt",
+    "tableType": "REALTIME",
+    "segmentsConfig": {
+      "timeColumnName": "createdAt",
+      "schemaName": "agent_decisions_rt",
+      "replicasPerPartition": "1",
+      "retentionTimeUnit": "DAYS",
+      "retentionTimeValue": "90"
+    },
+    "tableIndexConfig": {
+      "invertedIndexColumns": ["agentId", "action"],
+      "rangeIndexColumns": ["createdAt"],
+      "starTreeIndexConfigs": [
+        {
+          "dimensionsSplitOrder": ["agentId", "action"],
+          "functionColumnPairs": ["COUNT__*", "AVG__riskScore", "AVG__latencyMs"],
+          "maxLeafRecords": 10000
+        }
+      ],
+      "loadMode": "MMAP"
+    },
+    "tenants": {
+      "broker": "DefaultTenant",
+      "server": "DefaultTenant"
+    },
+    "ingestionConfig": {
+      "batchIngestionConfig": {
+        "segmentIngestionType": "APPEND",
+        "segmentIngestionFrequency": "HOURLY"
+      }
+    },
+    "metadata": {
+      "customConfigs": {}
+    }
+  }
+}

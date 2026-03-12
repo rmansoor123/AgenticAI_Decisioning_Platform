@@ -7,7 +7,12 @@
     "start": "node --env-file=.env gateway/server.js",
     "dev": "node --env-file=.env --watch gateway/server.js",
     "seed": "node --env-file=.env shared/synthetic-data/seed.js",
-    "mcp": "node mcp/server.js"
+    "mcp": "node mcp/server.js",
+    "test": "USE_LLM=false node agents/core/__tests__/run-all-tests.js",
+    "test:quick": "USE_LLM=false node agents/core/__tests__/run-all-tests.js --quick",
+    "test:golden": "USE_LLM=false node agents/core/__tests__/golden-test-suite.test.js",
+    "test:coverage": "USE_LLM=false c8 --reporter=text --reporter=lcov --reporter=json-summary --src=agents --src=services --src=gateway --src=shared node agents/core/__tests__/run-all-tests.js --quick",
+    "test:coverage:full": "USE_LLM=false c8 --reporter=text --reporter=lcov --reporter=json-summary --src=agents --src=services --src=gateway --src=shared node agents/core/__tests__/run-all-tests.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -30,5 +35,8 @@
     "langfuse": "^3.30.0",
     "neo4j-driver": "^5.27.0",
     "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "c8": "^11.0.0"
   }
 }

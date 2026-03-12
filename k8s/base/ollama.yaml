@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ollama
+  namespace: fraud-detection
+  labels:
+    app: fraud-detection
+    component: ollama
+spec:
+  serviceName: ollama
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fraud-detection
+      component: ollama
+  template:
+    metadata:
+      labels:
+        app: fraud-detection
+        component: ollama
+    spec:
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          ports:
+            - containerPort: 11434
+          volumeMounts:
+            - name: ollamadata
+              mountPath: /root/.ollama
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+              # Uncomment for GPU support:
+              # nvidia.com/gpu: 1
+          readinessProbe:
+            exec:
+              command: ["ollama", "list"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["ollama", "list"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+  volumeClaimTemplates:
+    - metadata:
+        name: ollamadata
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: fraud-detection
+spec:
+  selector:
+    app: fraud-detection
+    component: ollama
+  ports:
+    - port: 11434
+      targetPort: 11434
+  clusterIP: None
