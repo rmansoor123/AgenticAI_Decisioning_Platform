@@ -197,6 +197,69 @@ router.post('/compare-rules', (req, res) => {
   }
 });
 
+// Monte Carlo simulation with bootstrap sampling
+router.post('/monte-carlo', (req, res) => {
+  try {
+    const { ruleChanges, iterations = 1000, sampleSize = 500, confidenceLevel = 0.95 } = req.body;
+
+    const transactions = db_ops.getAll('transactions', sampleSize, 0).map(t => t.data);
+    if (transactions.length === 0) {
+      return res.status(400).json({ success: false, error: 'No transactions available for simulation' });
+    }
+
+    const rules = db_ops.getAll('rules', 1000, 0).map(r => r.data).filter(r => r.status === 'ACTIVE');
+    const simulatedRules = applyRuleChanges(rules, ruleChanges, null);
+
+    // Bootstrap: run N iterations with resampled transactions
+    const blockRates = [];
+    const reviewRates = [];
+
+    for (let i = 0; i < iterations; i++) {
+      // Resample with replacement
+      const sample = Array.from({ length: Math.min(sampleSize, transactions.length) }, () =>
+        transactions[Math.floor(Math.random() * transactions.length)]
+      );
+      const result = runRuleSet(simulatedRules, sample);
+      blockRates.push(parseFloat(result.summary.blockRate));
+      reviewRates.push(parseFloat(result.summary.reviewRate));
+    }
+
+    // Sort for confidence intervals
+    blockRates.sort((a, b) => a - b);
+    reviewRates.sort((a, b) => a - b);
+
+    const lo = Math.floor((1 - confidenceLevel) / 2 * iterations);
+    const hi = Math.floor((1 + confidenceLevel) / 2 * iterations);
+
+    const blockMean = blockRates.reduce((s, v) => s + v, 0) / iterations;
+    const reviewMean = reviewRates.reduce((s, v) => s + v, 0) / iterations;
+
+    res.json({
+      success: true,
+      data: {
+        blockRate: {
+          mean: parseFloat(blockMean.toFixed(4)),
+          ci: [blockRates[lo], blockRates[hi]],
+          min: blockRates[0],
+          max: blockRates[blockRates.length - 1]
+        },
+        reviewRate: {
+          mean: parseFloat(reviewMean.toFixed(4)),
+          ci: [reviewRates[lo], reviewRates[hi]],
+          min: reviewRates[0],
+          max: reviewRates[reviewRates.length - 1]
+        },
+        iterations,
+        sampleSize: transactions.length,
+        confidenceLevel,
+        rulesApplied: simulatedRules.length
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // What-if analysis
 router.post('/what-if', (req, res) => {
   try {
@@ -396,10 +459,30 @@ function generateImpactAnalysis(baseline, simulated) {
       reviewQueueChange: ((simulated.summary.reviewRate - baseline.summary.reviewRate) * 100).toFixed(2) + '%',
       automationRate: ((simulated.summary.approvalRate / 1) * 100).toFixed(2) + '%'
     },
-    riskImpact: {
-      estimatedFraudPrevention: 'Requires historical fraud labels',
-      falsePositiveChange: 'Requires ground truth data'
-    }
+    riskImpact: (() => {
+      // Check if labeled data exists in rule_performance
+      const labeledData = db_ops.raw(
+        'SELECT COUNT(*) as cnt FROM rule_performance WHERE actual_fraud IS NOT NULL', []
+      );
+      const labelCount = labeledData[0]?.cnt || 0;
+
+      if (labelCount > 0) {
+        const baselineFraud = db_ops.raw(
+          'SELECT SUM(CASE WHEN triggered = 1 AND actual_fraud = 1 THEN 1 ELSE 0 END) as caught, COUNT(*) as total FROM rule_performance WHERE actual_fraud IS NOT NULL', []
+        );
+        const bf = baselineFraud[0] || {};
+        const catchRate = bf.total > 0 ? (bf.caught / bf.total * 100).toFixed(2) : '0';
+        return {
+          estimatedFraudPrevention: `${catchRate}% catch rate based on ${labelCount} labeled samples`,
+          falsePositiveChange: `${((simulated.summary.reviewRate - baseline.summary.reviewRate) * 100).toFixed(2)}% change in review rate`
+        };
+      }
+
+      return {
+        estimatedFraudPrevention: `Insufficient labeled data (${labelCount} labels). Submit feedback via POST /api/feedback`,
+        falsePositiveChange: `Review rate change: ${((simulated.summary.reviewRate - baseline.summary.reviewRate) * 100).toFixed(2)}%`
+      };
+    })()
   };
 }
 

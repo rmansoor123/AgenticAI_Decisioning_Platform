@@ -62,13 +62,15 @@ router.post('/realtime', (req, res) => {
       streamBuffer.realtime.shift();
     }
 
-    // Update pipeline metrics
+    // Update pipeline metrics with real timing
+    const startMs = performance.now();
     pipelines.realtime.throughput++;
-    pipelines.realtime.latencyMs = Math.random() * 5 + 2;
     pipelines.realtime.lastProcessed = new Date().toISOString();
 
-    // Process and store (simulate feature extraction)
+    // Process and store (real feature extraction)
     const features = extractFeatures(event);
+
+    pipelines.realtime.latencyMs = parseFloat((performance.now() - startMs).toFixed(3));
 
     res.status(201).json({
       success: true,
@@ -79,6 +81,13 @@ router.post('/realtime', (req, res) => {
       }
     });
   } catch (error) {
+    // Dead letter queue on failure
+    try {
+      db_ops.run(
+        'INSERT INTO dead_letter_queue (id, pipeline, event_data, error_message, created_at) VALUES (?, ?, ?, ?, ?)',
+        [uuidv4(), 'realtime', JSON.stringify(req.body), error.message, new Date().toISOString()]
+      );
+    } catch (_) { /* best-effort */ }
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -236,16 +245,30 @@ router.get('/streams/stats', (req, res) => {
 
 // Helper function to extract features from event
 function extractFeatures(event) {
+  const ts = new Date(event.timestamp || event.ingestedAt);
+  const hour = ts.getHours();
+  const amount = event.amount || 0;
+
+  // Velocity: count events from same entity in recent buffer
+  const entityId = event.sellerId || event.transactionId || event.eventId;
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const recentFromEntity = streamBuffer.realtime.filter(
+    e => (e.sellerId === entityId || e.transactionId === entityId) && e.ingestedAt > oneHourAgo
+  ).length;
+
   return {
-    entityId: event.sellerId || event.transactionId || event.eventId,
+    entityId,
     features: {
-      amount: event.amount,
+      amount,
       timestamp: event.timestamp || event.ingestedAt,
-      hourOfDay: new Date(event.timestamp || event.ingestedAt).getHours(),
-      dayOfWeek: new Date(event.timestamp || event.ingestedAt).getDay(),
-      // Add more derived features
-      amountBucket: event.amount < 100 ? 'low' : event.amount < 500 ? 'medium' : 'high',
-      isWeekend: [0, 6].includes(new Date(event.timestamp || event.ingestedAt).getDay())
+      hourOfDay: hour,
+      dayOfWeek: ts.getDay(),
+      amountBucket: amount < 100 ? 'low' : amount < 500 ? 'medium' : amount < 2000 ? 'high' : 'very_high',
+      isWeekend: [0, 6].includes(ts.getDay()),
+      amountLog: parseFloat(Math.log10(amount + 1).toFixed(4)),
+      hourBucket: hour < 6 ? 'night' : hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening',
+      isHighRisk: amount > 5000,
+      velocityIndicator: recentFromEntity
     },
     metadata: {
       source: event.pipeline,

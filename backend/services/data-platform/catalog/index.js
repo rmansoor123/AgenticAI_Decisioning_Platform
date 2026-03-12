@@ -142,24 +142,137 @@ router.get('/datasets/:datasetId/quality', (req, res) => {
       return res.status(404).json({ success: false, error: 'Dataset not found' });
     }
 
+    // Query latest profile from data_profiles table
+    const profiles = db_ops.raw(
+      'SELECT * FROM data_profiles WHERE dataset_id = ? ORDER BY profiled_at DESC LIMIT 1',
+      [req.params.datasetId]
+    );
+    const profile = profiles[0];
+
     const quality = {
       datasetId: dataset.data.datasetId,
       name: dataset.data.name,
-      metrics: dataset.data.quality || {
-        completeness: 0.98,
-        freshness: '< 1 HOUR',
-        accuracy: 0.995
+      metrics: profile ? {
+        completeness: profile.completeness || 0,
+        freshness: profile.freshness_seconds != null
+          ? (profile.freshness_seconds < 3600 ? `< ${Math.ceil(profile.freshness_seconds / 60)} MIN` : `< ${Math.ceil(profile.freshness_seconds / 3600)} HOUR`)
+          : 'UNKNOWN',
+        accuracy: dataset.data.quality?.accuracy || null,
+        totalRows: profile.total_rows || 0,
+        nullCounts: profile.null_counts ? JSON.parse(profile.null_counts) : {},
+        valueDistributions: profile.value_distributions ? JSON.parse(profile.value_distributions) : {}
+      } : dataset.data.quality || {
+        completeness: null,
+        freshness: 'NO_PROFILE',
+        accuracy: null,
+        message: 'No profile data yet. Run POST /datasets/:datasetId/profile to generate.'
       },
-      lastChecked: new Date().toISOString(),
+      lastChecked: profile?.profiled_at || null,
       issues: []
     };
 
-    // Add any quality issues
-    if (quality.metrics.completeness < 0.95) {
-      quality.issues.push({ type: 'COMPLETENESS', message: 'Dataset has missing values' });
+    // Add quality issues based on real data
+    if (profile) {
+      if (quality.metrics.completeness < 0.95) {
+        quality.issues.push({ type: 'COMPLETENESS', message: `Dataset completeness is ${(quality.metrics.completeness * 100).toFixed(1)}%` });
+      }
+      if (profile.freshness_seconds > 86400) {
+        quality.issues.push({ type: 'FRESHNESS', message: 'Data is older than 24 hours' });
+      }
     }
 
     res.json({ success: true, data: quality });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Profile dataset - compute real quality metrics
+router.post('/datasets/:datasetId/profile', (req, res) => {
+  try {
+    const dataset = db_ops.getById('datasets', 'dataset_id', req.params.datasetId);
+    if (!dataset) {
+      return res.status(404).json({ success: false, error: 'Dataset not found' });
+    }
+
+    // Determine backing table from dataset name/type
+    const tableMap = {
+      'transactions_raw': 'transactions',
+      'seller_profiles': 'sellers',
+      'fraud_labels': 'transactions',
+      'payouts': 'payouts',
+      'listings': 'listings'
+    };
+    const tableName = tableMap[dataset.data.name] || 'transactions';
+
+    // Read sample data from backing table
+    const rows = db_ops.getAll(tableName, 500, 0);
+    const totalRows = db_ops.count(tableName);
+
+    // Compute profiling metrics
+    const nullCounts = {};
+    const numericValues = {};
+
+    rows.forEach(row => {
+      const data = row.data || row;
+      for (const [key, value] of Object.entries(data)) {
+        if (value === null || value === undefined || value === '') {
+          nullCounts[key] = (nullCounts[key] || 0) + 1;
+        }
+        if (typeof value === 'number') {
+          if (!numericValues[key]) numericValues[key] = [];
+          numericValues[key].push(value);
+        }
+      }
+    });
+
+    // Compute distributions for numeric fields
+    const valueDistributions = {};
+    for (const [field, values] of Object.entries(numericValues)) {
+      values.sort((a, b) => a - b);
+      const mean = values.reduce((s, v) => s + v, 0) / values.length;
+      const variance = values.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / values.length;
+      valueDistributions[field] = {
+        min: values[0],
+        max: values[values.length - 1],
+        mean: parseFloat(mean.toFixed(4)),
+        stddev: parseFloat(Math.sqrt(variance).toFixed(4))
+      };
+    }
+
+    // Compute completeness
+    const totalFields = rows.length > 0 ? Object.keys(rows[0].data || rows[0]).length * rows.length : 1;
+    const totalNulls = Object.values(nullCounts).reduce((s, c) => s + c, 0);
+    const completeness = parseFloat((1 - totalNulls / totalFields).toFixed(4));
+
+    // Freshness: time since newest record
+    const newestRecord = rows[0]?.created_at || rows[0]?.data?.createdAt;
+    const freshnessSeconds = newestRecord
+      ? (Date.now() - new Date(newestRecord).getTime()) / 1000
+      : null;
+
+    const profileId = `PROF-${Date.now().toString(36).toUpperCase()}`;
+
+    // Store profile
+    db_ops.run(
+      'INSERT INTO data_profiles (profile_id, dataset_id, table_name, total_rows, null_counts, value_distributions, freshness_seconds, completeness, profiled_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [profileId, req.params.datasetId, tableName, totalRows, JSON.stringify(nullCounts), JSON.stringify(valueDistributions), freshnessSeconds, completeness, new Date().toISOString()]
+    );
+
+    res.status(201).json({
+      success: true,
+      data: {
+        profileId,
+        datasetId: req.params.datasetId,
+        tableName,
+        totalRows,
+        nullCounts,
+        valueDistributions,
+        freshnessSeconds,
+        completeness,
+        profiledAt: new Date().toISOString()
+      }
+    });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

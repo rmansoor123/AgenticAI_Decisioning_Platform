@@ -27,7 +27,10 @@ router.post('/evaluate', (req, res) => {
     const triggeredRules = [];
 
     for (const rule of rules) {
+      const ruleStartTime = Date.now();
       const result = evaluateRule(rule, transaction, context);
+      const ruleLatency = Date.now() - ruleStartTime;
+
       ruleResults.push({
         ruleId: rule.ruleId,
         ruleName: rule.name,
@@ -37,6 +40,16 @@ router.post('/evaluate', (req, res) => {
         action: result.action,
         conditions: result.evaluatedConditions
       });
+
+      // Record rule evaluation to rule_performance table (fire-and-forget)
+      if (!dryRun) {
+        try {
+          db_ops.run(
+            'INSERT INTO rule_performance (id, rule_id, transaction_id, triggered, decision, latency_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [uuidv4(), rule.ruleId, transaction.transactionId || null, result.triggered ? 1 : 0, result.triggered ? rule.action : null, ruleLatency, new Date().toISOString()]
+          );
+        } catch (_) { /* best-effort */ }
+      }
 
       if (result.triggered) {
         triggeredRules.push(rule);

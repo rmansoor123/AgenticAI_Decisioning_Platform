@@ -239,16 +239,47 @@ router.get('/:ruleId/performance', (req, res) => {
     const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 7;
     const timeSeries = [];
 
-    for (let i = days - 1; i >= 0; i--) {
-      const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
-      timeSeries.push({
-        date: date.toISOString().split('T')[0],
-        triggered: Math.floor(Math.random() * 1000) + 100,
-        truePositives: Math.floor(Math.random() * 200) + 50,
-        falsePositives: Math.floor(Math.random() * 50) + 5,
-        catchRate: (0.85 + Math.random() * 0.1).toFixed(4),
-        falsePositiveRate: (0.02 + Math.random() * 0.03).toFixed(4)
+    // Query real performance data from rule_performance table
+    const perfData = db_ops.raw(`
+      SELECT
+        date(created_at) as date,
+        SUM(triggered) as triggered,
+        SUM(CASE WHEN triggered = 1 AND actual_fraud = 1 THEN 1 ELSE 0 END) as truePositives,
+        SUM(CASE WHEN triggered = 1 AND actual_fraud = 0 THEN 1 ELSE 0 END) as falsePositives,
+        COUNT(*) as total
+      FROM rule_performance
+      WHERE rule_id = ? AND created_at > datetime('now', ?)
+      GROUP BY date(created_at)
+      ORDER BY date ASC
+    `, [req.params.ruleId, `-${days} days`]);
+
+    if (perfData.length > 0) {
+      perfData.forEach(row => {
+        const triggered = row.triggered || 0;
+        const tp = row.truePositives || 0;
+        const fp = row.falsePositives || 0;
+        timeSeries.push({
+          date: row.date,
+          triggered,
+          truePositives: tp,
+          falsePositives: fp,
+          catchRate: triggered > 0 ? (tp / triggered).toFixed(4) : '0.0000',
+          falsePositiveRate: triggered > 0 ? (fp / triggered).toFixed(4) : '0.0000'
+        });
       });
+    } else {
+      // No data yet — return zeros for the requested date range
+      for (let i = days - 1; i >= 0; i--) {
+        const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+        timeSeries.push({
+          date: date.toISOString().split('T')[0],
+          triggered: 0,
+          truePositives: 0,
+          falsePositives: 0,
+          catchRate: '0.0000',
+          falsePositiveRate: '0.0000'
+        });
+      }
     }
 
     res.json({

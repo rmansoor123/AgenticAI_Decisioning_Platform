@@ -73,6 +73,14 @@ router.post('/predict', async (req, res) => {
 
     predictionCache.set(predictionId, predictionData);
 
+    // Persist prediction for monitoring (fire-and-forget)
+    try {
+      db_ops.run(
+        'INSERT INTO prediction_history (prediction_id, model_id, features, score, decision, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [predictionId, modelMeta.modelId, JSON.stringify(extractedFeatures.normalized || {}), mlResult.score, prediction.label, new Date().toISOString()]
+      );
+    } catch (_) { /* best-effort */ }
+
     res.json({
       success: true,
       data: {

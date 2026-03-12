@@ -239,11 +239,17 @@ router.post('/experiments/:experimentId/event', (req, res) => {
       return res.status(404).json({ success: false, error: 'Experiment not found' });
     }
 
-    // In production, this would store to an analytics database
+    // Persist event to experiment_events table
+    const eventId = `EVT-${uuidv4().substring(0, 8).toUpperCase()}`;
+    db_ops.run(
+      'INSERT INTO experiment_events (event_id, experiment_id, entity_id, variant, event_type, value, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [eventId, req.params.experimentId, entityId, variant, eventType, value || null, JSON.stringify(req.body.metadata || {}), new Date().toISOString()]
+    );
 
     res.json({
       success: true,
       data: {
+        eventId,
         experimentId: req.params.experimentId,
         entityId,
         variant,
@@ -265,42 +271,121 @@ router.get('/experiments/:experimentId/results', (req, res) => {
       return res.status(404).json({ success: false, error: 'Experiment not found' });
     }
 
-    // Generate realistic results
-    const results = {
-      experimentId: req.params.experimentId,
-      status: experiment.data.status,
-      variants: experiment.data.variants.map(v => ({
-        id: v.id,
-        name: v.name,
-        allocation: v.allocation,
-        sampleSize: Math.floor(1000 + Math.random() * 9000),
-        metrics: {
-          fraudCatchRate: (0.95 + Math.random() * 0.04).toFixed(4),
-          falsePositiveRate: (0.02 + Math.random() * 0.02).toFixed(4),
-          latencyP99: Math.floor(50 + Math.random() * 50),
-          conversionRate: (0.03 + Math.random() * 0.02).toFixed(4)
-        }
-      })),
-      statisticalAnalysis: {
-        primaryMetric: experiment.data.metrics?.primaryMetric || 'fraud_catch_rate',
-        pValue: (Math.random() * 0.1).toFixed(4),
-        confidenceLevel: 0.95,
-        isSignificant: Math.random() > 0.3,
-        uplift: ((Math.random() * 10) - 2).toFixed(2) + '%',
-        recommendation: Math.random() > 0.5 ? 'PROMOTE_TREATMENT' : 'KEEP_CONTROL'
-      },
-      generatedAt: new Date().toISOString()
-    };
+    // Aggregate real results from experiment_events table
+    const variantData = db_ops.raw(`
+      SELECT
+        variant,
+        COUNT(*) as sampleSize,
+        AVG(CASE WHEN event_type = 'fraud_caught' THEN value ELSE NULL END) as fraudCatchRate,
+        AVG(CASE WHEN event_type = 'false_positive' THEN value ELSE NULL END) as falsePositiveRate,
+        AVG(CASE WHEN event_type = 'latency' THEN value ELSE NULL END) as latencyP99,
+        AVG(CASE WHEN event_type = 'conversion' THEN value ELSE NULL END) as conversionRate,
+        SUM(CASE WHEN event_type = 'fraud_caught' AND value > 0 THEN 1 ELSE 0 END) as fraudCaughtCount,
+        COUNT(CASE WHEN event_type = 'fraud_caught' THEN 1 END) as fraudTrials
+      FROM experiment_events
+      WHERE experiment_id = ?
+      GROUP BY variant
+    `, [req.params.experimentId]);
 
-    // Use stored results if completed
-    if (experiment.data.results) {
-      results.variants = Object.entries(experiment.data.results)
+    let results;
+
+    if (variantData.length > 0) {
+      // Build results from real data
+      const variantResults = experiment.data.variants.map(v => {
+        const data = variantData.find(vd => vd.variant === v.id) || {};
+        return {
+          id: v.id,
+          name: v.name,
+          allocation: v.allocation,
+          sampleSize: data.sampleSize || 0,
+          metrics: {
+            fraudCatchRate: data.fraudCatchRate != null ? parseFloat(data.fraudCatchRate).toFixed(4) : null,
+            falsePositiveRate: data.falsePositiveRate != null ? parseFloat(data.falsePositiveRate).toFixed(4) : null,
+            latencyP99: data.latencyP99 != null ? Math.floor(data.latencyP99) : null,
+            conversionRate: data.conversionRate != null ? parseFloat(data.conversionRate).toFixed(4) : null
+          }
+        };
+      });
+
+      // Chi-square significance test between first two variants
+      let statisticalAnalysis = {
+        primaryMetric: experiment.data.metrics?.primaryMetric || 'fraud_catch_rate',
+        pValue: null,
+        confidenceLevel: 0.95,
+        isSignificant: false,
+        uplift: null,
+        recommendation: 'INSUFFICIENT_DATA'
+      };
+
+      if (variantResults.length >= 2 && variantResults[0].sampleSize > 0 && variantResults[1].sampleSize > 0) {
+        const control = variantData.find(vd => vd.variant === variantResults[0].id) || {};
+        const treatment = variantData.find(vd => vd.variant === variantResults[1].id) || {};
+
+        if (control.fraudTrials > 0 && treatment.fraudTrials > 0) {
+          const chiResult = chiSquareTest(
+            { tp: control.fraudCaughtCount || 0, n: control.fraudTrials },
+            { tp: treatment.fraudCaughtCount || 0, n: treatment.fraudTrials }
+          );
+          const controlRate = parseFloat(variantResults[0].metrics.fraudCatchRate || 0);
+          const treatmentRate = parseFloat(variantResults[1].metrics.fraudCatchRate || 0);
+          const uplift = controlRate > 0 ? ((treatmentRate - controlRate) / controlRate * 100).toFixed(2) : '0.00';
+
+          statisticalAnalysis = {
+            primaryMetric: experiment.data.metrics?.primaryMetric || 'fraud_catch_rate',
+            pValue: parseFloat(chiResult.pValue.toFixed(4)),
+            chiSquare: parseFloat(chiResult.chiSquare.toFixed(4)),
+            confidenceLevel: 0.95,
+            isSignificant: chiResult.isSignificant,
+            uplift: uplift + '%',
+            recommendation: chiResult.isSignificant
+              ? (treatmentRate > controlRate ? 'PROMOTE_TREATMENT' : 'KEEP_CONTROL')
+              : 'CONTINUE_EXPERIMENT'
+          };
+        }
+      }
+
+      results = {
+        experimentId: req.params.experimentId,
+        status: experiment.data.status,
+        variants: variantResults,
+        statisticalAnalysis,
+        generatedAt: new Date().toISOString()
+      };
+    } else {
+      // No events recorded yet
+      results = {
+        experimentId: req.params.experimentId,
+        status: experiment.data.status,
+        variants: experiment.data.variants.map(v => ({
+          id: v.id,
+          name: v.name,
+          allocation: v.allocation,
+          sampleSize: 0,
+          metrics: {}
+        })),
+        statisticalAnalysis: {
+          primaryMetric: experiment.data.metrics?.primaryMetric || 'fraud_catch_rate',
+          pValue: null,
+          confidenceLevel: 0.95,
+          isSignificant: false,
+          uplift: null,
+          recommendation: 'NO_DATA',
+          message: 'No events recorded yet. Submit events via POST /experiments/:experimentId/event'
+        },
+        generatedAt: new Date().toISOString()
+      };
+    }
+
+    // Override with stored results if experiment is completed and has them
+    if (experiment.data.results && experiment.data.status === 'COMPLETED') {
+      const storedVariants = Object.entries(experiment.data.results)
         .filter(([key]) => key !== 'pValue' && key !== 'significant')
         .map(([key, value]) => ({
           id: key,
           name: key.charAt(0).toUpperCase() + key.slice(1),
           metrics: value
         }));
+      if (storedVariants.length > 0) results.variants = storedVariants;
     }
 
     res.json({ success: true, data: results });
@@ -350,6 +435,42 @@ router.get('/stats', (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// Chi-square test for statistical significance (2x2 contingency table)
+function chiSquareTest(control, treatment) {
+  const total = control.n + treatment.n;
+  const totalPositive = control.tp + treatment.tp;
+  const totalNegative = total - totalPositive;
+
+  if (total === 0 || totalPositive === 0 || totalNegative === 0) {
+    return { chiSquare: 0, pValue: 1, isSignificant: false };
+  }
+
+  // Expected values for 2x2 table
+  const expected = [
+    [control.n * totalPositive / total, control.n * totalNegative / total],
+    [treatment.n * totalPositive / total, treatment.n * totalNegative / total]
+  ];
+
+  const observed = [
+    [control.tp, control.n - control.tp],
+    [treatment.tp, treatment.n - treatment.tp]
+  ];
+
+  // Chi-square statistic
+  let chiSq = 0;
+  for (let i = 0; i < 2; i++) {
+    for (let j = 0; j < 2; j++) {
+      if (expected[i][j] > 0) {
+        chiSq += Math.pow(observed[i][j] - expected[i][j], 2) / expected[i][j];
+      }
+    }
+  }
+
+  // p-value approximation for 1 degree of freedom
+  const pValue = Math.exp(-chiSq / 2);
+  return { chiSquare: chiSq, pValue, isSignificant: pValue < 0.05 };
+}
 
 // Helper function for deterministic hashing
 function simpleHash(str) {

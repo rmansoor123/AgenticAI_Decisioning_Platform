@@ -45,7 +45,13 @@ const memoryStore = {
   agent_events: new Map(),
   agent_evaluations: new Map(),
   agent_eval_history: new Map(),
-  cases: new Map()
+  cases: new Map(),
+  prediction_history: new Map(),
+  rule_performance: new Map(),
+  experiment_events: new Map(),
+  data_profiles: new Map(),
+  model_training_runs: new Map(),
+  dead_letter_queue: new Map()
 };
 
 /**
@@ -181,7 +187,13 @@ function getIdField(table) {
     agent_feedback: 'feedback_id',
     agent_evaluations: 'evaluation_id',
     agent_eval_history: 'history_id',
-    cases: 'case_id'
+    cases: 'case_id',
+    prediction_history: 'prediction_id',
+    rule_performance: 'id',
+    experiment_events: 'event_id',
+    data_profiles: 'profile_id',
+    model_training_runs: 'run_id',
+    dead_letter_queue: 'id'
   };
   return idFields[table] || 'id';
 }

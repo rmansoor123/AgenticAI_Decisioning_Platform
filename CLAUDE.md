@@ -778,6 +778,24 @@ policy:violation                          hard policy triggered
 
 ---
 
+## Platform Layer Status
+| Layer | Score | Key Capabilities |
+|---|---|---|
+| Data Platform | 8/10 | Real latency via `performance.now()`, data profiling, dead letter queue, enriched feature extraction |
+| ML Platform | 8/10 | Real PSI drift detection, confusion matrix from labeled predictions, prediction persistence, training run lineage |
+| Decision Engine | 8/10 | Real rule performance from `rule_performance` table, per-rule trigger tracking with latency |
+| Experimentation | 8/10 | Event persistence, real results aggregation, chi-square significance testing, Monte Carlo bootstrap |
+
+### New Tables (Migration 011)
+| Table | Purpose |
+|---|---|
+| `prediction_history` | Every ML prediction — enables confusion matrix, drift detection, feedback loop |
+| `rule_performance` | Every rule evaluation — enables real performance metrics |
+| `experiment_events` | A/B test events — enables real results aggregation |
+| `data_profiles` | Dataset quality profiles — enables real completeness/freshness metrics |
+| `model_training_runs` | Training history — enables real model lineage |
+| `dead_letter_queue` | Failed ingestion events — enables retry/debugging |
+
 ## Roadmap Priorities
 1. ~~Wire 4 existing agents — payout, listing, returns, profile-updates~~ ✅ DONE
 2. ~~Build TransactionRiskAgent + transaction-processing~~ ✅ DONE
@@ -789,6 +807,7 @@ policy:violation                          hard policy triggered
 8. ~~Fix Mem0 async/await mismatch in base-agent.js~~ ✅ DONE
 9. Citation-grounded reasoning: every claim linked to specific tool evidence
 10. Golden test suite: 100+ labeled cases for regression testing
+11. ~~Upgrade Data/ML/Decision/Experimentation layers from POC to production-grade~~ ✅ DONE
 
 ### Kubernetes
 - Manifests: `k8s/base/` (Kustomize) with `k8s/overlays/dev/` and `k8s/overlays/prod/`

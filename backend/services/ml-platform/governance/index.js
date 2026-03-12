@@ -135,17 +135,36 @@ router.get('/models/:modelId/lineage', (req, res) => {
       return res.status(404).json({ success: false, error: 'Model not found' });
     }
 
+    // Query actual training runs for the model
+    const trainingRuns = db_ops.raw(
+      'SELECT * FROM model_training_runs WHERE model_id = ? ORDER BY started_at DESC LIMIT 5',
+      [model.data.modelId]
+    );
+
+    // Count predictions for this model
+    const predCount = db_ops.raw(
+      'SELECT COUNT(*) as cnt FROM prediction_history WHERE model_id = ?',
+      [model.data.modelId]
+    );
+
+    const latestRun = trainingRuns[0];
     const lineage = {
       modelId: model.data.modelId,
       name: model.data.name,
       version: model.data.version,
-      trainingData: {
-        datasets: ['transactions_training_v2', 'fraud_labels_v3'],
+      trainingData: latestRun ? {
+        datasets: [`training_run_${latestRun.run_id}`],
         timeRange: {
-          start: '2024-01-01',
-          end: '2024-06-30'
+          start: latestRun.started_at,
+          end: latestRun.completed_at || 'in_progress'
         },
-        samples: model.data.trainingData?.samples || 1000000
+        samples: latestRun.training_data_count || 0,
+        validationSamples: latestRun.validation_data_count || 0,
+        metrics: latestRun.metrics ? JSON.parse(latestRun.metrics) : null
+      } : {
+        datasets: model.data.trainingData?.datasets || [],
+        samples: model.data.trainingData?.samples || 0,
+        message: 'No training runs recorded yet'
       },
       features: {
         featureStore: 'seller_features_v2',
@@ -153,6 +172,16 @@ router.get('/models/:modelId/lineage', (req, res) => {
       },
       parentModel: model.data.parentModelId || null,
       derivedModels: [],
+      predictionCount: predCount[0]?.cnt || 0,
+      trainingHistory: trainingRuns.map(r => ({
+        runId: r.run_id,
+        status: r.status,
+        accuracy: r.final_accuracy,
+        loss: r.final_loss,
+        startedAt: r.started_at,
+        completedAt: r.completed_at
+      })),
+      checksum: JSON.stringify(model.data.metrics || {}).length,
       artifacts: {
         modelPath: `s3://ml-models/${model.data.modelId}/model.pkl`,
         metricsPath: `s3://ml-models/${model.data.modelId}/metrics.json`,

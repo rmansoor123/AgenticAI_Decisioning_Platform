@@ -114,18 +114,44 @@ router.post('/explain', (req, res) => {
   try {
     const { sql } = req.body;
 
+    // Real timing-based explain plan
+    const stages = [];
+    let t0 = performance.now();
+
+    // Stage 1: Parse SQL
+    const sqlLower = (sql || '').toLowerCase();
+    stages.push({ step: 1, operation: 'PARSE_SQL', durationMs: parseFloat((performance.now() - t0).toFixed(3)) });
+
+    // Stage 2: Identify sources
+    t0 = performance.now();
+    const detectedSources = [];
+    if (sqlLower.includes('transaction')) detectedSources.push('transactions');
+    if (sqlLower.includes('seller')) detectedSources.push('sellers');
+    if (sqlLower.includes('payout')) detectedSources.push('payouts');
+    if (sqlLower.includes('listing')) detectedSources.push('listings');
+    if (detectedSources.length === 0) detectedSources.push('transactions');
+    stages.push({ step: 2, operation: 'IDENTIFY_SOURCES', durationMs: parseFloat((performance.now() - t0).toFixed(3)), sources: detectedSources });
+
+    // Stage 3: Estimate fetch
+    t0 = performance.now();
+    const estimatedRows = detectedSources.reduce((sum, src) => sum + db_ops.count(src), 0);
+    stages.push({ step: 3, operation: 'ESTIMATE_ROWS', durationMs: parseFloat((performance.now() - t0).toFixed(3)), estimatedRows });
+
+    // Stage 4-6: Static estimates based on detected complexity
+    const hasJoin = sqlLower.includes('join');
+    const hasWhere = sqlLower.includes('where');
+    stages.push({ step: 4, operation: 'FETCH_FROM_SOURCES', estimatedTimeMs: detectedSources.length * 25 });
+    if (hasJoin) stages.push({ step: 5, operation: 'JOIN_RESULTS', estimatedTimeMs: 20 });
+    if (hasWhere) stages.push({ step: 6, operation: 'APPLY_FILTERS', estimatedTimeMs: 5 });
+    stages.push({ step: stages.length + 1, operation: 'RETURN_RESULTS', estimatedTimeMs: 2 });
+
+    const totalEstimated = stages.reduce((sum, s) => sum + (s.durationMs || s.estimatedTimeMs || 0), 0);
+
     const plan = {
       sql,
-      steps: [
-        { step: 1, operation: 'PARSE_SQL', estimatedTimeMs: 1 },
-        { step: 2, operation: 'IDENTIFY_SOURCES', estimatedTimeMs: 2 },
-        { step: 3, operation: 'FETCH_FROM_SOURCES', estimatedTimeMs: 50 },
-        { step: 4, operation: 'JOIN_RESULTS', estimatedTimeMs: 20 },
-        { step: 5, operation: 'APPLY_FILTERS', estimatedTimeMs: 5 },
-        { step: 6, operation: 'RETURN_RESULTS', estimatedTimeMs: 2 }
-      ],
-      estimatedTotalMs: 80,
-      estimatedRows: 'unknown',
+      steps: stages,
+      estimatedTotalMs: parseFloat(totalEstimated.toFixed(3)),
+      estimatedRows,
       warnings: []
     };
 
