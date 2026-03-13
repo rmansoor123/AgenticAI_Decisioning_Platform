@@ -13,7 +13,7 @@ const __dirname = path.dirname(__filename);
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../../data/fraud_detection.db');
 
 let db = null;
-let usingSqlite = false;
+let usingSqlite = null; // null = not yet attempted, true = using SQLite, false = fallback to in-memory
 
 // In-memory fallback store
 const memoryStore = {
@@ -46,6 +46,15 @@ const memoryStore = {
   agent_evaluations: new Map(),
   agent_eval_history: new Map(),
   cases: new Map(),
+  account_setups: new Map(),
+  item_setups: new Map(),
+  pricing_records: new Map(),
+  profile_updates: new Map(),
+  returns: new Map(),
+  agent_calibration: new Map(),
+  agent_costs: new Map(),
+  agent_episodes: new Map(),
+  reasoning_checkpoints: new Map(),
   prediction_history: new Map(),
   rule_performance: new Map(),
   experiment_events: new Map(),
@@ -71,7 +80,7 @@ async function loadSqlite() {
  * Initialize the database
  */
 export async function initializeDatabase() {
-  if (db || usingSqlite === false) return db;
+  if (db || usingSqlite === false) return db; // skip if already initialized or already failed
 
   const Database = await loadSqlite();
 
@@ -188,6 +197,15 @@ function getIdField(table) {
     agent_evaluations: 'evaluation_id',
     agent_eval_history: 'history_id',
     cases: 'case_id',
+    account_setups: 'setup_id',
+    item_setups: 'item_id',
+    pricing_records: 'pricing_id',
+    profile_updates: 'update_id',
+    returns: 'return_id',
+    agent_calibration: 'calibration_id',
+    agent_costs: 'cost_id',
+    agent_episodes: 'episode_id',
+    reasoning_checkpoints: 'checkpoint_id',
     prediction_history: 'prediction_id',
     rule_performance: 'id',
     experiment_events: 'event_id',

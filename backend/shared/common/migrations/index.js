@@ -14,6 +14,7 @@ import caseQueue from './008-case-queue.js';
 import agentFeedback from './009-agent-feedback.js';
 import agentEvents from './010-agent-events.js';
 import platformUpgrade from './011-platform-upgrade.js';
+import lifecycleTables from './012-lifecycle-tables.js';
 
 const migrations = [
   { version: '001', name: 'initial-schema', migration: initialSchema },
@@ -26,7 +27,8 @@ const migrations = [
   { version: '008', name: 'case-queue', migration: caseQueue },
   { version: '009', name: 'agent-feedback', migration: agentFeedback },
   { version: '010', name: 'agent-events', migration: agentEvents },
-  { version: '011', name: 'platform-upgrade', migration: platformUpgrade }
+  { version: '011', name: 'platform-upgrade', migration: platformUpgrade },
+  { version: '012', name: 'lifecycle-tables', migration: lifecycleTables }
 ];
 
 /**

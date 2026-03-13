@@ -391,7 +391,7 @@ app.use((req, res, next) => {
 });
 
 // Initialize database and seed with data
-initializeDatabase();
+await initializeDatabase();
 await seedDatabase();
 
 // Initialize ML models (async, but don't block startup)
