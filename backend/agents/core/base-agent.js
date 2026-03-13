@@ -48,6 +48,7 @@ import { getInputSanitizer } from './input-sanitizer.js';
 import { getOutputValidator } from './output-validator.js';
 import { getAgentRateLimiter } from './agent-rate-limiter.js';
 import { getReasoningCheckpoint } from './reasoning-checkpoint.js';
+import { getPlatformIntegrator } from './platform-integrator.js';
 
 // Import event bus (only if running in context with WebSocket)
 let eventBus = null;
@@ -82,7 +83,11 @@ const AGENT_PROMPT_MAP = {
   'REVIEW_INTEGRITY': 'review-integrity',
   'BEHAVIORAL_ANALYTICS': 'behavioral-analytics',
   'BUYER_TRUST': 'buyer-trust',
-  'POLICY_ENFORCEMENT': 'policy-enforcement'
+  'POLICY_ENFORCEMENT': 'policy-enforcement',
+  'DATA_AGENT': 'data-agent',
+  'DATA_PLAYGROUND': 'data-playground',
+  'QUERY_FEDERATION': 'query-federation',
+  'FEATURE_ENGINEERING': 'feature-engineering'
 };
 
 export class BaseAgent {
@@ -665,6 +670,48 @@ export class BaseAgent {
         this.traceCollector.endSpan(traceId, 'investigation-round-2', {
           actionsExecuted: followUpPlan.actions.length
         });
+      }
+
+      // Step 5.2: PLATFORM ENRICH — fold ML, rules, and experiment signals
+      if (!this.skipPlatformEnrich) {
+        try {
+          const platformIntegrator = getPlatformIntegrator();
+          const domain = input?.domain || this.agentId.toLowerCase().replace(/_/g, '-');
+          const platformSignals = await platformIntegrator.enrich(
+            this.agentId, domain, input, thought.result
+          );
+
+          // Append enriched risk factors
+          if (platformSignals.enrichedRiskFactors.length > 0) {
+            if (!thought.result.riskFactors) thought.result.riskFactors = [];
+            thought.result.riskFactors.push(...platformSignals.enrichedRiskFactors);
+          }
+
+          // Adjust overall risk score
+          if (thought.result.overallRisk) {
+            const mlAdj = platformSignals.mlScore ? Math.round(platformSignals.mlScore.score * 15) : 0;
+            const ruleAdj = platformSignals.ruleRiskScore || 0;
+            thought.result.overallRisk.score = Math.min(100, Math.max(0,
+              thought.result.overallRisk.score + mlAdj + ruleAdj));
+            // Recalculate level
+            const s = thought.result.overallRisk.score;
+            thought.result.overallRisk.level = s >= 86 ? 'CRITICAL' : s >= 61 ? 'HIGH' : s >= 31 ? 'MEDIUM' : 'LOW';
+          }
+
+          // Attach for audit trail
+          thought.result._platformSignals = platformSignals;
+          if (platformSignals.experimentVariant) {
+            thought.result._experimentVariant = platformSignals.experimentVariant;
+          }
+
+          this.currentChain.addStep({
+            type: 'analysis',
+            content: `Platform: ML=${platformSignals.mlScore?.score?.toFixed(3) || 'N/A'}, Rules=${platformSignals.triggeredRules.length} triggered, Exp=${platformSignals.experimentVariant?.variant || 'none'} (${platformSignals.platformLatencyMs.toFixed(1)}ms)`,
+            confidence: CONFIDENCE.LIKELY
+          });
+        } catch (e) {
+          thought.result._platformSignals = { error: e.message, _platformEnriched: false };
+        }
       }
 
       // Step 5.25: POLICY CHECK — enforce hard/soft policies on the proposed decision

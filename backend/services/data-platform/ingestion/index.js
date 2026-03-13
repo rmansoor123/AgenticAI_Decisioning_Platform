@@ -277,4 +277,24 @@ function extractFeatures(event) {
   };
 }
 
+// ─── Agent-Enhanced Route ────────────────────────────────────────────────────
+
+router.post('/agent/ingest', (req, res) => {
+  const correlationId = `INGEST-${Date.now().toString(36).toUpperCase()}`;
+
+  import('../../../agents/specialized/data-agent.js')
+    .then(({ getDataAgent }) => {
+      const agent = getDataAgent();
+      agent.reason({ operation: 'ingest', ...req.body }, { correlationId })
+        .then(() => console.log(`[DataAgent:Ingest] Completed ${correlationId}`))
+        .catch(err => console.error(`[DataAgent:Ingest] Error ${correlationId}:`, err.message));
+    })
+    .catch(err => console.error('[DataAgent:Ingest] Import error:', err.message));
+
+  res.status(202).json({
+    success: true,
+    data: { correlationId, status: 'ACCEPTED', message: 'Ingestion analysis started' }
+  });
+});
+
 export default router;

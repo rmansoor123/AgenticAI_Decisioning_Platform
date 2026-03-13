@@ -310,4 +310,42 @@ function toCamelCase(str) {
   return str.replace(/_([a-z])/g, (g) => g[1].toUpperCase());
 }
 
+// ─── Agent-Enhanced Routes ───────────────────────────────────────────────────
+
+router.post('/agent/explore', (req, res) => {
+  const correlationId = `EXPLORE-${Date.now().toString(36).toUpperCase()}`;
+
+  import('../../../agents/specialized/data-playground-agent.js')
+    .then(({ getDataPlaygroundAgent }) => {
+      const agent = getDataPlaygroundAgent();
+      agent.reason(req.body, { correlationId })
+        .then(() => console.log(`[DataPlayground] Completed ${correlationId}`))
+        .catch(err => console.error(`[DataPlayground] Error ${correlationId}:`, err.message));
+    })
+    .catch(err => console.error('[DataPlayground] Import error:', err.message));
+
+  res.status(202).json({
+    success: true,
+    data: { correlationId, status: 'ACCEPTED', message: 'Data exploration started' }
+  });
+});
+
+router.post('/agent/federate', (req, res) => {
+  const correlationId = `FED-${Date.now().toString(36).toUpperCase()}`;
+
+  import('../../../agents/specialized/query-federation-agent.js')
+    .then(({ getQueryFederationAgent }) => {
+      const agent = getQueryFederationAgent();
+      agent.reason(req.body, { correlationId })
+        .then(() => console.log(`[QueryFederation] Completed ${correlationId}`))
+        .catch(err => console.error(`[QueryFederation] Error ${correlationId}:`, err.message));
+    })
+    .catch(err => console.error('[QueryFederation] Import error:', err.message));
+
+  res.status(202).json({
+    success: true,
+    data: { correlationId, status: 'ACCEPTED', message: 'Federated query started' }
+  });
+});
+
 export default router;

@@ -446,6 +446,10 @@ import { getReviewIntegrityAgent } from '../agents/specialized/review-integrity-
 import { getBehavioralAnalyticsAgent } from '../agents/specialized/behavioral-analytics-agent.js';
 import { getBuyerTrustAgent } from '../agents/specialized/buyer-trust-agent.js';
 import { getPolicyEnforcementAgent } from '../agents/specialized/policy-enforcement-agent.js';
+import { getDataAgent } from '../agents/specialized/data-agent.js';
+import { getDataPlaygroundAgent } from '../agents/specialized/data-playground-agent.js';
+import { getQueryFederationAgent } from '../agents/specialized/query-federation-agent.js';
+import { getFeatureEngineeringAgent } from '../agents/specialized/feature-engineering-agent.js';
 import { orchestrator } from '../agents/core/agent-orchestrator.js';
 
 const crossDomainAgent = getCrossDomainAgent();
@@ -488,6 +492,14 @@ orchestrator.registerAgent(reviewIntegrityAgent);
 orchestrator.registerAgent(behavioralAnalyticsAgent);
 orchestrator.registerAgent(buyerTrustAgent);
 orchestrator.registerAgent(policyEnforcementAgent);
+const dataAgent = getDataAgent();
+const dataPlaygroundAgent = getDataPlaygroundAgent();
+const queryFederationAgent = getQueryFederationAgent();
+const featureEngineeringAgent = getFeatureEngineeringAgent();
+orchestrator.registerAgent(dataAgent);
+orchestrator.registerAgent(dataPlaygroundAgent);
+orchestrator.registerAgent(queryFederationAgent);
+orchestrator.registerAgent(featureEngineeringAgent);
 setCrossDomainAgent(crossDomainAgent);
 setPolicyEvolutionAgent(policyEvolutionAgent);
 setRuleOptimizationAgent(ruleOptimizationAgent);
@@ -501,6 +513,7 @@ setReturnsAbuseAgent(returnsAbuseAgent);
 // Exception: CrossDomainCorrelationAgent runs on a 6h schedule for fraud ring detection.
 console.log('Autonomous agents registered: Cross-Domain Correlation (6h schedule), Policy Evolution (30m schedule), Rule Optimization (24h schedule), Payout Risk, Listing Intelligence, Profile Mutation, Returns Abuse');
 console.log('Request-driven agents registered: ATO Detection, Shipping Risk, Account Setup, Item Setup, Pricing Risk, Transaction Risk, Payment Risk, Compliance, Network Intelligence, Review Integrity, Behavioral Analytics, Buyer Trust, Policy Enforcement');
+console.log('Data agents registered: Data Agent (orchestrator), Data Playground, Query Federation, Feature Engineering');
 
 // ============================================================================
 // API ROUTES
@@ -727,6 +740,10 @@ app.use('/api/policy', policyEnforcementRouter);
 app.use('/api/data/ingestion', dataIngestionRouter);
 app.use('/api/data/catalog', dataCatalogRouter);
 app.use('/api/data/query', queryFederationRouter);
+
+// Data Agent
+import dataAgentRouter from '../services/data-platform/data-agent-router.js';
+app.use('/api/data/agent', dataAgentRouter);
 
 // ML Platform
 app.use('/api/ml/inference', mlInferenceRouter);

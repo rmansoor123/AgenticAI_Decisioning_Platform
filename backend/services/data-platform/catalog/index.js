@@ -361,4 +361,42 @@ function generateSampleSchema(datasetName) {
   return schemas[datasetName] || schemas.default;
 }
 
+// ─── Agent-Enhanced Routes ───────────────────────────────────────────────────
+
+router.post('/agent/curate', (req, res) => {
+  const correlationId = `CURATE-${Date.now().toString(36).toUpperCase()}`;
+
+  import('../../../agents/specialized/data-agent.js')
+    .then(({ getDataAgent }) => {
+      const agent = getDataAgent();
+      agent.reason({ operation: 'curate', ...req.body }, { correlationId })
+        .then(() => console.log(`[DataAgent:Curate] Completed ${correlationId}`))
+        .catch(err => console.error(`[DataAgent:Curate] Error ${correlationId}:`, err.message));
+    })
+    .catch(err => console.error('[DataAgent:Curate] Import error:', err.message));
+
+  res.status(202).json({
+    success: true,
+    data: { correlationId, status: 'ACCEPTED', message: 'Curation analysis started' }
+  });
+});
+
+router.post('/agent/features', (req, res) => {
+  const correlationId = `FEAT-${Date.now().toString(36).toUpperCase()}`;
+
+  import('../../../agents/specialized/feature-engineering-agent.js')
+    .then(({ getFeatureEngineeringAgent }) => {
+      const agent = getFeatureEngineeringAgent();
+      agent.reason(req.body, { correlationId })
+        .then(() => console.log(`[FeatureEngineering] Completed ${correlationId}`))
+        .catch(err => console.error(`[FeatureEngineering] Error ${correlationId}:`, err.message));
+    })
+    .catch(err => console.error('[FeatureEngineering] Import error:', err.message));
+
+  res.status(202).json({
+    success: true,
+    data: { correlationId, status: 'ACCEPTED', message: 'Feature engineering started' }
+  });
+});
+
 export default router;
