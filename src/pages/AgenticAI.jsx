@@ -4,6 +4,7 @@ import {
   AlertTriangle, Zap, MessageSquare, GitBranch, Target,
   Activity, Clock, ChevronRight, Sparkles, Network
 } from 'lucide-react'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 
@@ -24,7 +25,7 @@ export default function AgenticAI() {
   const fetchLLMStatus = async () => {
     try {
       const res = await fetch(`${API_BASE}/agents/llm-status`)
-      const data = await res.json()
+      const data = await safeJson(res)
       if (data.success) setLlmStatus(data.data)
     } catch (error) {
       console.error('Error fetching LLM status:', error)
@@ -57,7 +58,7 @@ export default function AgenticAI() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transactionId: `TXN-DEMO-${Date.now().toString(36).toUpperCase()}` })
       })
-      const data = await res.json()
+      const data = await safeJson(res)
       if (data.success) {
         setDemoResult(data.data)
       }
@@ -76,7 +77,7 @@ export default function AgenticAI() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transactionId, fullAnalysis: true })
       })
-      const data = await res.json()
+      const data = await safeJson(res)
       if (data.success) {
         setInvestigationResult(data.data)
       }

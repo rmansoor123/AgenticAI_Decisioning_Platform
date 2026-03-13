@@ -5,25 +5,18 @@ import {
 } from 'lucide-react'
 import AgentFlowViewer from '../components/AgentFlowViewer'
 import { useAgentFlow } from '../hooks/useAgentFlow'
+import { useSellers } from '../hooks/useSellers'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 
 const eventTypes = ['LOGIN_ATTEMPT', 'PASSWORD_CHANGE', 'EMAIL_CHANGE', 'BANK_CHANGE', 'MFA_DISABLED', 'SESSION_START', 'API_KEY_CREATED']
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
 
-const atoProfiles = [
-  { sellerId: 'SLR-990ADB07', name: 'Turcotte, Daniel and Quigley', risk: 'low' },
-  { sellerId: 'SLR-FF1DB1A3', name: 'Quigley - Raynor', risk: 'medium' },
-  { sellerId: 'SLR-343DCA9E', name: 'Emard - Emard', risk: 'low' },
-  { sellerId: 'SLR-E23A5F9B', name: 'Carroll, Price and Torp', risk: 'high' },
-  { sellerId: 'SLR-2DF52FC8', name: 'Rodriguez Group', risk: 'low' },
-  { sellerId: 'SLR-9C3B40DE', name: 'Mraz, Grant and Ankunding', risk: 'high' },
-]
 
 function generateRandomATO() {
-  const profile = pick(atoProfiles)
   return {
-    sellerId: profile.sellerId,
+    sellerId: '',
     eventType: pick(eventTypes),
     deviceFingerprint: `FP-${Math.random().toString(36).substr(2, 8).toUpperCase()}`,
     location: pick(['US', 'GB', 'DE', 'NG', 'RO', 'JP', 'BR'])
@@ -40,9 +33,19 @@ export default function ATOLive() {
   const [errors, setErrors] = useState({})
   const [correlationId, setCorrelationId] = useState(null)
 
-  const { events, isConnected, isAgentRunning, agentDecision, clearEvents } = useAgentFlow(correlationId)
+  const { events, isConnected, isAgentRunning, agentDecision, pollingDone, clearEvents } = useAgentFlow(correlationId)
+  const showDecision = !!(agentDecision && pollingDone)
+  const { sellers, loading: sellersLoading, urlSellerId } = useSellers()
 
-  useEffect(() => { if (agentDecision) setSubmitting(false) }, [agentDecision])
+  useEffect(() => { if (showDecision) setSubmitting(false) }, [showDecision])
+
+  useEffect(() => { if (urlSellerId) handleChange('sellerId', urlSellerId) }, [urlSellerId])
+  useEffect(() => {
+    if (sellers.length && !urlSellerId && !formData.sellerId) {
+      const s = sellers[Math.floor(Math.random() * sellers.length)]
+      handleChange('sellerId', s.sellerId)
+    }
+  }, [sellers])
 
   const handleChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -57,7 +60,7 @@ export default function ATOLive() {
     return Object.keys(e).length === 0
   }
 
-  const handleNewSubmission = () => { setFormData(generateRandomATO()); clearEvents(); setCorrelationId(null); setSubmitting(false); setResult(null); setErrors({}) }
+  const handleNewSubmission = () => { const d = generateRandomATO(); if (sellers.length) d.sellerId = sellers[Math.floor(Math.random() * sellers.length)].sellerId; setFormData(d); clearEvents(); setCorrelationId(null); setSubmitting(false); setResult(null); setErrors({}) }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -68,7 +71,7 @@ export default function ATOLive() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sellerId: formData.sellerId, eventType: formData.eventType, deviceInfo: { fingerprint: formData.deviceFingerprint }, location: { country: formData.location } })
       })
-      const data = await response.json()
+      const data = await safeJson(response)
       if (data.success) {
         if (data.correlationId) setCorrelationId(data.correlationId)
         setResult({ success: true, pending: true, eventId: data.eventId, message: data.message || 'Agent evaluation in progress...' })
@@ -116,7 +119,15 @@ export default function ATOLive() {
                 <ShieldAlert className="w-4 h-4 text-red-400" /> Event Details
               </h3>
               <div className="grid grid-cols-2 gap-3">
-                <InputField label="Seller ID" field="sellerId" placeholder="SLR-XXXXX" required />
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1.5">Seller *</label>
+                  <select value={formData.sellerId} onChange={(e) => handleChange('sellerId', e.target.value)}
+                    className={`w-full px-3 py-2 bg-gray-800 border rounded-lg text-white text-sm ${errors.sellerId ? 'border-red-500' : 'border-gray-700'} focus:border-red-500 focus:outline-none`}>
+                    <option value="">Select seller</option>
+                    {sellers.map(p => <option key={p.sellerId} value={p.sellerId}>{p.sellerId} — {p.name}</option>)}
+                  </select>
+                  {errors.sellerId && <p className="text-xs text-red-400 mt-1">{errors.sellerId}</p>}
+                </div>
                 <div>
                   <label className="block text-sm text-gray-400 mb-1.5">Event Type *</label>
                   <select value={formData.eventType} onChange={(e) => handleChange('eventType', e.target.value)}
@@ -131,7 +142,7 @@ export default function ATOLive() {
               </div>
             </div>
 
-            <button type="button" onClick={() => setFormData(generateRandomATO())} className="w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg border border-gray-700 flex items-center justify-center gap-2 transition-colors">
+            <button type="button" onClick={() => { const d = generateRandomATO(); if (sellers.length) d.sellerId = sellers[Math.floor(Math.random() * sellers.length)].sellerId; setFormData(d) }} className="w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg border border-gray-700 flex items-center justify-center gap-2 transition-colors">
               <RotateCcw className="w-4 h-4" /> Generate Random Event
             </button>
 
@@ -147,7 +158,7 @@ export default function ATOLive() {
             </div></div>
           )}
 
-          {result?.pending && !agentDecision && (
+          {result?.pending && !showDecision && (
             <div className="mt-4"><div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
               <div className="flex items-center gap-3"><Loader className="w-5 h-5 text-red-400 animate-spin" /><div>
                 <h4 className="font-semibold text-red-400">Agent Evaluating...</h4>
@@ -156,7 +167,7 @@ export default function ATOLive() {
             </div></div>
           )}
 
-          {agentDecision && agentDecision.decision !== 'ERROR' && (() => {
+          {showDecision && agentDecision.decision !== 'ERROR' && (() => {
             const Icon = getDecisionIcon(agentDecision.decision)
             const color = getDecisionColor(agentDecision.decision)
             return (
@@ -175,7 +186,7 @@ export default function ATOLive() {
             )
           })()}
 
-          {agentDecision?.decision === 'ERROR' && (
+          {showDecision && agentDecision?.decision === 'ERROR' && (
             <div className="mt-4"><div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
               <div className="flex items-center gap-2 text-red-400"><XCircle className="w-5 h-5" /><span className="font-semibold">Agent Error</span></div>
               <p className="text-sm text-gray-300 mt-1">{agentDecision.error}</p>

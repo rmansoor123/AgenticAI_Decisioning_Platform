@@ -1,8 +1,8 @@
 /**
- * LLM Client - Multi-Provider (Ollama + OpenAI + Anthropic)
+ * LLM Client - Multi-Provider (Groq + Ollama + OpenAI + Anthropic)
  *
  * Provides LLM reasoning capabilities to agents with:
- * - Ollama, OpenAI, and Anthropic provider support (LLM_PROVIDER env var)
+ * - Groq, Ollama, OpenAI, and Anthropic provider support (LLM_PROVIDER env var)
  * - Singleton pattern for shared client
  * - Graceful fallback when API key absent
  * - Retry with exponential backoff
@@ -32,9 +32,10 @@ try {
   // OpenAI SDK not installed
 }
 
-const LLM_PROVIDER = process.env.LLM_PROVIDER || 'ollama'; // 'ollama' | 'openai' | 'anthropic'
+const LLM_PROVIDER = process.env.LLM_PROVIDER || 'ollama'; // 'groq' | 'ollama' | 'openai' | 'anthropic'
 
 const DEFAULT_MODELS = {
+  groq: 'llama-3.3-70b-versatile',
   ollama: 'qwen2.5:7b',
   openai: 'gpt-4o-mini',
   anthropic: 'claude-haiku-4-5-20251001'
@@ -67,7 +68,9 @@ class LLMClient {
       return;
     }
 
-    if (this.provider === 'openai') {
+    if (this.provider === 'groq') {
+      this._initGroq();
+    } else if (this.provider === 'openai') {
       this._initOpenAI();
     } else if (this.provider === 'ollama') {
       this._initOllama();
@@ -91,6 +94,24 @@ class LLMClient {
       if (!OpenAI) reasons.push('SDK not installed');
       if (!apiKey || apiKey === 'your_openai_key') reasons.push('no OPENAI_API_KEY');
       console.log(`LLM Client: OpenAI disabled (${reasons.join(', ')}). Agents use hardcoded logic.`);
+    }
+  }
+
+  _initGroq() {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (OpenAI && apiKey && apiKey !== 'your_groq_key') {
+      try {
+        this.client = new OpenAI({ baseURL: 'https://api.groq.com/openai/v1', apiKey });
+        this.enabled = true;
+        console.log(`LLM Client initialized (Groq, model: ${MODEL})`);
+      } catch (e) {
+        console.warn('LLM Client: Failed to initialize Groq:', e.message);
+      }
+    } else {
+      const reasons = [];
+      if (!OpenAI) reasons.push('OpenAI SDK not installed');
+      if (!apiKey || apiKey === 'your_groq_key') reasons.push('no GROQ_API_KEY');
+      console.log(`LLM Client: Groq disabled (${reasons.join(', ')}). Agents use hardcoded logic.`);
     }
   }
 
@@ -154,7 +175,7 @@ class LLMClient {
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
         let result;
-        if (this.provider === 'openai' || this.provider === 'ollama') {
+        if (this.provider === 'groq' || this.provider === 'openai' || this.provider === 'ollama') {
           result = await this._callOpenAI(model, temperature, systemPrompt, userPrompt, options);
         } else {
           result = await this._callAnthropic(model, temperature, systemPrompt, userPrompt, options);

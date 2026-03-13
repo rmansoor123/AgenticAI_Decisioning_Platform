@@ -5,6 +5,7 @@ import {
   Play, RefreshCw, Eye, ArrowRight, Sparkles, Brain,
   Activity, TrendingUp, TrendingDown, Zap, ChevronRight
 } from 'lucide-react'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 
@@ -22,10 +23,16 @@ export default function Onboarding() {
 
   const fetchSellers = async () => {
     try {
-      const res = await fetch(`${API_BASE}/onboarding/sellers?limit=20`)
-      const data = await res.json()
+      const res = await fetch(`${API_BASE}/onboarding/sellers?limit=120`)
+      const data = await safeJson(res)
       if (data.success) {
-        setSellers(data.data || [])
+        // Sort newest first so recently onboarded sellers appear at the top
+        const sorted = (data.data || []).sort((a, b) => {
+          const ta = a.createdAt || a.sellerId || ''
+          const tb = b.createdAt || b.sellerId || ''
+          return tb.localeCompare(ta)
+        })
+        setSellers(sorted)
       }
     } catch (error) {
       console.error('Error fetching sellers:', error)
@@ -35,7 +42,7 @@ export default function Onboarding() {
   const fetchStats = async () => {
     try {
       const res = await fetch(`${API_BASE}/onboarding/stats`)
-      const data = await res.json()
+      const data = await safeJson(res)
       if (data.success) {
         setStats(data.data)
       }
@@ -223,7 +230,7 @@ export default function Onboarding() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(mockSeller)
       })
-      const data = await res.json()
+      const data = await safeJson(res)
       
       if (data.success) {
         // Also fetch the detailed agent evaluation

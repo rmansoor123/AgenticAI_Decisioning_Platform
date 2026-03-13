@@ -5,25 +5,17 @@ import {
 } from 'lucide-react'
 import AgentFlowViewer from '../components/AgentFlowViewer'
 import { useAgentFlow } from '../hooks/useAgentFlow'
+import { useSellers } from '../hooks/useSellers'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 
 const paymentMethods = ['credit_card', 'debit_card', 'digital_wallet', 'gift_card', 'crypto']
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
 
-const sellerProfiles = [
-  { sellerId: 'SLR-990ADB07', name: 'Turcotte, Daniel and Quigley', risk: 'low' },
-  { sellerId: 'SLR-FF1DB1A3', name: 'Quigley - Raynor', risk: 'medium' },
-  { sellerId: 'SLR-343DCA9E', name: 'Emard - Emard', risk: 'low' },
-  { sellerId: 'SLR-E23A5F9B', name: 'Carroll, Price and Torp', risk: 'high' },
-  { sellerId: 'SLR-2DF52FC8', name: 'Rodriguez Group', risk: 'low' },
-  { sellerId: 'SLR-9C3B40DE', name: 'Mraz, Grant and Ankunding', risk: 'high' },
-]
-
 function generateRandom() {
-  const profile = pick(sellerProfiles)
   return {
-    sellerId: profile.sellerId,
+    sellerId: '',
     amount: (Math.random() * 4990 + 10).toFixed(2),
     buyerId: `BUY-${Math.random().toString(36).substr(2, 8).toUpperCase()}`,
     paymentMethod: pick(paymentMethods),
@@ -42,14 +34,24 @@ export default function TransactionLive() {
   const [errors, setErrors] = useState({})
   const [correlationId, setCorrelationId] = useState(null)
 
-  const { events, isConnected, isAgentRunning, agentDecision, clearEvents } = useAgentFlow(correlationId)
+  const { events, isConnected, isAgentRunning, agentDecision, pollingDone, clearEvents } = useAgentFlow(correlationId)
+  const showDecision = !!(agentDecision && pollingDone)
+  const { sellers, loading: sellersLoading, urlSellerId } = useSellers()
 
-  useEffect(() => { if (agentDecision) setSubmitting(false) }, [agentDecision])
+  useEffect(() => { if (showDecision) setSubmitting(false) }, [showDecision])
 
   const handleChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }))
     if (errors[field]) setErrors(prev => ({ ...prev, [field]: null }))
   }
+
+  useEffect(() => { if (urlSellerId) handleChange('sellerId', urlSellerId) }, [urlSellerId])
+  useEffect(() => {
+    if (sellers.length && !urlSellerId && !formData.sellerId) {
+      const s = sellers[Math.floor(Math.random() * sellers.length)]
+      handleChange('sellerId', s.sellerId)
+    }
+  }, [sellers])
 
   const validateForm = () => {
     const e = {}
@@ -61,7 +63,7 @@ export default function TransactionLive() {
     return Object.keys(e).length === 0
   }
 
-  const handleNewSubmission = () => { setFormData(generateRandom()); clearEvents(); setCorrelationId(null); setSubmitting(false); setResult(null); setErrors({}) }
+  const handleNewSubmission = () => { const d = generateRandom(); if (sellers.length) d.sellerId = sellers[Math.floor(Math.random() * sellers.length)].sellerId; setFormData(d); clearEvents(); setCorrelationId(null); setSubmitting(false); setResult(null); setErrors({}) }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -79,7 +81,7 @@ export default function TransactionLive() {
           deviceFingerprint: formData.deviceFingerprint
         })
       })
-      const data = await response.json()
+      const data = await safeJson(response)
       if (data.success) {
         if (data.correlationId) setCorrelationId(data.correlationId)
         setResult({ success: true, pending: true, entityId: data.entityId || data.transactionId, message: data.message || 'Agent evaluation in progress...' })
@@ -132,7 +134,7 @@ export default function TransactionLive() {
                   <select value={formData.sellerId} onChange={(e) => handleChange('sellerId', e.target.value)}
                     className={`w-full px-3 py-2 bg-gray-800 border rounded-lg text-white text-sm ${errors.sellerId ? 'border-red-500' : 'border-gray-700'} focus:border-indigo-500 focus:outline-none`}>
                     <option value="">Select seller</option>
-                    {sellerProfiles.map(p => <option key={p.sellerId} value={p.sellerId}>{p.sellerId} — {p.name}</option>)}
+                    {sellers.map(p => <option key={p.sellerId} value={p.sellerId}>{p.sellerId} — {p.name}</option>)}
                   </select>
                   {errors.sellerId && <p className="text-xs text-red-400 mt-1">{errors.sellerId}</p>}
                 </div>
@@ -151,7 +153,7 @@ export default function TransactionLive() {
               </div>
             </div>
 
-            <button type="button" onClick={() => setFormData(generateRandom())} className="w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg border border-gray-700 flex items-center justify-center gap-2 transition-colors">
+            <button type="button" onClick={() => { const d = generateRandom(); if (sellers.length) d.sellerId = sellers[Math.floor(Math.random() * sellers.length)].sellerId; setFormData(d) }} className="w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg border border-gray-700 flex items-center justify-center gap-2 transition-colors">
               <RotateCcw className="w-4 h-4" /> Generate Random Transaction
             </button>
 
@@ -167,7 +169,7 @@ export default function TransactionLive() {
             </div></div>
           )}
 
-          {result?.pending && !agentDecision && (
+          {result?.pending && !showDecision && (
             <div className="mt-4"><div className="bg-indigo-500/10 border border-indigo-500/30 rounded-xl p-4">
               <div className="flex items-center gap-3"><Loader className="w-5 h-5 text-indigo-400 animate-spin" /><div>
                 <h4 className="font-semibold text-indigo-400">Agent Evaluating...</h4>
@@ -176,7 +178,7 @@ export default function TransactionLive() {
             </div></div>
           )}
 
-          {agentDecision && agentDecision.decision !== 'ERROR' && (() => {
+          {showDecision && agentDecision.decision !== 'ERROR' && (() => {
             const Icon = getDecisionIcon(agentDecision.decision)
             const color = getDecisionColor(agentDecision.decision)
             return (
@@ -195,7 +197,7 @@ export default function TransactionLive() {
             )
           })()}
 
-          {agentDecision?.decision === 'ERROR' && (
+          {showDecision && agentDecision?.decision === 'ERROR' && (
             <div className="mt-4"><div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
               <div className="flex items-center gap-2 text-red-400"><XCircle className="w-5 h-5" /><span className="font-semibold">Agent Error</span></div>
               <p className="text-sm text-gray-300 mt-1">{agentDecision.error}</p>

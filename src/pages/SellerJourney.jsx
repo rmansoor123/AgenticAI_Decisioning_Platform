@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { useAgentFlow } from '../hooks/useAgentFlow'
 import AgentFlowViewer from '../components/AgentFlowViewer'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 
@@ -452,7 +453,7 @@ function CheckpointCard({ checkpoint, sellerId, isExpanded, onToggleExpand, isOn
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })
-      const data = await res.json()
+      const data = await safeJson(res)
       if (data.correlationId) {
         setCorrelationId(data.correlationId)
       } else if (data.success === false) {
@@ -623,10 +624,17 @@ export default function SellerJourney() {
 
   // Fetch sellers for picker
   useEffect(() => {
-    fetch(`${API_BASE}/onboarding/sellers?limit=50`)
+    fetch(`${API_BASE}/onboarding/sellers?limit=120`)
       .then(r => r.json())
       .then(data => {
-        if (data.success && data.data) setSellers(data.data)
+        if (data.success && data.data) {
+          const sorted = [...data.data].sort((a, b) => {
+            const ta = a.createdAt || a.sellerId || ''
+            const tb = b.createdAt || b.sellerId || ''
+            return tb.localeCompare(ta)
+          })
+          setSellers(sorted)
+        }
       })
       .catch(() => {})
   }, [])

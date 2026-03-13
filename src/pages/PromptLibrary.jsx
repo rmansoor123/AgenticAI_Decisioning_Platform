@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { BookOpen, Search, Plus, Edit3, Trash2, ChevronDown, ChevronRight, FileText, CheckCircle } from 'lucide-react';
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api';
 
@@ -92,7 +93,7 @@ export default function PromptLibrary() {
   const fetchPrompts = async () => {
     try {
       const res = await fetch(`${API_BASE}/prompts`);
-      const data = await res.json();
+      const data = await safeJson(res);
       if (data.success) {
         setPrompts(data.data);
       }
@@ -118,7 +119,7 @@ export default function PromptLibrary() {
     const fetchPrompt = async () => {
       try {
         const res = await fetch(`${API_BASE}/prompts/${selectedId}`);
-        const data = await res.json();
+        const data = await safeJson(res);
         if (!cancelled && data.success) {
           setSelectedPrompt(data.data);
         }
@@ -204,7 +205,7 @@ export default function PromptLibrary() {
             content: editContent,
           }),
         });
-        const result = await res.json();
+        const result = await safeJson(res);
         if (!result.success) {
           console.error('Save failed:', result.error);
           setModal(null);
@@ -224,7 +225,7 @@ export default function PromptLibrary() {
             content: editContent,
           }),
         });
-        const result = await res.json();
+        const result = await safeJson(res);
         if (!result.success) {
           console.error('Update failed:', result.error);
           setModal(null);
@@ -248,7 +249,7 @@ export default function PromptLibrary() {
   const handleDeleteConfirm = async () => {
     try {
       const res = await fetch(`${API_BASE}/prompts/${selectedId}`, { method: 'DELETE' });
-      const result = await res.json();
+      const result = await safeJson(res);
       if (!result.success) {
         console.error('Delete failed:', result.error);
         setModal(null);

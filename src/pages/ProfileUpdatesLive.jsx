@@ -5,6 +5,8 @@ import {
 } from 'lucide-react'
 import AgentFlowViewer from '../components/AgentFlowViewer'
 import { useAgentFlow } from '../hooks/useAgentFlow'
+import { useSellers } from '../hooks/useSellers'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 
@@ -18,78 +20,23 @@ const updateTypes = [
 
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
 
-const profileProfiles = [
-  {
-    sellerId: 'SLR-990ADB07', updateType: 'bank_change',
-    changes: JSON.stringify({ bankName: 'New National Bank', accountNumber: '****7892', routingNumber: '021000021' }),
-    signals: {}
-  },
-  {
-    sellerId: 'SLR-FF1DB1A3', updateType: 'email_change',
-    changes: JSON.stringify({ oldEmail: 'sarah@techflow-electronics.com', newEmail: 'sarah.chen@gmail.com' }),
-    signals: { emailDomainDowngrade: true }
-  },
-  {
-    sellerId: 'SLR-E23A5F9B', updateType: 'bank_change',
-    changes: JSON.stringify({ bankName: 'Offshore Holdings Ltd', accountNumber: '****1234', routingNumber: '999000111' }),
-    signals: { openDispute: true, newDevice: true }
-  },
-  {
-    sellerId: 'SLR-2DF52FC8', updateType: 'phone_change',
-    changes: JSON.stringify({ oldPhone: '+1-416-555-0123', newPhone: '+1-647-555-9876' }),
-    signals: {}
-  },
-  {
-    sellerId: 'SLR-9C3B40DE', updateType: 'bank_change',
-    changes: JSON.stringify({ bankName: 'Crypto Exchange Wallet', accountNumber: '0x9f8e...3a2b', routingNumber: 'N/A' }),
-    signals: { openDispute: true, newDevice: true, emailDomainDowngrade: true }
-  },
-  {
-    sellerId: 'SLR-343DCA9E', updateType: 'address_change',
-    changes: JSON.stringify({ oldAddress: '45 Marienplatz, Munich', newAddress: '12 Bahnhofstr, Zurich' }),
-    signals: {}
-  },
-  {
-    sellerId: 'SLR-33313A8E', updateType: 'business_name_change',
-    changes: JSON.stringify({ oldName: 'Swaniawski, Jacobs and Ritchie Solutions', newName: 'SDS Global Trading Corp' }),
-    signals: { newDevice: true }
-  },
-  {
-    sellerId: 'SLR-BFBF2965', updateType: 'email_change',
-    changes: JSON.stringify({ oldEmail: 'marco@romagourmet.it', newEmail: 'marco.rossi@romagourmet.it' }),
-    signals: {}
-  },
-  {
-    sellerId: 'SLR-9521EA9B', updateType: 'bank_change',
-    changes: JSON.stringify({ bankName: 'HBL Pakistan', accountNumber: '****5678', routingNumber: 'HABBPKKA' }),
-    signals: { openDispute: true, emailDomainDowngrade: true }
-  },
-  {
-    sellerId: 'SLR-D0157140', updateType: 'phone_change',
-    changes: JSON.stringify({ oldPhone: '+55-21-555-0101', newPhone: '+1-305-555-7777' }),
-    signals: { newDevice: true }
-  },
-  {
-    sellerId: 'SLR-036E8FB4', updateType: 'address_change',
-    changes: JSON.stringify({ oldAddress: '8 Rue de Rivoli, Paris', newAddress: '15 Av des Champs-Elysees, Paris' }),
-    signals: {}
-  },
-  {
-    sellerId: 'SLR-8EAE5C93', updateType: 'email_change',
-    changes: JSON.stringify({ oldEmail: 'thabo@capetowngifts.co.za', newEmail: 'thabo.nkosi@tempmail.com' }),
-    signals: { emailDomainDowngrade: true }
-  },
-]
 
 function generateRandomProfileUpdate() {
-  const profile = pick(profileProfiles)
+  const updateType = pick(updateTypes).value
+  const changesMap = {
+    bank_change: JSON.stringify({ bankName: 'New National Bank', accountNumber: '****' + Math.floor(1000 + Math.random() * 9000), routingNumber: '021000021' }),
+    email_change: JSON.stringify({ oldEmail: 'user@company.com', newEmail: 'user@gmail.com' }),
+    phone_change: JSON.stringify({ oldPhone: '+1-555-0100', newPhone: '+1-555-' + Math.floor(1000 + Math.random() * 9000) }),
+    address_change: JSON.stringify({ oldAddress: '123 Main St', newAddress: '456 New Ave' }),
+    business_name_change: JSON.stringify({ oldName: 'Old Corp', newName: 'New Trading LLC' })
+  }
   return {
-    sellerId: profile.sellerId,
-    updateType: profile.updateType,
-    changes: profile.changes,
-    openDispute: profile.signals.openDispute || false,
-    newDevice: profile.signals.newDevice || false,
-    emailDomainDowngrade: profile.signals.emailDomainDowngrade || false
+    sellerId: '',
+    updateType,
+    changes: changesMap[updateType] || '{}',
+    openDispute: Math.random() > 0.7,
+    newDevice: Math.random() > 0.6,
+    emailDomainDowngrade: Math.random() > 0.7
   }
 }
 
@@ -118,11 +65,21 @@ export default function ProfileUpdatesLive() {
   const [errors, setErrors] = useState({})
   const [correlationId, setCorrelationId] = useState(null)
 
-  const { events, isConnected, isAgentRunning, agentDecision, clearEvents } = useAgentFlow(correlationId)
+  const { events, isConnected, isAgentRunning, agentDecision, pollingDone, clearEvents } = useAgentFlow(correlationId)
+  const showDecision = !!(agentDecision && pollingDone)
+  const { sellers, loading: sellersLoading, urlSellerId } = useSellers()
 
   useEffect(() => {
-    if (agentDecision) setSubmitting(false)
-  }, [agentDecision])
+    if (showDecision) setSubmitting(false)
+  }, [showDecision])
+
+  useEffect(() => { if (urlSellerId) handleChange('sellerId', urlSellerId) }, [urlSellerId])
+  useEffect(() => {
+    if (sellers.length && !urlSellerId && !formData.sellerId) {
+      const s = sellers[Math.floor(Math.random() * sellers.length)]
+      handleChange('sellerId', s.sellerId)
+    }
+  }, [sellers])
 
   const handleChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -139,7 +96,8 @@ export default function ProfileUpdatesLive() {
   }
 
   const handleNewSubmission = () => {
-    setFormData(generateRandomProfileUpdate())
+    const d = generateRandomProfileUpdate(); if (sellers.length) d.sellerId = sellers[Math.floor(Math.random() * sellers.length)].sellerId
+    setFormData(d)
     clearEvents()
     setCorrelationId(null)
     setSubmitting(false)
@@ -170,7 +128,7 @@ export default function ProfileUpdatesLive() {
         })
       })
 
-      const data = await response.json()
+      const data = await safeJson(response)
 
       if (data.success) {
         if (data.correlationId) setCorrelationId(data.correlationId)
@@ -262,7 +220,15 @@ export default function ProfileUpdatesLive() {
                 Update Details
               </h3>
               <div className="grid grid-cols-2 gap-3">
-                <InputField label="Seller ID" field="sellerId" placeholder="SLR-XXXXX" required />
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1.5">Seller *</label>
+                  <select value={formData.sellerId} onChange={(e) => handleChange('sellerId', e.target.value)}
+                    className={`w-full px-3 py-2 bg-gray-800 border rounded-lg text-white text-sm ${errors.sellerId ? 'border-red-500' : 'border-gray-700'} focus:border-orange-500 focus:outline-none`}>
+                    <option value="">Select seller</option>
+                    {sellers.map(p => <option key={p.sellerId} value={p.sellerId}>{p.sellerId} — {p.name}</option>)}
+                  </select>
+                  {errors.sellerId && <p className="text-xs text-red-400 mt-1">{errors.sellerId}</p>}
+                </div>
                 <div>
                   <label className="block text-sm text-gray-400 mb-1.5">Update Type *</label>
                   <select
@@ -309,7 +275,7 @@ export default function ProfileUpdatesLive() {
             {/* Generate Random */}
             <button
               type="button"
-              onClick={() => setFormData(generateRandomProfileUpdate())}
+              onClick={() => { const d = generateRandomProfileUpdate(); if (sellers.length) d.sellerId = sellers[Math.floor(Math.random() * sellers.length)].sellerId; setFormData(d) }}
               className="w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg border border-gray-700 flex items-center justify-center gap-2 transition-colors"
             >
               <RotateCcw className="w-4 h-4" />
@@ -351,7 +317,7 @@ export default function ProfileUpdatesLive() {
           )}
 
           {/* Pending */}
-          {result?.pending && !agentDecision && (
+          {result?.pending && !showDecision && (
             <div className="mt-4">
               <div className="bg-orange-500/10 border border-orange-500/30 rounded-xl p-4">
                 <div className="flex items-center gap-3">
@@ -368,7 +334,7 @@ export default function ProfileUpdatesLive() {
           )}
 
           {/* Final Decision */}
-          {agentDecision && agentDecision.decision !== 'ERROR' && (
+          {showDecision && agentDecision.decision !== 'ERROR' && (
             <div className="mt-4">
               <div className={`bg-[#12121a] rounded-xl border p-4 ${
                 agentDecision.decision === 'ALLOW' ? 'border-emerald-500/30' :
@@ -407,7 +373,7 @@ export default function ProfileUpdatesLive() {
           )}
 
           {/* Agent Error */}
-          {agentDecision?.decision === 'ERROR' && (
+          {showDecision && agentDecision?.decision === 'ERROR' && (
             <div className="mt-4">
               <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
                 <div className="flex items-center gap-2 text-red-400">

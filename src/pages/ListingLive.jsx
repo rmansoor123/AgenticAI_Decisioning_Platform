@@ -5,6 +5,8 @@ import {
 } from 'lucide-react'
 import AgentFlowViewer from '../components/AgentFlowViewer'
 import { useAgentFlow } from '../hooks/useAgentFlow'
+import { useSellers } from '../hooks/useSellers'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 
@@ -24,71 +26,50 @@ const conditions = [
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
 const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min
 
-const listingProfiles = [
-  {
-    sellerId: 'SLR-990ADB07', title: 'Handcrafted Beach House Wind Chimes', desc: 'Beautiful coastal-themed wind chimes made from natural driftwood and shells.', cat: 'Home & Garden',
-    price: 49.99, qty: 25, condition: 'NEW', flags: {}
-  },
-  {
-    sellerId: 'SLR-FF1DB1A3', title: 'iPhone 15 Pro Max 256GB - Brand New Sealed', desc: 'Factory sealed Apple iPhone 15 Pro Max. Full warranty included.', cat: 'Electronics',
-    price: 399.00, qty: 50, condition: 'NEW', flags: { priceAnomaly: true, counterfeitRisk: true }
-  },
-  {
-    sellerId: 'SLR-343DCA9E', title: 'Professional Hiking Backpack 65L', desc: 'Waterproof hiking backpack with ergonomic frame. Perfect for multi-day treks.', cat: 'Sports & Outdoors',
-    price: 189.95, qty: 15, condition: 'NEW', flags: {}
-  },
-  {
-    sellerId: 'SLR-E23A5F9B', title: 'Louis Vuitton Neverfull MM Monogram', desc: 'Authentic LV Neverfull handbag. Comes with dust bag and receipt.', cat: 'Fashion',
-    price: 450.00, qty: 200, condition: 'NEW', flags: { counterfeitRisk: true, priceAnomaly: true, duplicateListing: true }
-  },
-  {
-    sellerId: 'SLR-2DF52FC8', title: 'Wooden Train Set - 80 Piece Deluxe', desc: 'Premium wooden train set with bridges, tunnels, and accessories. Ages 3+.', cat: 'Toys & Games',
-    price: 34.99, qty: 100, condition: 'NEW', flags: {}
-  },
-  {
-    sellerId: 'SLR-9C3B40DE', title: 'RTX 4090 Graphics Card - BNIB', desc: 'NVIDIA GeForce RTX 4090 24GB. Brand new in box, never opened.', cat: 'Electronics',
-    price: 800.00, qty: 30, condition: 'NEW', flags: { priceAnomaly: true }
-  },
-  {
-    sellerId: 'SLR-BFBF2965', title: 'Authentic Italian Extra Virgin Olive Oil 1L', desc: 'Cold-pressed olive oil from Tuscany. DOP certified, harvest 2024.', cat: 'Home & Garden',
-    price: 28.50, qty: 200, condition: 'NEW', flags: {}
-  },
-  {
-    sellerId: 'SLR-33313A8E', title: 'Bulk Wholesale Electronics Lot - 500 Units', desc: 'Mixed electronics lot: earbuds, chargers, cables, phone cases. Great for resellers.', cat: 'Electronics',
-    price: 2.99, qty: 500, condition: 'NEW', flags: { prohibitedContent: true, priceAnomaly: true }
-  },
-  {
-    sellerId: 'SLR-9521EA9B', title: 'Premium Noise Cancelling Headphones Pro', desc: 'AirPods Max alternative. Active noise cancelling, premium audio quality.', cat: 'Electronics',
-    price: 29.99, qty: 1000, condition: 'NEW', flags: { counterfeitRisk: true, priceAnomaly: true, duplicateListing: true }
-  },
-  {
-    sellerId: 'SLR-D0157140', title: 'Brazilian Emerald Pendant - 2ct Sterling Silver', desc: 'Natural emerald pendant set in .925 sterling silver. Includes certificate of authenticity.', cat: 'Jewelry',
-    price: 299.00, qty: 10, condition: 'NEW', flags: {}
-  },
-  {
-    sellerId: 'SLR-036E8FB4', title: 'Vintage Chanel No. 5 Perfume 100ml', desc: 'Classic Chanel fragrance. Sealed box with batch code verification.', cat: 'Health & Beauty',
-    price: 85.00, qty: 40, condition: 'NEW', flags: { counterfeitRisk: true }
-  },
-  {
-    sellerId: 'SLR-8EAE5C93', title: 'South African Rooibos Tea Gift Set', desc: 'Premium organic rooibos tea collection. 6 varieties in decorative box.', cat: 'Home & Garden',
-    price: 24.99, qty: 50, condition: 'NEW', flags: {}
-  },
+const listingTitles = [
+  'Handcrafted Beach House Wind Chimes',
+  'iPhone 15 Pro Max 256GB - Brand New Sealed',
+  'Professional Hiking Backpack 65L',
+  'Louis Vuitton Neverfull MM Monogram',
+  'Wooden Train Set - 80 Piece Deluxe',
+  'RTX 4090 Graphics Card - BNIB',
+  'Authentic Italian Extra Virgin Olive Oil 1L',
+  'Bulk Wholesale Electronics Lot - 500 Units',
+  'Premium Noise Cancelling Headphones Pro',
+  'Brazilian Emerald Pendant - 2ct Sterling Silver',
+  'Vintage Chanel No. 5 Perfume 100ml',
+  'South African Rooibos Tea Gift Set'
+]
+
+const listingDescriptions = [
+  'Beautiful coastal-themed wind chimes made from natural driftwood and shells.',
+  'Factory sealed Apple iPhone 15 Pro Max. Full warranty included.',
+  'Waterproof hiking backpack with ergonomic frame. Perfect for multi-day treks.',
+  'Authentic LV Neverfull handbag. Comes with dust bag and receipt.',
+  'Premium wooden train set with bridges, tunnels, and accessories. Ages 3+.',
+  'NVIDIA GeForce RTX 4090 24GB. Brand new in box, never opened.',
+  'Cold-pressed olive oil from Tuscany. DOP certified, harvest 2024.',
+  'Mixed electronics lot: earbuds, chargers, cables, phone cases. Great for resellers.',
+  'AirPods Max alternative. Active noise cancelling, premium audio quality.',
+  'Natural emerald pendant set in .925 sterling silver. Includes certificate of authenticity.',
+  'Classic Chanel fragrance. Sealed box with batch code verification.',
+  'Premium organic rooibos tea collection. 6 varieties in decorative box.'
 ]
 
 function generateRandomListing() {
-  const profile = pick(listingProfiles)
+  const idx = Math.floor(Math.random() * listingTitles.length)
   return {
-    sellerId: profile.sellerId,
-    title: profile.title,
-    description: profile.desc,
-    category: profile.cat,
-    price: profile.price,
-    quantity: profile.qty,
-    condition: profile.condition,
-    priceAnomaly: profile.flags.priceAnomaly || false,
-    prohibitedContent: profile.flags.prohibitedContent || false,
-    counterfeitRisk: profile.flags.counterfeitRisk || false,
-    duplicateListing: profile.flags.duplicateListing || false
+    sellerId: '',
+    title: listingTitles[idx],
+    description: listingDescriptions[idx] || '',
+    category: pick(categories),
+    price: Math.round((Math.random() * 800 + 2) * 100) / 100,
+    quantity: randInt(1, 500),
+    condition: pick(conditions).value,
+    priceAnomaly: Math.random() < 0.3,
+    prohibitedContent: Math.random() < 0.1,
+    counterfeitRisk: Math.random() < 0.25,
+    duplicateListing: Math.random() < 0.15
   }
 }
 
@@ -117,11 +98,21 @@ export default function ListingLive() {
   const [errors, setErrors] = useState({})
   const [correlationId, setCorrelationId] = useState(null)
 
-  const { events, isConnected, isAgentRunning, agentDecision, clearEvents } = useAgentFlow(correlationId)
+  const { events, isConnected, isAgentRunning, agentDecision, pollingDone, clearEvents } = useAgentFlow(correlationId)
+  const showDecision = !!(agentDecision && pollingDone)
+  const { sellers, loading: sellersLoading, urlSellerId } = useSellers()
 
   useEffect(() => {
-    if (agentDecision) setSubmitting(false)
-  }, [agentDecision])
+    if (showDecision) setSubmitting(false)
+  }, [showDecision])
+
+  useEffect(() => { if (urlSellerId) handleChange('sellerId', urlSellerId) }, [urlSellerId])
+  useEffect(() => {
+    if (sellers.length && !urlSellerId && !formData.sellerId) {
+      const s = sellers[Math.floor(Math.random() * sellers.length)]
+      handleChange('sellerId', s.sellerId)
+    }
+  }, [sellers])
 
   const handleChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -140,7 +131,8 @@ export default function ListingLive() {
   }
 
   const handleNewSubmission = () => {
-    setFormData(generateRandomListing())
+    const d = generateRandomListing(); if (sellers.length) d.sellerId = sellers[Math.floor(Math.random() * sellers.length)].sellerId
+    setFormData(d)
     clearEvents()
     setCorrelationId(null)
     setSubmitting(false)
@@ -180,7 +172,7 @@ export default function ListingLive() {
         body: JSON.stringify(payload)
       })
 
-      const data = await response.json()
+      const data = await safeJson(response)
 
       if (data.success) {
         if (data.correlationId) setCorrelationId(data.correlationId)
@@ -211,7 +203,7 @@ export default function ListingLive() {
           onChange={(e) => handleChange(field, type === 'number' ? parseFloat(e.target.value) || '' : e.target.value)}
           className={`w-full ${prefix ? 'pl-7' : 'px-3'} py-2 bg-gray-800 border rounded-lg text-white text-sm ${
             errors[field] ? 'border-red-500' : 'border-gray-700'
-          } focus:border-blue-500 focus:outline-none`}
+          } focus:border-purple-500 focus:outline-none`}
           placeholder={placeholder}
           step={type === 'number' ? '0.01' : undefined}
         />
@@ -276,7 +268,15 @@ export default function ListingLive() {
                 Listing Details
               </h3>
               <div className="grid grid-cols-2 gap-3">
-                <InputField label="Seller ID" field="sellerId" placeholder="SLR-XXXXX" required />
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1.5">Seller *</label>
+                  <select value={formData.sellerId} onChange={(e) => handleChange('sellerId', e.target.value)}
+                    className={`w-full px-3 py-2 bg-gray-800 border rounded-lg text-white text-sm ${errors.sellerId ? 'border-red-500' : 'border-gray-700'} focus:border-purple-500 focus:outline-none`}>
+                    <option value="">Select seller</option>
+                    {sellers.map(p => <option key={p.sellerId} value={p.sellerId}>{p.sellerId} — {p.name}</option>)}
+                  </select>
+                  {errors.sellerId && <p className="text-xs text-red-400 mt-1">{errors.sellerId}</p>}
+                </div>
                 <div>
                   <label className="block text-sm text-gray-400 mb-1.5">Category *</label>
                   <select
@@ -284,7 +284,7 @@ export default function ListingLive() {
                     onChange={(e) => handleChange('category', e.target.value)}
                     className={`w-full px-3 py-2 bg-gray-800 border rounded-lg text-white text-sm ${
                       errors.category ? 'border-red-500' : 'border-gray-700'
-                    } focus:border-blue-500 focus:outline-none`}
+                    } focus:border-purple-500 focus:outline-none`}
                   >
                     <option value="">Select category</option>
                     {categories.map(c => <option key={c} value={c}>{c}</option>)}
@@ -300,7 +300,7 @@ export default function ListingLive() {
                     value={formData.description}
                     onChange={(e) => handleChange('description', e.target.value)}
                     rows={3}
-                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:border-blue-500 focus:outline-none resize-none"
+                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:border-purple-500 focus:outline-none resize-none"
                     placeholder="Describe the product..."
                   />
                 </div>
@@ -311,7 +311,7 @@ export default function ListingLive() {
                   <select
                     value={formData.condition}
                     onChange={(e) => handleChange('condition', e.target.value)}
-                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:border-blue-500 focus:outline-none"
+                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:border-purple-500 focus:outline-none"
                   >
                     {conditions.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                   </select>
@@ -336,7 +336,7 @@ export default function ListingLive() {
             {/* Generate Random */}
             <button
               type="button"
-              onClick={() => setFormData(generateRandomListing())}
+              onClick={() => { const d = generateRandomListing(); if (sellers.length) d.sellerId = sellers[Math.floor(Math.random() * sellers.length)].sellerId; setFormData(d) }}
               className="w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg border border-gray-700 flex items-center justify-center gap-2 transition-colors"
             >
               <RotateCcw className="w-4 h-4" />
@@ -378,7 +378,7 @@ export default function ListingLive() {
           )}
 
           {/* Pending */}
-          {result?.pending && !agentDecision && (
+          {result?.pending && !showDecision && (
             <div className="mt-4">
               <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-4">
                 <div className="flex items-center gap-3">
@@ -395,7 +395,7 @@ export default function ListingLive() {
           )}
 
           {/* Final Decision */}
-          {agentDecision && agentDecision.decision !== 'ERROR' && (
+          {showDecision && agentDecision.decision !== 'ERROR' && (
             <div className="mt-4">
               <div className={`bg-[#12121a] rounded-xl border p-4 ${
                 agentDecision.decision === 'APPROVE' ? 'border-emerald-500/30' :
@@ -434,7 +434,7 @@ export default function ListingLive() {
           )}
 
           {/* Agent Error */}
-          {agentDecision?.decision === 'ERROR' && (
+          {showDecision && agentDecision?.decision === 'ERROR' && (
             <div className="mt-4">
               <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
                 <div className="flex items-center gap-2 text-red-400">

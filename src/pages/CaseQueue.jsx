@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { User, Filter } from 'lucide-react';
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api';
 
@@ -61,7 +62,7 @@ export default function CaseQueue() {
   const fetchCaseDetail = async (caseId) => {
     try {
       const res = await fetch(`${API_BASE}/cases/${caseId}`);
-      const data = await res.json();
+      const data = await safeJson(res);
       if (data.success) setCaseDetail(data.data);
     } catch (error) {
       console.error('Error:', error);

@@ -5,6 +5,7 @@ import {
   RefreshCw, FileText, Activity
 } from 'lucide-react'
 import ForceGraph2D from 'react-force-graph-2d'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 const GRAPH_API = `${API_BASE}/graph`
@@ -100,7 +101,7 @@ export default function SellerNetworkAnalysis() {
     try {
       const res = await fetch(`${GRAPH_API}/seller/${encodeURIComponent(sellerId)}/network?depth=2`)
       if (!res.ok) throw new Error(`Seller network API returned ${res.status}`)
-      const data = await res.json()
+      const data = await safeJson(res)
       const rawNodes = data.nodes ?? data.seller ? [data.seller, ...(data.neighbors ?? [])] : []
       const rawEdges = data.edges ?? data.links ?? []
       const nodes = rawNodes.map(n => ({
@@ -142,7 +143,7 @@ export default function SellerNetworkAnalysis() {
     try {
       const res = await fetch(`${GRAPH_API}/rings`)
       if (!res.ok) throw new Error(`Fraud rings API returned ${res.status}`)
-      const data = await res.json()
+      const data = await safeJson(res)
       const rings = data.rings ?? data.data ?? data ?? []
       setFraudRings(Array.isArray(rings) ? rings : [])
 
@@ -200,7 +201,7 @@ export default function SellerNetworkAnalysis() {
     try {
       const res = await fetch(`${GRAPH_API}/seller/${encodeURIComponent(sellerId)}/risk-propagation`)
       if (!res.ok) throw new Error(`Risk propagation API returned ${res.status}`)
-      const data = await res.json()
+      const data = await safeJson(res)
       setRiskPropagation(data)
 
       // If the response includes graph data, use it for visualization

@@ -3,6 +3,7 @@ import {
   Play, Database, Brain, Cog, FlaskConical, CheckCircle, XCircle,
   AlertTriangle, ChevronRight, Clock, Zap, RefreshCw
 } from 'lucide-react'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 
@@ -93,7 +94,7 @@ export default function TransactionFlow() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(transaction)
           })
-          const data = await res.json()
+          const data = await safeJson(res)
           results.ingestion = {
             eventId: data.data?.eventId,
             latency: data.data?.latencyMs || 3,
@@ -131,7 +132,7 @@ export default function TransactionFlow() {
               }
             })
           })
-          const data = await res.json()
+          const data = await safeJson(res)
           results.ml = {
             fraudScore: data.data?.prediction?.score || 0.73,
             label: data.data?.prediction?.label || 'SUSPICIOUS',
@@ -160,7 +161,7 @@ export default function TransactionFlow() {
               dryRun: true
             })
           })
-          const data = await res.json()
+          const data = await safeJson(res)
           results.rules = {
             rulesEvaluated: data.data?.rulesEvaluated || 50,
             rulesTriggered: data.data?.rulesTriggered || 3,

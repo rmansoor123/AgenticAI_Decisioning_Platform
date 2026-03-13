@@ -6,6 +6,7 @@ import {
   ChevronRight, AlertTriangle, Sliders
 } from 'lucide-react'
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 
@@ -24,7 +25,7 @@ export default function Experimentation() {
     const fetchData = async () => {
       try {
         const res = await fetch(`${API_BASE}/experiments/experiments`)
-        const data = await res.json()
+        const data = await safeJson(res)
         if (data.success) setExperiments(data.data || [])
       } catch (error) {
         console.error('Error:', error)
@@ -126,7 +127,29 @@ function ABTesting({ experiments }) {
     }
   ]
 
-  const displayExperiments = experiments.length > 0 ? experiments : defaultExperiments
+  // Normalize API experiments to match expected shape (metrics.catchRate.control/treatment)
+  const normalizedExperiments = experiments.map(exp => {
+    if (exp.metrics?.catchRate?.control !== undefined) return exp // already correct shape
+    const r = exp.results
+    return {
+      ...exp,
+      startDate: exp.startDate?.split('T')[0] || exp.startDate,
+      metrics: {
+        catchRate: {
+          control: r?.control?.fraudCatchRate != null ? +(r.control.fraudCatchRate * 100).toFixed(1) : null,
+          treatment: r?.treatment?.fraudCatchRate != null ? +(r.treatment.fraudCatchRate * 100).toFixed(1) : null
+        },
+        fpRate: {
+          control: r?.control?.falsePositiveRate ?? null,
+          treatment: r?.treatment?.falsePositiveRate ?? null
+        },
+        pValue: r?.pValue ?? null,
+        significant: r?.significant ?? null
+      }
+    }
+  })
+
+  const displayExperiments = normalizedExperiments.length > 0 ? normalizedExperiments : defaultExperiments
 
   return (
     <div className="space-y-6">
@@ -134,8 +157,13 @@ function ABTesting({ experiments }) {
       <div className="grid grid-cols-4 gap-4">
         {[
           { label: 'Active Experiments', value: displayExperiments.filter(e => e.status === 'RUNNING').length, icon: FlaskConical, color: 'emerald' },
-          { label: 'Traffic Allocated', value: '35%', icon: Users, color: 'blue' },
-          { label: 'Avg Lift', value: '+1.3%', icon: TrendingUp, color: 'purple' },
+          { label: 'Traffic Allocated', value: `${displayExperiments.filter(e => e.status === 'RUNNING').reduce((sum, e) => sum + (e.trafficAllocation || 0), 0)}%`, icon: Users, color: 'blue' },
+          { label: 'Avg Lift', value: (() => {
+            const withResults = displayExperiments.filter(e => e.metrics?.catchRate?.control != null && e.metrics?.catchRate?.treatment != null)
+            if (withResults.length === 0) return 'N/A'
+            const avg = withResults.reduce((sum, e) => sum + (e.metrics.catchRate.treatment - e.metrics.catchRate.control), 0) / withResults.length
+            return `${avg >= 0 ? '+' : ''}${avg.toFixed(1)}%`
+          })(), icon: TrendingUp, color: 'purple' },
           { label: 'Completed', value: displayExperiments.filter(e => e.status === 'COMPLETED').length, icon: CheckCircle, color: 'amber' }
         ].map(stat => (
           <div key={stat.label} className="bg-[#12121a] rounded-xl border border-gray-800 p-4">
@@ -183,7 +211,7 @@ function ABTesting({ experiments }) {
                   <span className="text-gray-400">Traffic: <span className="text-emerald-400">{exp.trafficAllocation}%</span></span>
                   <span className="text-gray-400">Started: <span className="text-gray-300">{exp.startDate}</span></span>
                 </div>
-                {exp.metrics && (
+                {exp.metrics?.catchRate?.control != null && exp.metrics?.catchRate?.treatment != null && (
                   <div className="flex items-center gap-4 mt-3">
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-gray-500">Catch Rate:</span>
@@ -196,6 +224,11 @@ function ABTesting({ experiments }) {
                         <TrendingUp className="w-3 h-3 text-emerald-400" />
                       )}
                     </div>
+                  </div>
+                )}
+                {exp.metrics?.catchRate?.control == null && (
+                  <div className="flex items-center gap-4 mt-3">
+                    <span className="text-xs text-gray-500">Results pending...</span>
                   </div>
                 )}
               </div>
@@ -227,7 +260,7 @@ function ABTesting({ experiments }) {
                 </div>
               </div>
 
-              {selectedExperiment.metrics && (
+              {selectedExperiment.metrics?.catchRate?.control != null && selectedExperiment.metrics?.catchRate?.treatment != null ? (
                 <div className="bg-[#12121a] rounded-xl border border-gray-800 p-4">
                   <h4 className="font-medium text-white mb-3">Results</h4>
                   <div className="space-y-4">
@@ -256,6 +289,7 @@ function ABTesting({ experiments }) {
                       </div>
                     </div>
 
+                    {selectedExperiment.metrics?.fpRate?.control != null && selectedExperiment.metrics?.fpRate?.treatment != null && (
                     <div>
                       <div className="flex justify-between text-sm mb-1">
                         <span className="text-gray-400">False Positive Rate</span>
@@ -276,7 +310,23 @@ function ABTesting({ experiments }) {
                         </div>
                       </div>
                     </div>
+                    )}
+
+                    {selectedExperiment.metrics?.pValue != null && (
+                      <div className="flex justify-between text-sm border-t border-gray-800 pt-3">
+                        <span className="text-gray-400">p-value</span>
+                        <span className={selectedExperiment.metrics.significant ? 'text-emerald-400' : 'text-amber-400'}>
+                          {selectedExperiment.metrics.pValue.toFixed(4)}
+                          {selectedExperiment.metrics.significant ? ' (significant)' : ' (not significant)'}
+                        </span>
+                      </div>
+                    )}
                   </div>
+                </div>
+              ) : (
+                <div className="bg-[#12121a] rounded-xl border border-gray-800 p-4">
+                  <h4 className="font-medium text-white mb-3">Results</h4>
+                  <p className="text-sm text-gray-500">Experiment still collecting data...</p>
                 </div>
               )}
 

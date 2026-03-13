@@ -7,6 +7,7 @@ import {
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 
@@ -296,7 +297,7 @@ export default function SellerRiskProfile() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(overrideForm)
       })
-      const data = await res.json()
+      const data = await safeJson(res)
       if (data.success) {
         setOverrideStatus({ ...overrideForm, timestamp: new Date().toISOString() })
         setOverrideForm({ tier: '', reason: '', overriddenBy: '' })

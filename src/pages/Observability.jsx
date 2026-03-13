@@ -1,5 +1,6 @@
 import { useState, useEffect, Fragment } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 
@@ -51,7 +52,7 @@ export default function Observability() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agentType: advAgentType, count: advCount })
       })
-      const data = await res.json()
+      const data = await safeJson(res)
       if (data.success) {
         // Since real batch execution is async, show the execution info
         // For now, generate mock results client-side for display

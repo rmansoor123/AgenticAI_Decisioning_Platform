@@ -5,6 +5,8 @@ import {
 } from 'lucide-react'
 import AgentFlowViewer from '../components/AgentFlowViewer'
 import { useAgentFlow } from '../hooks/useAgentFlow'
+import { useSellers } from '../hooks/useSellers'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 
@@ -13,28 +15,14 @@ const payoutMethods = ['BANK_TRANSFER', 'WIRE', 'CHECK', 'CRYPTO', 'PAYPAL']
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
 const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min
 
-const payoutProfiles = [
-  { sellerId: 'SLR-990ADB07', name: 'Turcotte, Daniel and Quigley', amount: 2450.00, method: 'BANK_TRANSFER', risk: 'low' },
-  { sellerId: 'SLR-FF1DB1A3', name: 'Quigley - Raynor', amount: 18750.50, method: 'WIRE', risk: 'medium' },
-  { sellerId: 'SLR-343DCA9E', name: 'Emard - Emard', amount: 5200.00, method: 'BANK_TRANSFER', risk: 'low' },
-  { sellerId: 'SLR-E23A5F9B', name: 'Carroll, Price and Torp', amount: 45000.00, method: 'CRYPTO', risk: 'high' },
-  { sellerId: 'SLR-2DF52FC8', name: 'Rodriguez Group', amount: 890.25, method: 'PAYPAL', risk: 'low' },
-  { sellerId: 'SLR-9C3B40DE', name: 'Mraz, Grant and Ankunding', amount: 32000.00, method: 'WIRE', risk: 'high' },
-  { sellerId: 'SLR-BFBF2965', name: 'OConnell Torp and Witting', amount: 3100.00, method: 'BANK_TRANSFER', risk: 'low' },
-  { sellerId: 'SLR-33313A8E', name: 'Swaniawski, Jacobs and Ritchie', amount: 67500.00, method: 'WIRE', risk: 'high' },
-  { sellerId: 'SLR-9521EA9B', name: 'Goodwin, Willms and Schulist', amount: 28900.00, method: 'CRYPTO', risk: 'high' },
-  { sellerId: 'SLR-D0157140', name: 'Kilback - Schmidt', amount: 4200.75, method: 'BANK_TRANSFER', risk: 'medium' },
-  { sellerId: 'SLR-036E8FB4', name: 'Langworth, Bartoletti and Harber', amount: 12300.00, method: 'WIRE', risk: 'medium' },
-  { sellerId: 'SLR-8EAE5C93', name: 'Dooley, Bashirian and Wolf', amount: 950.00, method: 'PAYPAL', risk: 'low' },
-]
 
 function generateRandomPayout() {
-  const profile = pick(payoutProfiles)
-  const variance = profile.amount * (Math.random() * 0.4 - 0.2)
+  const baseAmount = pick([2450, 18750.50, 5200, 45000, 890.25, 32000, 3100, 67500, 28900, 4200.75, 12300, 950])
+  const variance = baseAmount * (Math.random() * 0.4 - 0.2)
   return {
-    sellerId: profile.sellerId,
-    amount: Math.round((profile.amount + variance) * 100) / 100,
-    method: profile.method
+    sellerId: '',
+    amount: Math.round((baseAmount + variance) * 100) / 100,
+    method: pick(payoutMethods)
   }
 }
 
@@ -63,11 +51,21 @@ export default function PayoutLive() {
   const [errors, setErrors] = useState({})
   const [correlationId, setCorrelationId] = useState(null)
 
-  const { events, isConnected, isAgentRunning, agentDecision, clearEvents } = useAgentFlow(correlationId)
+  const { events, isConnected, isAgentRunning, agentDecision, pollingDone, clearEvents } = useAgentFlow(correlationId)
+  const showDecision = !!(agentDecision && pollingDone)
+  const { sellers, loading: sellersLoading, urlSellerId } = useSellers()
 
   useEffect(() => {
-    if (agentDecision) setSubmitting(false)
-  }, [agentDecision])
+    if (showDecision) setSubmitting(false)
+  }, [showDecision])
+
+  useEffect(() => { if (urlSellerId) handleChange('sellerId', urlSellerId) }, [urlSellerId])
+  useEffect(() => {
+    if (sellers.length && !urlSellerId && !formData.sellerId) {
+      const s = sellers[Math.floor(Math.random() * sellers.length)]
+      handleChange('sellerId', s.sellerId)
+    }
+  }, [sellers])
 
   const handleChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -84,7 +82,8 @@ export default function PayoutLive() {
   }
 
   const handleNewSubmission = () => {
-    setFormData(generateRandomPayout())
+    const d = generateRandomPayout(); if (sellers.length) d.sellerId = sellers[Math.floor(Math.random() * sellers.length)].sellerId
+    setFormData(d)
     clearEvents()
     setCorrelationId(null)
     setSubmitting(false)
@@ -108,7 +107,7 @@ export default function PayoutLive() {
         body: JSON.stringify(formData)
       })
 
-      const data = await response.json()
+      const data = await safeJson(response)
 
       if (data.success) {
         if (data.correlationId) setCorrelationId(data.correlationId)
@@ -192,7 +191,15 @@ export default function PayoutLive() {
                 Payout Details
               </h3>
               <div className="grid grid-cols-2 gap-3">
-                <InputField label="Seller ID" field="sellerId" placeholder="SLR-XXXXX" required />
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1.5">Seller *</label>
+                  <select value={formData.sellerId} onChange={(e) => handleChange('sellerId', e.target.value)}
+                    className={`w-full px-3 py-2 bg-gray-800 border rounded-lg text-white text-sm ${errors.sellerId ? 'border-red-500' : 'border-gray-700'} focus:border-amber-500 focus:outline-none`}>
+                    <option value="">Select seller</option>
+                    {sellers.map(p => <option key={p.sellerId} value={p.sellerId}>{p.sellerId} — {p.name}</option>)}
+                  </select>
+                  {errors.sellerId && <p className="text-xs text-red-400 mt-1">{errors.sellerId}</p>}
+                </div>
                 <InputField label="Amount" field="amount" type="number" placeholder="1000.00" required prefix="$" />
                 <div className="col-span-2">
                   <label className="block text-sm text-gray-400 mb-1.5">Payout Method *</label>
@@ -214,7 +221,7 @@ export default function PayoutLive() {
             {/* Generate Random */}
             <button
               type="button"
-              onClick={() => setFormData(generateRandomPayout())}
+              onClick={() => { const d = generateRandomPayout(); if (sellers.length) d.sellerId = sellers[Math.floor(Math.random() * sellers.length)].sellerId; setFormData(d) }}
               className="w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg border border-gray-700 flex items-center justify-center gap-2 transition-colors"
             >
               <RotateCcw className="w-4 h-4" />
@@ -256,7 +263,7 @@ export default function PayoutLive() {
           )}
 
           {/* Pending */}
-          {result?.pending && !agentDecision && (
+          {result?.pending && !showDecision && (
             <div className="mt-4">
               <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
                 <div className="flex items-center gap-3">
@@ -273,7 +280,7 @@ export default function PayoutLive() {
           )}
 
           {/* Final Decision */}
-          {agentDecision && agentDecision.decision !== 'ERROR' && (
+          {showDecision && agentDecision.decision !== 'ERROR' && (
             <div className="mt-4">
               <div className={`bg-[#12121a] rounded-xl border p-4 ${
                 agentDecision.decision === 'APPROVE' ? 'border-emerald-500/30' :
@@ -312,7 +319,7 @@ export default function PayoutLive() {
           )}
 
           {/* Agent Error */}
-          {agentDecision?.decision === 'ERROR' && (
+          {showDecision && agentDecision?.decision === 'ERROR' && (
             <div className="mt-4">
               <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
                 <div className="flex items-center gap-2 text-red-400">

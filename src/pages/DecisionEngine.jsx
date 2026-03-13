@@ -6,6 +6,7 @@ import {
   ChevronRight, ChevronDown, Code, Database, Brain
 } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 
@@ -26,7 +27,7 @@ export default function DecisionEngine() {
     const fetchRules = async () => {
       try {
         const res = await fetch(`${API_BASE}/rules`)
-        const data = await res.json()
+        const data = await safeJson(res)
         if (data.success) setRules(data.data || [])
       } catch (error) {
         console.error('Error:', error)

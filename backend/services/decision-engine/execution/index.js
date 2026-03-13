@@ -302,64 +302,8 @@ router.get('/health', (req, res) => {
   }
 });
 
-// Helper functions
-function evaluateRule(rule, transaction, context) {
-  let triggered = true;
-  const evaluatedConditions = [];
-
-  for (const condition of rule.conditions || []) {
-    const fieldValue = getNestedValue({ ...transaction, ...context }, condition.field);
-    let conditionMet = false;
-
-    switch (condition.operator) {
-      case 'GT': conditionMet = fieldValue > condition.value; break;
-      case 'LT': conditionMet = fieldValue < condition.value; break;
-      case 'GTE': conditionMet = fieldValue >= condition.value; break;
-      case 'LTE': conditionMet = fieldValue <= condition.value; break;
-      case 'EQ': conditionMet = fieldValue === condition.value; break;
-      case 'NE': conditionMet = fieldValue !== condition.value; break;
-      case 'IN': conditionMet = Array.isArray(condition.value) && condition.value.includes(fieldValue); break;
-      case 'NOT_IN': conditionMet = Array.isArray(condition.value) && !condition.value.includes(fieldValue); break;
-      case 'CONTAINS': conditionMet = String(fieldValue).includes(condition.value); break;
-      default: conditionMet = false;
-    }
-
-    evaluatedConditions.push({ ...condition, actualValue: fieldValue, met: conditionMet });
-    if (!conditionMet) triggered = false;
-  }
-
-  return { triggered, action: triggered ? rule.action : 'NO_ACTION', evaluatedConditions };
-}
-
-function mapActionToDecision(action) {
-  const mapping = {
-    'BLOCK': 'BLOCKED',
-    'REVIEW': 'REVIEW',
-    'CHALLENGE': 'CHALLENGE',
-    'FLAG': 'APPROVED',
-    'ALLOW_WITH_LIMIT': 'APPROVED',
-    'ALLOW': 'APPROVED'
-  };
-  return mapping[action] || 'APPROVED';
-}
-
-function calculateRiskScore(triggeredRules, transaction) {
-  let score = transaction.riskScore || 0;
-
-  // Add weight based on triggered rules
-  triggeredRules.forEach(rule => {
-    if (rule.action === 'BLOCK') score += 30;
-    else if (rule.action === 'REVIEW') score += 20;
-    else if (rule.action === 'CHALLENGE') score += 15;
-    else if (rule.action === 'FLAG') score += 10;
-  });
-
-  return Math.min(100, score);
-}
-
-function getNestedValue(obj, path) {
-  return path.split('.').reduce((current, key) => current?.[key], obj);
-}
+// Shared rule evaluation functions (extracted for reuse by platform-integrator)
+import { evaluateRule, calculateRiskScore, getNestedValue, mapActionToDecision } from './rule-evaluator.js';
 
 function createCaseFromDecision(decision, triggeredRules, transaction) {
   const caseId = `CASE-${uuidv4().substring(0, 10).toUpperCase()}`;

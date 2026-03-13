@@ -816,14 +816,29 @@ export class SellerOnboardingAgent extends BaseAgent {
     evidence.forEach(e => {
       if (!e.success || !e.data) return;
 
-      // Identity verification
-      if (e.source === 'verify_identity' && !e.data.verified) {
-        factors.push({ factor: 'IDENTITY_NOT_VERIFIED', severity: 'CRITICAL', score: 40 });
+      // Identity verification — only flag if explicitly failed (not free-tier format-only checks)
+      if (e.source === 'verify_identity') {
+        if (e.data.verified === false) {
+          const isFreeApi = e.data.source === 'format-validation' || e.data.source === 'simulation';
+          if (isFreeApi) {
+            factors.push({ factor: 'ID_FORMAT_MISMATCH', severity: 'MEDIUM', score: 15 });
+          } else {
+            factors.push({ factor: 'IDENTITY_NOT_VERIFIED', severity: 'CRITICAL', score: 40 });
+          }
+        } else if (e.data.verified === true) {
+          factors.push({ factor: 'ID_FORMAT_VALID', severity: 'POSITIVE', score: -10 });
+        }
       }
 
-      // Business verification
-      if (e.source === 'verify_business' && !e.data.isRegistered) {
-        factors.push({ factor: 'BUSINESS_NOT_REGISTERED', severity: 'CRITICAL', score: 45 });
+      // Business verification — free-tier can never find businesses, don't penalize
+      if (e.source === 'verify_business' && e.data.isRegistered === false) {
+        const isFreeApi = e.data.source === 'simulation' || e.data.source === 'opencorporates';
+        if (isFreeApi && e.data.status === 'NOT_FOUND') {
+          // Cannot verify ≠ not registered — downgrade
+          factors.push({ factor: 'BUSINESS_UNVERIFIABLE', severity: 'LOW', score: 10 });
+        } else {
+          factors.push({ factor: 'BUSINESS_NOT_REGISTERED', severity: 'CRITICAL', score: 45 });
+        }
       }
 
       // Email verification
@@ -840,6 +855,8 @@ export class SellerOnboardingAgent extends BaseAgent {
       if (e.source === 'screen_watchlist') {
         if (e.data.sanctionsMatch || e.data.pepMatch) {
           factors.push({ factor: 'WATCHLIST_MATCH', severity: 'CRITICAL', score: 50 });
+        } else {
+          factors.push({ factor: 'WATCHLIST_CLEAR', severity: 'POSITIVE', score: -10 });
         }
       }
 
@@ -847,17 +864,27 @@ export class SellerOnboardingAgent extends BaseAgent {
       if (e.source === 'check_fraud_databases') {
         if (e.data.isBlocked) {
           factors.push({ factor: 'FRAUD_DATABASE_BLOCK', severity: 'CRITICAL', score: 50 });
-        }
-        if (e.data.isHighRisk) {
+        } else if (e.data.isHighRisk) {
           factors.push({ factor: 'HIGH_RISK_IN_DATABASE', severity: 'HIGH', score: 35 });
+        } else {
+          factors.push({ factor: 'FRAUD_DATABASE_CLEAR', severity: 'POSITIVE', score: -10 });
         }
       }
 
-      // Bank verification
-      if (e.source === 'verify_bank_account' && !e.data.verified) {
-        factors.push({ factor: 'BANK_ACCOUNT_NOT_VERIFIED', severity: 'HIGH', score: 30 });
+      // Bank verification — free-tier can only do ABA checksum, not full verification
+      if (e.source === 'verify_bank_account') {
+        if (e.data.verified === false) {
+          const isFreeApi = e.data.source === 'aba-checksum' || e.data.source === 'simulation';
+          if (isFreeApi) {
+            factors.push({ factor: 'BANK_ROUTING_INVALID', severity: 'MEDIUM', score: 15 });
+          } else {
+            factors.push({ factor: 'BANK_ACCOUNT_NOT_VERIFIED', severity: 'HIGH', score: 30 });
+          }
+        } else if (e.data.verified === true) {
+          factors.push({ factor: 'BANK_ROUTING_VALID', severity: 'POSITIVE', score: -10 });
+        }
       }
-      if (e.source === 'verify_bank_account' && !e.data.ownershipMatch) {
+      if (e.source === 'verify_bank_account' && e.data.ownershipMatch === false) {
         factors.push({ factor: 'BANK_OWNERSHIP_MISMATCH', severity: 'CRITICAL', score: 40 });
       }
 

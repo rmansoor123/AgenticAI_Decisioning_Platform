@@ -3,25 +3,27 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 const WS_URL = 'ws://localhost:3001/ws'
 const API_BASE = '/api'
 
-const POLL_INTERVAL = 2000    // Poll every 2 seconds
-const POLL_TIMEOUT = 300000   // 5 minutes max polling
+const POLL_INTERVAL = 1500
+const POLL_TIMEOUT = 300000
+const MIN_STABLE_AFTER_TERMINAL = 2000
 
 /**
- * Production-grade hook for real-time agent event streaming.
+ * Hook for real-time agent event streaming.
  *
- * Architecture: REST polling is the PRIMARY reliable source.
- * WebSocket is supplementary for low-latency updates between polls.
- * Both sources deduplicate by event ID.
+ * REST polling is PRIMARY. WebSocket is supplementary for low-latency.
+ * Deduplication is derived from events state (StrictMode-safe), not a detached ref.
+ *
+ * pollingDone: true only when REST event count stabilizes after the terminal event.
  */
 export function useAgentFlow(correlationId) {
   const [events, setEvents] = useState([])
   const [isConnected, setIsConnected] = useState(false)
   const [isAgentRunning, setIsAgentRunning] = useState(false)
   const [agentDecision, setAgentDecision] = useState(null)
+  const [pollingDone, setPollingDone] = useState(false)
   const wsRef = useRef(null)
   const reconnectRef = useRef(null)
   const correlationIdRef = useRef(correlationId)
-  const seenIdsRef = useRef(new Set())
 
   correlationIdRef.current = correlationId
 
@@ -29,33 +31,34 @@ export function useAgentFlow(correlationId) {
     setEvents([])
     setIsAgentRunning(false)
     setAgentDecision(null)
-    seenIdsRef.current = new Set()
+    setPollingDone(false)
   }, [])
 
   /**
    * Merge new events into state, deduplicate, sort, extract decision.
-   * Returns true if a terminal event was found.
+   * Dedup set is rebuilt from prev state each time (StrictMode-safe).
+   * Returns { foundTerminal, novelCount }.
    */
   const mergeEvents = useCallback((incoming) => {
     let foundTerminal = false
+    let novelCount = 0
 
     setEvents(prev => {
-      const seen = seenIdsRef.current
+      // Rebuild seen set from actual state — never drifts from reality
+      const seen = new Set(prev.map(e => e.id).filter(Boolean))
       const novel = incoming.filter(e => e.id && !seen.has(e.id))
+      novelCount = novel.length
+
       if (novel.length === 0) {
-        // Even with no new events, check if we already have a terminal event
         foundTerminal = prev.some(e =>
           e.type === 'agent:decision:complete' || e.type === 'agent:decision:error'
         )
         return prev
       }
 
-      novel.forEach(e => seen.add(e.id))
-
       const combined = [...prev, ...novel]
       combined.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
 
-      // Check for terminal event
       const decEvt = combined.find(e => e.type === 'agent:decision:complete')
       const errEvt = combined.find(e => e.type === 'agent:decision:error')
       foundTerminal = !!(decEvt || errEvt)
@@ -79,7 +82,6 @@ export function useAgentFlow(correlationId) {
         }, 0)
       }
 
-      // If we see any action:start, mark as running (unless already terminal)
       if (!foundTerminal) {
         const hasStart = combined.some(e =>
           e.type === 'agent:action:start' && e.data?.agentName
@@ -92,7 +94,7 @@ export function useAgentFlow(correlationId) {
       return combined
     })
 
-    return foundTerminal
+    return { foundTerminal, novelCount }
   }, [])
 
   // ── WebSocket (supplementary, low-latency) ──
@@ -156,7 +158,6 @@ export function useAgentFlow(correlationId) {
   }, [mergeEvents])
 
   // ── REST Polling (primary, reliable) ──
-  // Polls every POLL_INTERVAL until terminal event or POLL_TIMEOUT
   useEffect(() => {
     if (!correlationId) return
 
@@ -164,12 +165,17 @@ export function useAgentFlow(correlationId) {
     let pollTimer = null
     const startTime = Date.now()
 
+    let terminalFound = false
+    let terminalFoundAt = 0
+    let lastRestCount = -1
+    let stablePolls = 0
+
     const poll = async () => {
       if (cancelled) return
 
-      // Timeout guard
       if (Date.now() - startTime > POLL_TIMEOUT) {
-        console.warn('[useAgentFlow] Polling timed out after 5 minutes')
+        console.warn('[useAgentFlow] Polling timed out')
+        if (!cancelled) setPollingDone(true)
         return
       }
 
@@ -190,19 +196,45 @@ export function useAgentFlow(correlationId) {
             timestamp: e.timestamp
           }))
 
-          const terminal = mergeEvents(mapped)
-          if (terminal) return // Stop polling — pipeline complete
+          const restCount = mapped.length
+          const { foundTerminal, novelCount } = mergeEvents(mapped)
+
+          if (foundTerminal && !terminalFound) {
+            terminalFound = true
+            terminalFoundAt = Date.now()
+          }
+
+          if (terminalFound) {
+            if (restCount === lastRestCount && novelCount === 0) {
+              stablePolls++
+            } else {
+              stablePolls = 0
+            }
+            lastRestCount = restCount
+
+            const elapsed = Date.now() - terminalFoundAt
+            if (stablePolls >= 2 && elapsed >= MIN_STABLE_AFTER_TERMINAL) {
+              if (!cancelled) setPollingDone(true)
+              return
+            }
+          }
+        } else if (terminalFound) {
+          stablePolls++
+          const elapsed = Date.now() - terminalFoundAt
+          if (stablePolls >= 2 && elapsed >= MIN_STABLE_AFTER_TERMINAL) {
+            if (!cancelled) setPollingDone(true)
+            return
+          }
         }
       } catch (e) {
         // Network error — keep polling
       }
 
       if (!cancelled) {
-        pollTimer = setTimeout(poll, POLL_INTERVAL)
+        pollTimer = setTimeout(poll, terminalFound ? 800 : POLL_INTERVAL)
       }
     }
 
-    // Start polling after a short delay for initial events to arrive
     pollTimer = setTimeout(poll, 500)
 
     return () => {
@@ -211,7 +243,7 @@ export function useAgentFlow(correlationId) {
     }
   }, [correlationId, mergeEvents])
 
-  return { events, isConnected, isAgentRunning, agentDecision, clearEvents }
+  return { events, isConnected, isAgentRunning, agentDecision, pollingDone, clearEvents }
 }
 
 export default useAgentFlow

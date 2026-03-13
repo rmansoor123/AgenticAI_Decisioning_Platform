@@ -57,7 +57,9 @@ router.get('/sellers/:sellerId', (req, res) => {
 // Create new seller (onboarding) - Now uses Agentic AI
 router.post('/sellers', async (req, res) => {
   try {
-    const sellerData = req.body.sellerId ? req.body : generateSeller();
+    // Use submitted form data if it has meaningful fields, otherwise generate synthetic
+    const hasFormData = req.body.businessName || req.body.email || req.body.sellerId;
+    const sellerData = hasFormData ? { ...req.body } : generateSeller();
     const sellerId = sellerData.sellerId || `SLR-${Date.now().toString(36).toUpperCase()}`;
     sellerData.sellerId = sellerId;
 
@@ -177,23 +179,41 @@ router.post('/sellers', async (req, res) => {
         } catch {}
 
         // Fire-and-forget evaluation via Python eval service
-        const evalInterval = parseInt(process.env.EVAL_INTERVAL || '5');
-        if (!global._evalCounter) global._evalCounter = 0;
-        global._evalCounter++;
-        if (global._evalCounter % evalInterval === 0) {
-          const evalServiceUrl = process.env.EVAL_SERVICE_URL || 'http://localhost:8000';
-          fetch(`${evalServiceUrl}/evaluate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              query: `Evaluate seller: ${sellerData.businessName || 'Unknown'} (${sellerData.businessCategory || 'Unknown'}) from ${sellerData.country || 'Unknown'}`,
-              retrieved_contexts: (riskAssessment.agentEvaluation?.chainOfThought || []).map(s => s.content || JSON.stringify(s)).slice(0, 5),
-              agent_response: `Decision: ${decision.action || 'UNKNOWN'}. Risk Score: ${riskAssessment.riskScore || 0}. ${agentResult.result?.reasoning || ''}`,
-              ground_truth: null,
-              use_case: 'onboarding_decision',
-              agent_id: 'seller-onboarding-agent',
-            }),
-          }).catch(() => {});
+        try {
+          const evalInterval = parseInt(process.env.EVAL_INTERVAL || '5');
+          if (!global._evalCounter) global._evalCounter = 0;
+          global._evalCounter++;
+          if (global._evalCounter % evalInterval === 0) {
+            const evalServiceUrl = process.env.EVAL_SERVICE_URL || 'http://localhost:8000';
+            const cot = riskAssessment.agentEvaluation?.chainOfThought;
+            const cotSteps = Array.isArray(cot) ? cot : (cot?.steps || []);
+            fetch(`${evalServiceUrl}/evaluate`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                query: `Evaluate seller: ${sellerData.businessName || 'Unknown'} (${sellerData.businessCategory || 'Unknown'}) from ${sellerData.country || 'Unknown'}`,
+                retrieved_contexts: cotSteps.map(s => s.content || JSON.stringify(s)).slice(0, 5),
+                agent_response: `Decision: ${decision.action || 'UNKNOWN'}. Risk Score: ${riskAssessment.riskScore || 0}. ${agentResult.result?.reasoning || ''}`,
+                ground_truth: null,
+                use_case: 'onboarding_decision',
+                agent_id: 'seller-onboarding-agent',
+              }),
+            }).catch(() => {});
+          }
+        } catch (_) { /* best-effort eval */ }
+
+        // Record experiment outcome if active
+        if (agentResult.result?._platformSignals?.experimentVariant) {
+          const exp = agentResult.result._platformSignals.experimentVariant;
+          try {
+            db_ops.run(
+              'INSERT INTO experiment_events (event_id, experiment_id, entity_id, variant, event_type, value, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+              [`EVT-${Date.now().toString(36).toUpperCase()}`, exp.experimentId, sellerId, exp.variant,
+               'onboarding_decision', riskAssessment.riskScore || 0,
+               JSON.stringify({ decision: decision.action, confidence: decision.confidence }),
+               new Date().toISOString()]
+            );
+          } catch (_) { /* best-effort */ }
         }
 
         console.log(`[Onboarding Agent] Completed: ${sellerId} → ${decision.action} (${(decision.confidence * 100).toFixed(0)}%)`);

@@ -5,6 +5,7 @@ import {
   XCircle, Eye, Filter, Search, Calendar
 } from 'lucide-react'
 import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 
@@ -21,7 +22,7 @@ export default function SellerRiskLifecycle() {
   const fetchSellers = async () => {
     try {
       const res = await fetch(`${API_BASE}/onboarding/sellers?limit=100`)
-      const data = await res.json()
+      const data = await safeJson(res)
       if (data.success) {
         setSellers(data.data || [])
       }

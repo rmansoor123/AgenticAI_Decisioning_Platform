@@ -5,24 +5,16 @@ import {
 } from 'lucide-react'
 import AgentFlowViewer from '../components/AgentFlowViewer'
 import { useAgentFlow } from '../hooks/useAgentFlow'
+import { useSellers } from '../hooks/useSellers'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
-
-const sellerProfiles = [
-  { sellerId: 'SLR-990ADB07', name: 'Turcotte, Daniel and Quigley', risk: 'low' },
-  { sellerId: 'SLR-FF1DB1A3', name: 'Quigley - Raynor', risk: 'medium' },
-  { sellerId: 'SLR-343DCA9E', name: 'Emard - Emard', risk: 'low' },
-  { sellerId: 'SLR-E23A5F9B', name: 'Carroll, Price and Torp', risk: 'high' },
-  { sellerId: 'SLR-2DF52FC8', name: 'Rodriguez Group', risk: 'low' },
-  { sellerId: 'SLR-9C3B40DE', name: 'Mraz, Grant and Ankunding', risk: 'high' },
-]
 
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
 
 function generateRandom() {
-  const profile = pick(sellerProfiles)
   return {
-    sellerId: profile.sellerId,
+    sellerId: '',
     buyerId: `BUY-${Math.random().toString(36).substr(2, 8).toUpperCase()}`,
     purchaseAmount: parseFloat((Math.random() * 2990 + 10).toFixed(2)),
     isFirstPurchase: Math.random() > 0.5,
@@ -42,9 +34,20 @@ export default function BuyerTrustLive() {
   const [errors, setErrors] = useState({})
   const [correlationId, setCorrelationId] = useState(null)
 
-  const { events, isConnected, isAgentRunning, agentDecision, clearEvents } = useAgentFlow(correlationId)
+  const { events, isConnected, isAgentRunning, agentDecision, pollingDone, clearEvents } = useAgentFlow(correlationId)
+  const showDecision = !!(agentDecision && pollingDone)
+  const { sellers, loading: sellersLoading, urlSellerId } = useSellers()
 
-  useEffect(() => { if (agentDecision) setSubmitting(false) }, [agentDecision])
+  useEffect(() => { if (showDecision) setSubmitting(false) }, [showDecision])
+
+  useEffect(() => { if (urlSellerId) handleChange('sellerId', urlSellerId) }, [urlSellerId])
+
+  useEffect(() => {
+    if (sellers.length && !urlSellerId && !formData.sellerId) {
+      const s = sellers[Math.floor(Math.random() * sellers.length)]
+      handleChange('sellerId', s.sellerId)
+    }
+  }, [sellers])
 
   const handleChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -60,7 +63,8 @@ export default function BuyerTrustLive() {
   }
 
   const handleNewSubmission = () => {
-    setFormData(generateRandom())
+    const d = generateRandom(); if (sellers.length) d.sellerId = sellers[Math.floor(Math.random() * sellers.length)].sellerId
+    setFormData(d)
     clearEvents()
     setCorrelationId(null)
     setSubmitting(false)
@@ -86,7 +90,7 @@ export default function BuyerTrustLive() {
           deviceFingerprint: formData.deviceFingerprint
         })
       })
-      const data = await response.json()
+      const data = await safeJson(response)
       if (data.success) {
         if (data.correlationId) setCorrelationId(data.correlationId)
         setResult({ success: true, pending: true, entityId: data.entityId, message: data.message || 'Agent evaluation in progress...' })
@@ -145,7 +149,7 @@ export default function BuyerTrustLive() {
                   <select value={formData.sellerId} onChange={(e) => handleChange('sellerId', e.target.value)}
                     className={`w-full px-3 py-2 bg-gray-800 border rounded-lg text-white text-sm ${errors.sellerId ? 'border-red-500' : 'border-gray-700'} focus:border-sky-500 focus:outline-none`}>
                     <option value="">Select seller</option>
-                    {sellerProfiles.map(p => <option key={p.sellerId} value={p.sellerId}>{p.sellerId}</option>)}
+                    {sellers.map(p => <option key={p.sellerId} value={p.sellerId}>{p.sellerId} — {p.name}</option>)}
                   </select>
                   {errors.sellerId && <p className="text-xs text-red-400 mt-1">{errors.sellerId}</p>}
                 </div>
@@ -165,7 +169,7 @@ export default function BuyerTrustLive() {
               </div>
             </div>
 
-            <button type="button" onClick={() => setFormData(generateRandom())} className="w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg border border-gray-700 flex items-center justify-center gap-2 transition-colors">
+            <button type="button" onClick={() => { const d = generateRandom(); if (sellers.length) d.sellerId = sellers[Math.floor(Math.random() * sellers.length)].sellerId; setFormData(d) }} className="w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg border border-gray-700 flex items-center justify-center gap-2 transition-colors">
               <RotateCcw className="w-4 h-4" /> Generate Random Buyer
             </button>
 
@@ -181,7 +185,7 @@ export default function BuyerTrustLive() {
             </div></div>
           )}
 
-          {result?.pending && !agentDecision && (
+          {result?.pending && !showDecision && (
             <div className="mt-4"><div className="bg-sky-500/10 border border-sky-500/30 rounded-xl p-4">
               <div className="flex items-center gap-3"><Loader className="w-5 h-5 text-sky-400 animate-spin" /><div>
                 <h4 className="font-semibold text-sky-400">Agent Evaluating...</h4>
@@ -190,7 +194,7 @@ export default function BuyerTrustLive() {
             </div></div>
           )}
 
-          {agentDecision && agentDecision.decision !== 'ERROR' && (() => {
+          {showDecision && agentDecision.decision !== 'ERROR' && (() => {
             const Icon = getDecisionIcon(agentDecision.decision)
             const color = getDecisionColor(agentDecision.decision)
             return (
@@ -209,7 +213,7 @@ export default function BuyerTrustLive() {
             )
           })()}
 
-          {agentDecision?.decision === 'ERROR' && (
+          {showDecision && agentDecision?.decision === 'ERROR' && (
             <div className="mt-4"><div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
               <div className="flex items-center gap-2 text-red-400"><XCircle className="w-5 h-5" /><span className="font-semibold">Agent Error</span></div>
               <p className="text-sm text-gray-300 mt-1">{agentDecision.error}</p>

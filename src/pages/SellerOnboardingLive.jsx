@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import AgentFlowViewer from '../components/AgentFlowViewer'
 import { useAgentFlow } from '../hooks/useAgentFlow'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 
@@ -102,14 +103,16 @@ export default function SellerOnboardingLive() {
   const [errors, setErrors] = useState({})
   const [correlationId, setCorrelationId] = useState(null)
 
-  const { events, isConnected, isAgentRunning, agentDecision, clearEvents } = useAgentFlow(correlationId)
+  const { events, isConnected, isAgentRunning, agentDecision, pollingDone, clearEvents } = useAgentFlow(correlationId)
 
-  // Stop submitting state when agent decision arrives
+  // Show decision only after polling has collected all events
+  const showDecision = !!(agentDecision && pollingDone)
+
   useEffect(() => {
-    if (agentDecision) {
+    if (showDecision) {
       setSubmitting(false)
     }
-  }, [agentDecision])
+  }, [showDecision])
 
   const handleChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -168,7 +171,7 @@ export default function SellerOnboardingLive() {
         body: JSON.stringify(sellerData)
       })
 
-      const data = await response.json()
+      const data = await safeJson(response)
 
       if (data.success) {
         // Set correlationId to trigger backfill + live filtering
@@ -385,7 +388,7 @@ export default function SellerOnboardingLive() {
           )}
 
           {/* Pending indicator */}
-          {result?.pending && !agentDecision && (
+          {result?.pending && !showDecision && (
             <div className="mt-4">
               <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-xl p-4">
                 <div className="flex items-center gap-3">
@@ -402,7 +405,7 @@ export default function SellerOnboardingLive() {
           )}
 
           {/* Final Decision from Agent */}
-          {agentDecision && agentDecision.decision !== 'ERROR' && (
+          {showDecision && agentDecision && agentDecision.decision !== 'ERROR' && (
             <div className="mt-4">
               <div className={`bg-[#12121a] rounded-xl border p-4 ${
                 agentDecision.decision === 'APPROVE' ? 'border-emerald-500/30' :
@@ -439,8 +442,41 @@ export default function SellerOnboardingLive() {
             </div>
           )}
 
+          {/* Continue Seller Journey */}
+          {showDecision && result?.sellerId && agentDecision?.decision !== 'ERROR' && (
+            <div className="mt-4 bg-[#12121a] rounded-xl border border-gray-800 p-4">
+              <h4 className="text-sm font-semibold text-white mb-3">Continue Seller Journey</h4>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { label: 'Account Setup', path: '/account-setup/live' },
+                  { label: 'Item Setup', path: '/item-setup/live' },
+                  { label: 'Listing', path: '/listing/live' },
+                  { label: 'Pricing', path: '/pricing/live' },
+                  { label: 'Transaction', path: '/transaction/live' },
+                  { label: 'Shipping', path: '/shipping/live' },
+                  { label: 'Payout', path: '/payout/live' },
+                  { label: 'Returns', path: '/returns/live' },
+                  { label: 'Profile Updates', path: '/profile-updates/live' },
+                  { label: 'ATO Detection', path: '/ato/live' },
+                  { label: 'Compliance', path: '/compliance/live' },
+                  { label: 'Network', path: '/network/live' },
+                  { label: 'Review', path: '/review/live' },
+                  { label: 'Behavioral', path: '/behavioral/live' },
+                  { label: 'Buyer Trust', path: '/buyer-trust/live' },
+                  { label: 'Policy', path: '/policy/live' },
+                  { label: 'Payment', path: '/payment/live' },
+                ].map(s => (
+                  <a key={s.path} href={`${s.path}?sellerId=${result.sellerId}`}
+                    className="px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-lg border border-gray-700 text-center transition-colors">
+                    {s.label}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Agent Error */}
-          {agentDecision?.decision === 'ERROR' && (
+          {showDecision && agentDecision?.decision === 'ERROR' && (
             <div className="mt-4">
               <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
                 <div className="flex items-center gap-2 text-red-400">

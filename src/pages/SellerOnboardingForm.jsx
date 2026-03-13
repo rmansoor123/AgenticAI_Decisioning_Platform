@@ -5,6 +5,7 @@ import {
   ArrowRight, Sparkles, Brain, TrendingUp, Camera, Upload,
   FileCheck, Scan
 } from 'lucide-react'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 
@@ -304,7 +305,7 @@ export default function SellerOnboardingForm() {
         throw new Error(`Server error: ${response.status} - ${errorText}`)
       }
 
-      const data = await response.json()
+      const data = await safeJson(response)
       console.log('Response data:', data)
 
       if (data.success) {
@@ -460,7 +461,7 @@ export default function SellerOnboardingForm() {
         body: JSON.stringify(sellerData)
       })
 
-      const data = await response.json()
+      const data = await safeJson(response)
 
       if (data.success) {
         setResult({

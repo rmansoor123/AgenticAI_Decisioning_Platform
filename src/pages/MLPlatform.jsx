@@ -6,6 +6,7 @@ import {
   ChevronRight, BarChart3, Target, Cpu
 } from 'lucide-react'
 import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 
@@ -25,7 +26,7 @@ export default function MLPlatform() {
     const fetchData = async () => {
       try {
         const res = await fetch(`${API_BASE}/ml/governance/models`)
-        const data = await res.json()
+        const data = await safeJson(res)
         if (data.success) setModels(data.data || [])
       } catch (error) {
         console.error('Error:', error)

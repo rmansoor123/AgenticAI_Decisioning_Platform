@@ -5,6 +5,8 @@ import {
 } from 'lucide-react'
 import AgentFlowViewer from '../components/AgentFlowViewer'
 import { useAgentFlow } from '../hooks/useAgentFlow'
+import { useSellers } from '../hooks/useSellers'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 
@@ -19,34 +21,21 @@ const returnReasons = [
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)]
 const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min
 
-const returnProfiles = [
-  { sellerId: 'SLR-990ADB07', orderId: 'ORD-20250301-001', reason: 'defective', amount: 89.99, signals: {} },
-  { sellerId: 'SLR-FF1DB1A3', orderId: 'ORD-20250215-042', reason: 'wrong_item', amount: 349.00, signals: { serialReturner: true } },
-  { sellerId: 'SLR-E23A5F9B', orderId: 'ORD-20250228-019', reason: 'not_as_described', amount: 1250.00, signals: { emptyBox: true, fundsWithdrawn: true } },
-  { sellerId: 'SLR-2DF52FC8', orderId: 'ORD-20250305-007', reason: 'changed_mind', amount: 24.50, signals: {} },
-  { sellerId: 'SLR-9C3B40DE', orderId: 'ORD-20250220-033', reason: 'defective', amount: 4500.00, signals: { refundExceedsPurchase: true, serialReturner: true } },
-  { sellerId: 'SLR-343DCA9E', orderId: 'ORD-20250310-055', reason: 'not_as_described', amount: 189.95, signals: { wardrobing: true } },
-  { sellerId: 'SLR-33313A8E', orderId: 'ORD-20250201-088', reason: 'defective', amount: 8900.00, signals: { emptyBox: true, refundExceedsPurchase: true, fundsWithdrawn: true } },
-  { sellerId: 'SLR-BFBF2965', orderId: 'ORD-20250308-012', reason: 'wrong_item', amount: 65.00, signals: {} },
-  { sellerId: 'SLR-9521EA9B', orderId: 'ORD-20250225-071', reason: 'other', amount: 2100.00, signals: { serialReturner: true, wardrobing: true } },
-  { sellerId: 'SLR-D0157140', orderId: 'ORD-20250303-029', reason: 'not_as_described', amount: 750.00, signals: {} },
-  { sellerId: 'SLR-036E8FB4', orderId: 'ORD-20250312-003', reason: 'changed_mind', amount: 420.00, signals: { wardrobing: true } },
-  { sellerId: 'SLR-8EAE5C93', orderId: 'ORD-20250307-016', reason: 'defective', amount: 35.00, signals: {} },
-]
 
 function generateRandomReturn() {
-  const profile = pick(returnProfiles)
-  const variance = profile.amount * (Math.random() * 0.3 - 0.15)
+  const reasons = ['defective', 'wrong_item', 'not_as_described', 'changed_mind', 'other']
+  const baseAmount = pick([89.99, 349.00, 1250.00, 24.50, 4500.00, 189.95, 8900.00, 65.00, 2100.00, 750.00, 420.00, 35.00])
+  const variance = baseAmount * (Math.random() * 0.3 - 0.15)
   return {
-    sellerId: profile.sellerId,
+    sellerId: '',
     orderId: `ORD-${Date.now().toString(36).toUpperCase().slice(0, 8)}-${randInt(1, 99).toString().padStart(3, '0')}`,
-    reason: profile.reason,
-    refundAmount: Math.round((profile.amount + variance) * 100) / 100,
-    serialReturner: profile.signals.serialReturner || false,
-    emptyBox: profile.signals.emptyBox || false,
-    refundExceedsPurchase: profile.signals.refundExceedsPurchase || false,
-    wardrobing: profile.signals.wardrobing || false,
-    fundsWithdrawn: profile.signals.fundsWithdrawn || false
+    reason: pick(reasons),
+    refundAmount: Math.round((baseAmount + variance) * 100) / 100,
+    serialReturner: Math.random() > 0.7,
+    emptyBox: Math.random() > 0.8,
+    refundExceedsPurchase: Math.random() > 0.8,
+    wardrobing: Math.random() > 0.7,
+    fundsWithdrawn: Math.random() > 0.8
   }
 }
 
@@ -75,11 +64,21 @@ export default function ReturnsLive() {
   const [errors, setErrors] = useState({})
   const [correlationId, setCorrelationId] = useState(null)
 
-  const { events, isConnected, isAgentRunning, agentDecision, clearEvents } = useAgentFlow(correlationId)
+  const { events, isConnected, isAgentRunning, agentDecision, pollingDone, clearEvents } = useAgentFlow(correlationId)
+  const showDecision = !!(agentDecision && pollingDone)
+  const { sellers, loading: sellersLoading, urlSellerId } = useSellers()
 
   useEffect(() => {
-    if (agentDecision) setSubmitting(false)
-  }, [agentDecision])
+    if (showDecision) setSubmitting(false)
+  }, [showDecision])
+
+  useEffect(() => { if (urlSellerId) handleChange('sellerId', urlSellerId) }, [urlSellerId])
+  useEffect(() => {
+    if (sellers.length && !urlSellerId && !formData.sellerId) {
+      const s = sellers[Math.floor(Math.random() * sellers.length)]
+      handleChange('sellerId', s.sellerId)
+    }
+  }, [sellers])
 
   const handleChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -97,7 +96,8 @@ export default function ReturnsLive() {
   }
 
   const handleNewSubmission = () => {
-    setFormData(generateRandomReturn())
+    const d = generateRandomReturn(); if (sellers.length) d.sellerId = sellers[Math.floor(Math.random() * sellers.length)].sellerId
+    setFormData(d)
     clearEvents()
     setCorrelationId(null)
     setSubmitting(false)
@@ -121,7 +121,7 @@ export default function ReturnsLive() {
         body: JSON.stringify(formData)
       })
 
-      const data = await response.json()
+      const data = await safeJson(response)
 
       if (data.success) {
         if (data.correlationId) setCorrelationId(data.correlationId)
@@ -217,7 +217,15 @@ export default function ReturnsLive() {
                 Return Details
               </h3>
               <div className="grid grid-cols-2 gap-3">
-                <InputField label="Seller ID" field="sellerId" placeholder="SLR-XXXXX" required />
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1.5">Seller *</label>
+                  <select value={formData.sellerId} onChange={(e) => handleChange('sellerId', e.target.value)}
+                    className={`w-full px-3 py-2 bg-gray-800 border rounded-lg text-white text-sm ${errors.sellerId ? 'border-red-500' : 'border-gray-700'} focus:border-pink-500 focus:outline-none`}>
+                    <option value="">Select seller</option>
+                    {sellers.map(p => <option key={p.sellerId} value={p.sellerId}>{p.sellerId} — {p.name}</option>)}
+                  </select>
+                  {errors.sellerId && <p className="text-xs text-red-400 mt-1">{errors.sellerId}</p>}
+                </div>
                 <InputField label="Order ID" field="orderId" placeholder="ORD-XXXXX-XXX" required />
                 <div>
                   <label className="block text-sm text-gray-400 mb-1.5">Return Reason *</label>
@@ -255,7 +263,7 @@ export default function ReturnsLive() {
             {/* Generate Random */}
             <button
               type="button"
-              onClick={() => setFormData(generateRandomReturn())}
+              onClick={() => { const d = generateRandomReturn(); if (sellers.length) d.sellerId = sellers[Math.floor(Math.random() * sellers.length)].sellerId; setFormData(d) }}
               className="w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg border border-gray-700 flex items-center justify-center gap-2 transition-colors"
             >
               <RotateCcw className="w-4 h-4" />
@@ -297,7 +305,7 @@ export default function ReturnsLive() {
           )}
 
           {/* Pending */}
-          {result?.pending && !agentDecision && (
+          {result?.pending && !showDecision && (
             <div className="mt-4">
               <div className="bg-pink-500/10 border border-pink-500/30 rounded-xl p-4">
                 <div className="flex items-center gap-3">
@@ -314,7 +322,7 @@ export default function ReturnsLive() {
           )}
 
           {/* Final Decision */}
-          {agentDecision && agentDecision.decision !== 'ERROR' && (
+          {showDecision && agentDecision.decision !== 'ERROR' && (
             <div className="mt-4">
               <div className={`bg-[#12121a] rounded-xl border p-4 ${
                 agentDecision.decision === 'APPROVE' ? 'border-emerald-500/30' :
@@ -353,7 +361,7 @@ export default function ReturnsLive() {
           )}
 
           {/* Agent Error */}
-          {agentDecision?.decision === 'ERROR' && (
+          {showDecision && agentDecision?.decision === 'ERROR' && (
             <div className="mt-4">
               <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
                 <div className="flex items-center gap-2 text-red-400">

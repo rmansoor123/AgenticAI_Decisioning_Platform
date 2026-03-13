@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Shield, Search, ChevronDown, ChevronRight, Activity, AlertTriangle, Zap, Eye } from 'lucide-react';
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api';
 
@@ -49,7 +50,7 @@ export default function RiskRules() {
     const fetchRules = async () => {
       try {
         const res = await fetch(`${API_BASE}/rules/by-checkpoint`);
-        const data = await res.json();
+        const data = await safeJson(res);
         if (data.success) {
           setGroupedRules(data.data);
           const allRules = Object.values(data.data).flatMap(g => g.rules);

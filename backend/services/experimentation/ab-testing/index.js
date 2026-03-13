@@ -472,15 +472,7 @@ function chiSquareTest(control, treatment) {
   return { chiSquare: chiSq, pValue, isSignificant: pValue < 0.05 };
 }
 
-// Helper function for deterministic hashing
-function simpleHash(str) {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  return Math.abs(hash);
-}
+// Shared hashing/assignment functions (extracted for reuse by platform-integrator)
+import { simpleHash, assignVariant } from './variant-assigner.js';
 
 export default router;
