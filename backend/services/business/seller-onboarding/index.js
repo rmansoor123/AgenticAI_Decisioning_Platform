@@ -141,7 +141,7 @@ router.post('/sellers', async (req, res) => {
         const updatedData = { ...sellerData, onboardingRiskAssessment: riskAssessment };
         if (decision.action === 'REJECT') updatedData.status = 'BLOCKED';
         else if (decision.action === 'REVIEW') updatedData.status = 'UNDER_REVIEW';
-        else if (decision.action === 'APPROVE') updatedData.status = 'PENDING';
+        else if (decision.action === 'APPROVE') updatedData.status = 'ACTIVE';
         else updatedData.status = 'UNDER_REVIEW';
 
         db_ops.update('sellers', 'seller_id', sellerId, updatedData);

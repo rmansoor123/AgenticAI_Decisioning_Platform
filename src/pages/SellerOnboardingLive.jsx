@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   User, Building, Mail, Phone, MapPin, CreditCard, FileText,
   Shield, CheckCircle, XCircle, Clock, AlertTriangle, Loader,
-  ArrowRight, Brain, Zap, Plus, RotateCcw
+  ArrowRight, Brain, Zap, Plus, RotateCcw, UserCheck
 } from 'lucide-react'
 import AgentFlowViewer from '../components/AgentFlowViewer'
 import { useAgentFlow } from '../hooks/useAgentFlow'
@@ -77,6 +77,66 @@ function generateRandomSeller() {
   }
 }
 
+// --- Pre-qualified seller profiles: low-risk, established businesses ---
+const approvedProfiles = [
+  { name: 'Evergreen Home Furnishings', cat: 'Home & Garden', country: 'US', city: 'Portland, OR', owner: 'Rebecca Mitchell', domain: 'evergreenhomefurnishings.com', bank: 'Wells Fargo' },
+  { name: 'Summit Sports Equipment', cat: 'Sports & Outdoors', country: 'US', city: 'Denver, CO', owner: 'Michael Torres', domain: 'summitsportsequip.com', bank: 'Chase Bank' },
+  { name: 'Brightwood Books & Media', cat: 'Books & Media', country: 'US', city: 'Austin, TX', owner: 'Jennifer Adams', domain: 'brightwoodbooks.com', bank: 'Bank of America' },
+  { name: 'Harbour Toys Company', cat: 'Toys & Games', country: 'UK', city: 'Bristol, England', owner: 'Oliver Bennett', domain: 'harbourtoys.co.uk', bank: 'Barclays' },
+  { name: 'Nordic Kitchen Imports', cat: 'Food & Beverage', country: 'CA', city: 'Vancouver, BC', owner: 'Erik Johansson', domain: 'nordickitchen.ca', bank: 'TD Bank' },
+  { name: 'Bavarian Garden Centre', cat: 'Home & Garden', country: 'DE', city: 'Stuttgart, BW', owner: 'Katrin Weber', domain: 'bavariangarden.de', bank: 'Deutsche Bank' },
+  { name: 'Pacific Wellness Products', cat: 'Health & Beauty', country: 'AU', city: 'Melbourne, VIC', owner: 'Sarah Thompson', domain: 'pacificwellness.com.au', bank: 'Commonwealth Bank' },
+  { name: 'Maple Creek Outdoors', cat: 'Sports & Outdoors', country: 'CA', city: 'Calgary, AB', owner: 'David Nguyen', domain: 'maplecreekoutdoors.ca', bank: 'TD Bank' },
+  { name: 'Heritage Craft Supplies', cat: 'Other', country: 'US', city: 'Nashville, TN', owner: 'Amanda Foster', domain: 'heritagecrafts.com', bank: 'Citibank' },
+  { name: 'Sunrise Kids Collection', cat: 'Toys & Games', country: 'US', city: 'Scottsdale, AZ', owner: 'Daniel Kim', domain: 'sunrisekids.com', bank: 'Wells Fargo' },
+  { name: 'Blue Ridge Auto Parts', cat: 'Automotive', country: 'US', city: 'Charlotte, NC', owner: 'Robert Hayes', domain: 'blueridgeautoparts.com', bank: 'Bank of America' },
+  { name: 'Lakeside Pet Supplies', cat: 'Other', country: 'US', city: 'Minneapolis, MN', owner: 'Lisa Chang', domain: 'lakesidepets.com', bank: 'Chase Bank' },
+]
+
+function generateApprovedSeller() {
+  const profile = pick(approvedProfiles)
+  const docNum = `P${randDigits(8)}`
+  return {
+    businessName: profile.name,
+    businessCategory: profile.cat,
+    businessRegistrationNumber: `REG-${randInt(2010, 2018)}-${randDigits(5)}`,
+    businessAge: String(randInt(5, 15)),
+    taxId: `TAX-${randDigits(2)}-${randDigits(7)}`,
+    email: `${profile.owner.split(' ')[0].toLowerCase()}@${profile.domain}`,
+    phone: `+1-${randDigits(3)}-${randDigits(3)}-${randDigits(4)}`,
+    country: profile.country,
+    address: `${randInt(100, 9999)} ${pick(['Commerce Blvd', 'Enterprise Dr', 'Main St', 'Oak Ave', 'Market St'])}, ${profile.city}`,
+    documentType: 'PASSPORT',
+    documentNumber: docNum,
+    bankName: profile.bank,
+    accountNumber: randDigits(10),
+    routingNumber: randDigits(9),
+    accountHolderName: profile.owner,
+    ipAddress: `${randInt(10, 50)}.${randInt(0, 255)}.${randInt(0, 255)}.${randInt(1, 254)}`,
+    website: `https://${profile.domain}`,
+    // These flags tell the agent this seller has pre-verified identity + bank
+    _preQualified: true,
+    _kycVerified: true,
+    _bankVerified: true,
+    _idVerification: {
+      isValid: true,
+      confidence: 0.97,
+      faceMatch: { matchResult: { isMatch: true } },
+      validation: {
+        isExpired: false,
+        validationScore: 95,
+        issues: []
+      },
+      extractedData: {
+        documentType: 'PASSPORT',
+        documentNumber: docNum,
+        address: `${profile.city}`,
+        country: profile.country
+      }
+    }
+  }
+}
+
 const getDecisionColor = (decision) => {
   switch (decision) {
     case 'APPROVE': return 'emerald'
@@ -97,11 +157,12 @@ const getDecisionIcon = (decision) => {
 
 export default function SellerOnboardingLive() {
   const [formData, setFormData] = useState(generateRandomSeller)
-
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState(null)
   const [errors, setErrors] = useState({})
   const [correlationId, setCorrelationId] = useState(null)
+  const [autoSubmitPending, setAutoSubmitPending] = useState(false)
+  const formRef = useRef(null)
 
   const { events, isConnected, isAgentRunning, agentDecision, pollingDone, clearEvents } = useAgentFlow(correlationId)
 
@@ -145,23 +206,22 @@ export default function SellerOnboardingLive() {
     setErrors({})
   }
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    if (!validateForm()) return
-
-    // Reset state
+  const submitSeller = useCallback(async (data) => {
     clearEvents()
     setCorrelationId(null)
     setSubmitting(true)
     setResult(null)
+    setErrors({})
 
     try {
       const sellerId = `SLR-${Date.now().toString(36).toUpperCase()}`
+      const { _preQualified, _kycVerified, _bankVerified, _idVerification, ...fields } = data
       const sellerData = {
         sellerId,
-        ...formData,
-        kycVerified: false,
-        bankVerified: false,
+        ...fields,
+        kycVerified: _kycVerified || false,
+        bankVerified: _bankVerified || false,
+        ...(_idVerification ? { idVerification: _idVerification } : {}),
         createdAt: new Date().toISOString()
       }
 
@@ -171,26 +231,23 @@ export default function SellerOnboardingLive() {
         body: JSON.stringify(sellerData)
       })
 
-      const data = await safeJson(response)
+      const responseData = await safeJson(response)
 
-      if (data.success) {
-        // Set correlationId to trigger backfill + live filtering
-        if (data.correlationId) {
-          setCorrelationId(data.correlationId)
+      if (responseData.success) {
+        if (responseData.correlationId) {
+          setCorrelationId(responseData.correlationId)
         }
-
-        // Agent is running async — don't show final result yet
-        // The result will come via the agent:decision:complete WebSocket event
         setResult({
           success: true,
           pending: true,
-          sellerId: data.sellerId,
-          message: data.message || 'Agent evaluation in progress...'
+          sellerId: responseData.sellerId,
+          preQualified: _preQualified || false,
+          message: responseData.message || 'Agent evaluation in progress...'
         })
       } else {
         setResult({
           success: false,
-          error: data.error || 'Failed to start evaluation'
+          error: responseData.error || 'Failed to start evaluation'
         })
         setSubmitting(false)
       }
@@ -201,7 +258,31 @@ export default function SellerOnboardingLive() {
       })
       setSubmitting(false)
     }
+  }, [clearEvents])
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    if (!validateForm()) return
+    submitSeller(formData)
   }
+
+  const handleGenerateApproved = () => {
+    const approvedData = generateApprovedSeller()
+    setFormData(approvedData)
+    clearEvents()
+    setCorrelationId(null)
+    setResult(null)
+    setErrors({})
+    setAutoSubmitPending(true)
+  }
+
+  // Auto-submit after form is populated with approved profile
+  useEffect(() => {
+    if (autoSubmitPending && formData._preQualified) {
+      setAutoSubmitPending(false)
+      submitSeller(formData)
+    }
+  }, [autoSubmitPending, formData, submitSeller])
 
   const InputField = ({ label, field, type = 'text', placeholder, required, colSpan }) => (
     <div className={colSpan ? `col-span-${colSpan}` : ''}>
@@ -247,6 +328,14 @@ export default function SellerOnboardingLive() {
           >
             <Plus className="w-4 h-4" />
             New Application
+          </button>
+          <button
+            onClick={handleGenerateApproved}
+            disabled={submitting}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
+          >
+            <UserCheck className="w-4 h-4" />
+            Quick Approve Seller
           </button>
         </div>
       </div>
@@ -390,13 +479,18 @@ export default function SellerOnboardingLive() {
           {/* Pending indicator */}
           {result?.pending && !showDecision && (
             <div className="mt-4">
-              <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-xl p-4">
+              <div className={`${result.preQualified ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-indigo-500/10 border-indigo-500/30'} border rounded-xl p-4`}>
                 <div className="flex items-center gap-3">
-                  <Loader className="w-5 h-5 text-indigo-400 animate-spin" />
+                  <Loader className={`w-5 h-5 ${result.preQualified ? 'text-emerald-400' : 'text-indigo-400'} animate-spin`} />
                   <div>
-                    <h4 className="font-semibold text-indigo-400">Agent Evaluating...</h4>
+                    <h4 className={`font-semibold ${result.preQualified ? 'text-emerald-400' : 'text-indigo-400'}`}>
+                      {result.preQualified ? 'Pre-Qualified Seller — Agent Verifying...' : 'Agent Evaluating...'}
+                    </h4>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      Watch the flow panel for real-time progress. Seller: {result.sellerId}
+                      {result.preQualified
+                        ? `KYC & bank pre-verified. TPAOR loop running full evaluation. Seller: ${result.sellerId}`
+                        : `Watch the flow panel for real-time progress. Seller: ${result.sellerId}`
+                      }
                     </p>
                   </div>
                 </div>
