@@ -81,7 +81,7 @@ export class ReturnsAbuseAgent extends AutonomousAgent {
         if (!sellerId) return { success: false, error: 'sellerId is required' };
 
         try {
-          const allReturns = db_ops.getAll('returns', 1000, 0);
+          const allReturns = await db_ops.getAll('returns', 1000, 0);
           const returns = allReturns
             .map(e => e.data || e)
             .filter(r => r.sellerId === sellerId)
@@ -106,12 +106,12 @@ export class ReturnsAbuseAgent extends AutonomousAgent {
         if (!sellerId) return { success: false, error: 'sellerId is required' };
 
         try {
-          const allReturns = db_ops.getAll('returns', 1000, 0);
+          const allReturns = await db_ops.getAll('returns', 1000, 0);
           const returns = allReturns
             .map(e => e.data || e)
             .filter(r => r.sellerId === sellerId);
 
-          const allTxns = db_ops.getAll('transactions', 5000, 0);
+          const allTxns = await db_ops.getAll('transactions', 5000, 0);
           const transactions = allTxns
             .map(e => e.data || e)
             .filter(t => t.sellerId === sellerId);
@@ -152,7 +152,7 @@ export class ReturnsAbuseAgent extends AutonomousAgent {
         if (!sellerId) return { success: false, error: 'sellerId is required' };
 
         try {
-          const allReturns = db_ops.getAll('returns', 1000, 0);
+          const allReturns = await db_ops.getAll('returns', 1000, 0);
           const returns = allReturns
             .map(e => e.data || e)
             .filter(r => r.sellerId === sellerId);
@@ -200,7 +200,7 @@ export class ReturnsAbuseAgent extends AutonomousAgent {
         if (!sellerId) return { success: false, error: 'sellerId is required' };
 
         try {
-          const allReturns = db_ops.getAll('returns', 1000, 0);
+          const allReturns = await db_ops.getAll('returns', 1000, 0);
           const sellerReturns = allReturns
             .map(e => e.data || e)
             .filter(r => r.sellerId === sellerId);
@@ -246,13 +246,13 @@ export class ReturnsAbuseAgent extends AutonomousAgent {
         if (!sellerId) return { success: false, error: 'sellerId is required' };
 
         try {
-          const allPayouts = db_ops.getAll('payouts', 1000, 0);
+          const allPayouts = await db_ops.getAll('payouts', 1000, 0);
           const payouts = allPayouts
             .map(e => e.data || e)
             .filter(p => p.sellerId === sellerId)
             .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-          const allReturns = db_ops.getAll('returns', 1000, 0);
+          const allReturns = await db_ops.getAll('returns', 1000, 0);
           const returns = allReturns
             .map(e => e.data || e)
             .filter(r => r.sellerId === sellerId);

@@ -7,11 +7,11 @@ import { getPaymentRiskAgent } from '../../../agents/specialized/payment-risk-ag
 const router = express.Router();
 
 // Get all payments
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { limit = 50, offset = 0, sellerId, status, paymentType } = req.query;
 
-    let payments = db_ops.getAll('payments', parseInt(limit), parseInt(offset));
+    let payments = await db_ops.getAll('payments', parseInt(limit), parseInt(offset));
     payments = payments.map(p => p.data);
 
     if (sellerId) payments = payments.filter(p => p.sellerId === sellerId);
@@ -24,7 +24,7 @@ router.get('/', (req, res) => {
       pagination: {
         limit: parseInt(limit),
         offset: parseInt(offset),
-        total: db_ops.count('payments')
+        total: await db_ops.count('payments')
       }
     });
   } catch (error) {
@@ -33,9 +33,9 @@ router.get('/', (req, res) => {
 });
 
 // Get payment statistics
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
-    const allPayments = db_ops.getAll('payments', 10000, 0).map(p => p.data);
+    const allPayments = (await db_ops.getAll('payments', 10000, 0)).map(p => p.data);
 
     const stats = {
       total: allPayments.length,
@@ -74,9 +74,9 @@ router.get('/stats', (req, res) => {
 });
 
 // Get payment by ID
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
-    const payment = db_ops.getById('payments', 'payment_id', req.params.id);
+    const payment = await db_ops.getById('payments', 'payment_id', req.params.id);
     if (!payment) {
       return res.status(404).json({ success: false, error: 'Payment not found' });
     }
@@ -91,7 +91,7 @@ router.post('/', async (req, res) => {
   try {
     const { sellerId, amount, cardBin, cardLast4, paymentType, currency, billingCountry, deviceFingerprint } = req.body;
 
-    const seller = db_ops.getById('sellers', 'seller_id', sellerId);
+    const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
     if (!seller) {
       return res.status(404).json({ success: false, error: 'Seller not found' });
     }
@@ -115,7 +115,7 @@ router.post('/', async (req, res) => {
       createdAt: new Date().toISOString()
     };
 
-    db_ops.insert('payments', 'payment_id', paymentId, record);
+    await db_ops.insert('payments', 'payment_id', paymentId, record);
 
     res.status(202).json({
       success: true,
@@ -147,7 +147,7 @@ router.post('/', async (req, res) => {
       evaluationType: 'payment_risk',
       _correlationId: correlationId
     })
-      .then(agentResult => {
+      .then(async agentResult => {
         const rec = agentResult.result?.recommendation || agentResult.result?.decision;
         const decision = rec?.action || 'BLOCK';
         const riskScore = agentResult.result?.overallRisk?.score ?? 75;
@@ -156,7 +156,7 @@ router.post('/', async (req, res) => {
 
         const riskLevel = riskScore >= 66 ? 'CRITICAL' : riskScore >= 40 ? 'HIGH' : riskScore >= 20 ? 'MEDIUM' : 'LOW';
 
-        db_ops.update('payments', 'payment_id', paymentId, {
+        await db_ops.update('payments', 'payment_id', paymentId, {
           ...record,
           status: decision,
           riskScore,
@@ -178,7 +178,7 @@ router.post('/', async (req, res) => {
             status: 'OPEN', sellerId, entityId: paymentId, entityType: 'PAYMENT',
             decision, riskScore, reasoning, agentId, createdAt: new Date().toISOString()
           };
-          db_ops.insert('cases', 'case_id', caseId, caseData);
+          await db_ops.insert('cases', 'case_id', caseId, caseData);
         }
 
         try {
@@ -192,9 +192,9 @@ router.post('/', async (req, res) => {
 
         console.log(`[PaymentService] Completed: ${paymentId} → ${decision} (risk: ${riskScore})`);
       })
-      .catch(error => {
+      .catch(async error => {
         console.error(`[PaymentService] Agent error for ${paymentId}:`, error.message);
-        db_ops.update('payments', 'payment_id', paymentId, {
+        await db_ops.update('payments', 'payment_id', paymentId, {
           ...record,
           status: 'BLOCK',
           riskScore: 75,
@@ -216,10 +216,10 @@ router.post('/', async (req, res) => {
 });
 
 // Update payment status
-router.patch('/:id/status', (req, res) => {
+router.patch('/:id/status', async (req, res) => {
   try {
     const { status, reason } = req.body;
-    const payment = db_ops.getById('payments', 'payment_id', req.params.id);
+    const payment = await db_ops.getById('payments', 'payment_id', req.params.id);
     if (!payment) {
       return res.status(404).json({ success: false, error: 'Payment not found' });
     }
@@ -229,7 +229,7 @@ router.patch('/:id/status', (req, res) => {
       return res.status(400).json({ success: false, error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
     }
 
-    db_ops.update('payments', 'payment_id', req.params.id, {
+    await db_ops.update('payments', 'payment_id', req.params.id, {
       ...payment.data,
       status,
       statusReason: reason,

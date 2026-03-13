@@ -7,10 +7,10 @@ const router = express.Router();
 const metricsHistory = new Map();
 
 // Get model performance metrics
-router.get('/models/:modelId/metrics', (req, res) => {
+router.get('/models/:modelId/metrics', async (req, res) => {
   try {
     const { timeRange = '24h' } = req.query;
-    const model = db_ops.getById('ml_models', 'model_id', req.params.modelId);
+    const model = await db_ops.getById('ml_models', 'model_id', req.params.modelId);
 
     if (!model) {
       return res.status(404).json({ success: false, error: 'Model not found' });
@@ -35,9 +35,9 @@ router.get('/models/:modelId/metrics', (req, res) => {
 });
 
 // Get model drift detection
-router.get('/models/:modelId/drift', (req, res) => {
+router.get('/models/:modelId/drift', async (req, res) => {
   try {
-    const model = db_ops.getById('ml_models', 'model_id', req.params.modelId);
+    const model = await db_ops.getById('ml_models', 'model_id', req.params.modelId);
 
     if (!model) {
       return res.status(404).json({ success: false, error: 'Model not found' });
@@ -124,7 +124,7 @@ router.get('/models/:modelId/drift', (req, res) => {
 });
 
 // Get model alerts
-router.get('/alerts', (req, res) => {
+router.get('/alerts', async (req, res) => {
   try {
     const { status, severity, modelId } = req.query;
 
@@ -172,7 +172,7 @@ router.get('/alerts', (req, res) => {
 });
 
 // Acknowledge alert
-router.post('/alerts/:alertId/acknowledge', (req, res) => {
+router.post('/alerts/:alertId/acknowledge', async (req, res) => {
   try {
     const { acknowledgedBy } = req.body;
 
@@ -191,9 +191,9 @@ router.post('/alerts/:alertId/acknowledge', (req, res) => {
 });
 
 // Get model SLA metrics
-router.get('/models/:modelId/sla', (req, res) => {
+router.get('/models/:modelId/sla', async (req, res) => {
   try {
-    const model = db_ops.getById('ml_models', 'model_id', req.params.modelId);
+    const model = await db_ops.getById('ml_models', 'model_id', req.params.modelId);
 
     if (!model) {
       return res.status(404).json({ success: false, error: 'Model not found' });
@@ -240,7 +240,7 @@ router.get('/models/:modelId/sla', (req, res) => {
 });
 
 // Get prediction feedback (for labeling)
-router.post('/feedback', (req, res) => {
+router.post('/feedback', async (req, res) => {
   try {
     const { predictionId, modelId, actualLabel, feedbackSource } = req.body;
 
@@ -255,7 +255,7 @@ router.post('/feedback', (req, res) => {
 
     // Persist actual label to prediction_history for confusion matrix + drift
     try {
-      db_ops.run(
+      await db_ops.run(
         'UPDATE prediction_history SET actual_label = ?, feedback_source = ? WHERE prediction_id = ?',
         [actualLabel, feedbackSource, predictionId]
       );
@@ -268,9 +268,9 @@ router.post('/feedback', (req, res) => {
 });
 
 // Get confusion matrix
-router.get('/models/:modelId/confusion-matrix', (req, res) => {
+router.get('/models/:modelId/confusion-matrix', async (req, res) => {
   try {
-    const model = db_ops.getById('ml_models', 'model_id', req.params.modelId);
+    const model = await db_ops.getById('ml_models', 'model_id', req.params.modelId);
 
     if (!model) {
       return res.status(404).json({ success: false, error: 'Model not found' });
@@ -318,9 +318,9 @@ router.get('/models/:modelId/confusion-matrix', (req, res) => {
 });
 
 // Monitoring dashboard summary
-router.get('/summary', (req, res) => {
+router.get('/summary', async (req, res) => {
   try {
-    const models = db_ops.getAll('ml_models', 100, 0).map(m => m.data);
+    const models = (await db_ops.getAll('ml_models', 100, 0)).map(m => m.data);
     const productionModels = models.filter(m => m.status === 'PRODUCTION');
 
     const summary = {

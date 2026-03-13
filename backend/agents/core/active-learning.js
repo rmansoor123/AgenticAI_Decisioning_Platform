@@ -213,7 +213,7 @@ class ActiveLearningManager {
    * Create an active learning case for human review.
    * Rate-limited per agent to prevent case flooding.
    */
-  _createLearningCase({ trigger, agentId, sellerId, decision, confidence, reasoning, riskScore, priority, metadata }) {
+  async _createLearningCase({ trigger, agentId, sellerId, decision, confidence, reasoning, riskScore, priority, metadata }) {
     // Rate limit check
     if (!this._checkRateLimit(agentId)) {
       this._stats.casesRateLimited++;
@@ -240,7 +240,7 @@ class ActiveLearningManager {
 
     // Persist to database
     try {
-      db_ops.insert('cases', 'case_id', caseId, caseData);
+      await db_ops.insert('cases', 'case_id', caseId, caseData);
     } catch (e) {
       // If cases table doesn't support the fields, just log
       console.warn('[ActiveLearning] Failed to persist case:', e.message);

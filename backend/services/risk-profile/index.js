@@ -83,17 +83,16 @@ function determineActions(tier) {
   }
 }
 
-function recalculateProfile(sellerId) {
+async function recalculateProfile(sellerId) {
   // 1. Get all risk_events for this seller
-  const allEvents = db_ops.getAll('risk_events', 10000, 0)
-    .map(e => e.data)
+  const allEvents = (await db_ops.getAll('risk_events', 10000, 0)).map(e => e.data)
     .filter(e => e.sellerId === sellerId);
 
   // 2. Calculate decayed scores per domain
   const domainScores = {};
   for (const domain of Object.keys(DOMAIN_WEIGHTS)) {
     const domainEvents = allEvents.filter(e => e.domain === domain);
-    const totalDecayed = domainEvents.reduce((sum, evt) => {
+    const totalDecayed = domainEvents.reduceasync ((sum, evt) => {
       return sum + calculateDecayedScore(evt.riskScore, evt.createdAt);
     }, 0);
     // 3. Cap each domain at 0-100
@@ -111,7 +110,7 @@ function recalculateProfile(sellerId) {
   let newTier = determineTier(compositeScore);
 
   // 6. Get existing profile for override / cooldown checks
-  const existingRecord = db_ops.getById('seller_risk_profiles', 'seller_id', sellerId);
+  const existingRecord = await db_ops.getById('seller_risk_profiles', 'seller_id', sellerId);
   const existingProfile = existingRecord ? existingRecord.data : null;
 
   // Check for manual override (keep override tier if set)
@@ -157,9 +156,9 @@ function recalculateProfile(sellerId) {
 
   // 8. Upsert profile in seller_risk_profiles
   if (existingProfile) {
-    db_ops.update('seller_risk_profiles', 'seller_id', sellerId, profile);
+    await db_ops.update('seller_risk_profiles', 'seller_id', sellerId, profile);
   } else {
-    db_ops.insert('seller_risk_profiles', 'seller_id', sellerId, profile);
+    await db_ops.insert('seller_risk_profiles', 'seller_id', sellerId, profile);
   }
 
   return profile;
@@ -169,20 +168,19 @@ function recalculateProfile(sellerId) {
 // Static paths BEFORE parameterized paths
 
 // 1. GET /high-risk — List high-risk sellers
-router.get('/high-risk', (req, res) => {
+router.get('/high-risk', async (req, res) => {
   try {
     const { tier = 'HIGH', limit = 50 } = req.query;
     const threshold = TIER_THRESHOLDS[tier]?.min ?? TIER_THRESHOLDS.HIGH.min;
 
-    const allProfiles = db_ops.getAll('seller_risk_profiles', 10000, 0)
-      .map(r => r.data)
+    const allProfiles = (await db_ops.getAll('seller_risk_profiles', 10000, 0)).map(r => r.data)
       .filter(p => p.compositeScore >= threshold)
       .sort((a, b) => b.compositeScore - a.compositeScore)
       .slice(0, parseInt(limit));
 
     // Enrich with seller info (flatten for frontend compatibility)
-    const enriched = allProfiles.map(profile => {
-      const sellerRecord = db_ops.getById('sellers', 'seller_id', profile.sellerId);
+    const enriched = allProfiles.map(async profile => {
+      const sellerRecord = await db_ops.getById('sellers', 'seller_id', profile.sellerId);
       const sellerData = sellerRecord ? sellerRecord.data : {};
       return {
         ...profile,
@@ -203,14 +201,14 @@ router.get('/high-risk', (req, res) => {
 });
 
 // 2. GET /stats — Platform risk distribution
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
-    const allProfiles = db_ops.getAll('seller_risk_profiles', 10000, 0).map(r => r.data);
+    const allProfiles = (await db_ops.getAll('seller_risk_profiles', 10000, 0)).map(r => r.data);
 
     const tierCounts = { LOW: 0, MEDIUM: 0, HIGH: 0, CRITICAL: 0 };
     let totalComposite = 0;
 
-    allProfiles.forEach(p => {
+    allProfiles.forEach(async p => {
       tierCounts[p.riskTier] = (tierCounts[p.riskTier] || 0) + 1;
       totalComposite += p.compositeScore;
     });
@@ -220,7 +218,7 @@ router.get('/stats', (req, res) => {
       ? Math.round((totalComposite / totalProfiles) * 100) / 100
       : 0;
 
-    const totalEvents = db_ops.count('risk_events');
+    const totalEvents = await db_ops.count('risk_events');
 
     // Recent escalations: tier changes to HIGH or CRITICAL in last 24h
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -247,7 +245,7 @@ router.get('/stats', (req, res) => {
 });
 
 // 3. POST /event — Record risk event
-router.post('/event', (req, res) => {
+router.post('/event', async (req, res) => {
   try {
     const { sellerId, domain, eventType, riskScore, metadata } = req.body;
 
@@ -271,7 +269,7 @@ router.post('/event', (req, res) => {
       createdAt: now
     };
 
-    db_ops.insert('risk_events', 'event_id', eventId, event);
+    await db_ops.insert('risk_events', 'event_id', eventId, event);
 
     // Store in knowledge base for agentic AI layers
     const kb = getKnowledgeBase();
@@ -302,13 +300,13 @@ router.post('/event', (req, res) => {
 });
 
 // 4. GET /:sellerId — Full risk profile
-router.get('/:sellerId', (req, res) => {
+router.get('/:sellerId', async (req, res) => {
   try {
-    const record = db_ops.getById('seller_risk_profiles', 'seller_id', req.params.sellerId);
+    const record = await db_ops.getById('seller_risk_profiles', 'seller_id', req.params.sellerId);
     if (!record) {
       return res.status(404).json({ success: false, error: 'Risk profile not found' });
     }
-    const sellerRecord = db_ops.getById('sellers', 'seller_id', req.params.sellerId);
+    const sellerRecord = await db_ops.getById('sellers', 'seller_id', req.params.sellerId);
     const sellerData = sellerRecord ? sellerRecord.data : {};
     res.json({ success: true, data: { ...record.data, tier: record.data.riskTier, businessName: sellerData.businessName || null } });
   } catch (error) {
@@ -317,12 +315,11 @@ router.get('/:sellerId', (req, res) => {
 });
 
 // 5. GET /:sellerId/events — All risk events for seller
-router.get('/:sellerId/events', (req, res) => {
+router.get('/:sellerId/events', async (req, res) => {
   try {
     const { domain, limit = 100 } = req.query;
 
-    let events = db_ops.getAll('risk_events', 10000, 0)
-      .map(r => r.data)
+    let events = (await db_ops.getAll('risk_events', 10000, 0)).map(r => r.data)
       .filter(e => e.sellerId === req.params.sellerId);
 
     if (domain) {
@@ -347,10 +344,9 @@ router.get('/:sellerId/events', (req, res) => {
 });
 
 // 6. GET /:sellerId/history — Score history over time
-router.get('/:sellerId/history', (req, res) => {
+router.get('/:sellerId/history', async (req, res) => {
   try {
-    const allEvents = db_ops.getAll('risk_events', 10000, 0)
-      .map(r => r.data)
+    const allEvents = (await db_ops.getAll('risk_events', 10000, 0)).map(r => r.data)
       .filter(e => e.sellerId === req.params.sellerId);
 
     // Sort events chronologically (ascending)
@@ -398,10 +394,9 @@ router.get('/:sellerId/history', (req, res) => {
 });
 
 // 7. GET /:sellerId/timeline — Chronological event timeline
-router.get('/:sellerId/timeline', (req, res) => {
+router.get('/:sellerId/timeline', async (req, res) => {
   try {
-    const events = db_ops.getAll('risk_events', 10000, 0)
-      .map(r => r.data)
+    const events = (await db_ops.getAll('risk_events', 10000, 0)).map(r => r.data)
       .filter(e => e.sellerId === req.params.sellerId)
       .map(e => ({
         ...e,
@@ -417,7 +412,7 @@ router.get('/:sellerId/timeline', (req, res) => {
 });
 
 // 8. PATCH /:sellerId/override — Manual tier override
-router.patch('/:sellerId/override', (req, res) => {
+router.patch('/:sellerId/override', async (req, res) => {
   try {
     const { tier, reason, overriddenBy } = req.body;
 
@@ -436,7 +431,7 @@ router.patch('/:sellerId/override', (req, res) => {
     }
 
     const { sellerId } = req.params;
-    const record = db_ops.getById('seller_risk_profiles', 'seller_id', sellerId);
+    const record = await db_ops.getById('seller_risk_profiles', 'seller_id', sellerId);
 
     if (!record) {
       return res.status(404).json({ success: false, error: 'Risk profile not found' });
@@ -461,7 +456,7 @@ router.patch('/:sellerId/override', (req, res) => {
       updatedAt: now
     };
 
-    db_ops.update('seller_risk_profiles', 'seller_id', sellerId, updatedProfile);
+    await db_ops.update('seller_risk_profiles', 'seller_id', sellerId, updatedProfile);
 
     res.json({ success: true, data: updatedProfile });
   } catch (error) {

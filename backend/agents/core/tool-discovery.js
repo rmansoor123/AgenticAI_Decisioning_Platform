@@ -172,7 +172,7 @@ class ToolDiscovery {
    * @param {string} toolName - The tool name to invoke
    * @returns {Function} Async handler accepting params and returning result
    */
-  _createHandler(endpoint, toolName) {
+  async _createHandler(endpoint, toolName) {
     return async (params) => {
       const urls = [
         `${endpoint}/api/onboarding/tools/execute`,

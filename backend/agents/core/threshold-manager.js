@@ -142,9 +142,9 @@ class ThresholdManager {
     }
   }
 
-  _loadFromDB() {
+  async _loadFromDB() {
     try {
-      const records = db_ops.getAll('agent_thresholds', 100, 0);
+      const records = await db_ops.getAll('agent_thresholds', 100, 0);
       for (const record of records) {
         const data = record.data;
         if (data?.agentId && data?.thresholds) {

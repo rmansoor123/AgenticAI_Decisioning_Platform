@@ -2,10 +2,23 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 
+// Prevent crashes from unhandled promise rejections in background agents
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[UNHANDLED REJECTION]', reason?.message || reason);
+});
+process.on('uncaughtException', (error) => {
+  console.error('[UNCAUGHT EXCEPTION]', error?.message || error);
+  // Only exit for truly fatal errors, not agent/tool failures
+  if (error?.code === 'ERR_SOCKET_CLOSED' || error?.message?.includes('EADDRINUSE')) {
+    process.exit(1);
+  }
+});
+
 const EVAL_SERVICE_URL = process.env.EVAL_SERVICE_URL || 'http://localhost:8000';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
-import { initializeDatabase, isSeeded, db_ops } from '../shared/common/database.js';
+import { initializeDb, getDbOps } from '../shared/common/database-factory.js';
+import { isSeeded as _isSeededSqlite } from '../shared/common/database.js';
 import { initializeMLModels } from '../services/ml-platform/models/model-loader.js';
 import generators from '../shared/synthetic-data/generators.js';
 const { generateTransaction, generateMetricsSnapshot, generateSeller, generateListing, generatePayout, generateATOEvent, generateShipment, generateMLModel, generateRule, generateExperiment, generateDataset, generateCheckpointRules, generateAccountSetup, generateItemSetup, generatePricingRecord, generateProfileUpdate, generateOutboundShipment, generateReturn } = generators;
@@ -13,20 +26,20 @@ const { generateTransaction, generateMetricsSnapshot, generateSeller, generateLi
 // Seed database with initial data (only if not already seeded)
 async function seedDatabase() {
   // Check if database already has data
-  if (isSeeded()) {
+  if (await isSeeded()) {
     console.log('Database already contains data, skipping seed...');
-    console.log(`  Sellers: ${db_ops.count('sellers')}`);
-    console.log(`  Transactions: ${db_ops.count('transactions')}`);
-    console.log(`  Listings: ${db_ops.count('listings')}`);
-    console.log(`  ML Models: ${db_ops.count('ml_models')}`);
-    console.log(`  Rules: ${db_ops.count('rules')}`);
-    console.log(`  Experiments: ${db_ops.count('experiments')}`);
+    console.log(`  Sellers: ${await db_ops.count('sellers')}`);
+    console.log(`  Transactions: ${await db_ops.count('transactions')}`);
+    console.log(`  Listings: ${await db_ops.count('listings')}`);
+    console.log(`  ML Models: ${await db_ops.count('ml_models')}`);
+    console.log(`  Rules: ${await db_ops.count('rules')}`);
+    console.log(`  Experiments: ${await db_ops.count('experiments')}`);
 
     // Ensure knowledge base is populated even on restart
     const { getKnowledgeBase } = await import('../agents/core/knowledge-base.js');
     const kb = getKnowledgeBase();
     if (kb.getStats().totalEntries === 0) {
-      const allTx = db_ops.getAll('transactions', 100, 0).map(t => t.data);
+      const allTx = (await db_ops.getAll('transactions', 100, 0)).map(t => t.data);
       kb.addKnowledge('transactions', allTx.slice(0, 50).map(tx => ({
         _id: tx.transactionId,
         text: `Transaction ${tx.transactionId}: amount $${tx.amount}, merchant ${tx.merchant || 'Unknown'}, risk score ${tx.riskScore || 0}. Decision: ${tx.decision || 'APPROVED'}`,
@@ -37,7 +50,7 @@ async function seedDatabase() {
         riskScore: tx.riskScore || 0,
         source: 'seed-data'
       })));
-      const allOnboarding = db_ops.getAll('sellers', 100, 0).map(s => s.data);
+      const allOnboarding = (await db_ops.getAll('sellers', 100, 0)).map(s => s.data);
       kb.addKnowledge('onboarding', allOnboarding.slice(0, 50).map(s => ({
         _id: s.sellerId,
         text: `Seller ${s.businessName}: category ${s.businessCategory || 'Unknown'}, country ${s.country || 'US'}, status ${s.status || 'ACTIVE'}, risk ${s.riskTier || 'LOW'}`,
@@ -59,103 +72,103 @@ async function seedDatabase() {
   // Seed sellers
   for (let i = 0; i < 100; i++) {
     const seller = generateSeller();
-    db_ops.insert('sellers', 'seller_id', seller.sellerId, seller);
+    await db_ops.insert('sellers', 'seller_id', seller.sellerId, seller);
   }
 
   // Seed transactions
-  const sellers = db_ops.getAll('sellers', 100, 0);
-  sellers.forEach(s => {
+  const sellers = await db_ops.getAll('sellers', 100, 0);
+  for (const s of sellers) {
     for (let i = 0; i < 10; i++) {
       const tx = generateTransaction(s.data.sellerId);
-      db_ops.insert('transactions', 'transaction_id', tx.transactionId, tx);
+      await db_ops.insert('transactions', 'transaction_id', tx.transactionId, tx);
     }
-  });
+  }
 
   // Seed other entities
-  sellers.slice(0, 50).forEach(s => {
+  for (const s of sellers.slice(0, 50)) {
     for (let i = 0; i < 5; i++) {
       const listing = generateListing(s.data.sellerId);
-      db_ops.insert('listings', 'listing_id', listing.listingId, listing);
+      await db_ops.insert('listings', 'listing_id', listing.listingId, listing);
     }
     for (let i = 0; i < 2; i++) {
       const payout = generatePayout(s.data.sellerId);
-      db_ops.insert('payouts', 'payout_id', payout.payoutId, payout);
+      await db_ops.insert('payouts', 'payout_id', payout.payoutId, payout);
     }
     const ato = generateATOEvent(s.data.sellerId);
-    db_ops.insert('ato_events', 'event_id', ato.eventId, ato);
+    await db_ops.insert('ato_events', 'event_id', ato.eventId, ato);
     for (let i = 0; i < 3; i++) {
       const shipment = generateShipment(s.data.sellerId);
-      db_ops.insert('shipments', 'shipment_id', shipment.shipmentId, shipment);
+      await db_ops.insert('shipments', 'shipment_id', shipment.shipmentId, shipment);
     }
-  });
+  }
 
-    // Seed new business services
-    sellers.slice(0, 50).forEach(s => {
-      const sid = s.data.sellerId;
-      const setup = generateAccountSetup(sid);
-      db_ops.insert('account_setups', 'setup_id', setup.setupId, setup);
-      const item = generateItemSetup(sid);
-      db_ops.insert('item_setups', 'item_id', item.itemId, item);
-      const pricing = generatePricingRecord(sid);
-      db_ops.insert('pricing_records', 'pricing_id', pricing.pricingId, pricing);
-      for (let i = 0; i < 2; i++) {
-        const update = generateProfileUpdate(sid);
-        db_ops.insert('profile_updates', 'update_id', update.updateId, update);
-      }
-      const shipment = generateOutboundShipment(sid);
-      db_ops.insert('shipments', 'shipment_id', shipment.shipmentId, shipment);
-      const ret = generateReturn(sid);
-      db_ops.insert('returns', 'return_id', ret.returnId, ret);
-    });
+  // Seed new business services
+  for (const s of sellers.slice(0, 50)) {
+    const sid = s.data.sellerId;
+    const setup = generateAccountSetup(sid);
+    await db_ops.insert('account_setups', 'setup_id', setup.setupId, setup);
+    const item = generateItemSetup(sid);
+    await db_ops.insert('item_setups', 'item_id', item.itemId, item);
+    const pricing = generatePricingRecord(sid);
+    await db_ops.insert('pricing_records', 'pricing_id', pricing.pricingId, pricing);
+    for (let i = 0; i < 2; i++) {
+      const update = generateProfileUpdate(sid);
+      await db_ops.insert('profile_updates', 'update_id', update.updateId, update);
+    }
+    const shipment = generateOutboundShipment(sid);
+    await db_ops.insert('shipments', 'shipment_id', shipment.shipmentId, shipment);
+    const ret = generateReturn(sid);
+    await db_ops.insert('returns', 'return_id', ret.returnId, ret);
+  }
 
   // Seed ML models
   for (let i = 0; i < 15; i++) {
     const model = generateMLModel();
-    db_ops.insert('ml_models', 'model_id', model.modelId, model);
+    await db_ops.insert('ml_models', 'model_id', model.modelId, model);
   }
 
   // Seed rules
   for (let i = 0; i < 50; i++) {
     const rule = generateRule();
-    db_ops.insert('rules', 'rule_id', rule.ruleId, rule);
+    await db_ops.insert('rules', 'rule_id', rule.ruleId, rule);
   }
 
   // Seed checkpoint-specific rules
   const checkpointRules = generateCheckpointRules();
-  checkpointRules.forEach(rule => {
-    db_ops.insert('rules', 'rule_id', rule.ruleId, rule);
-  });
+  for (const rule of checkpointRules) {
+    await db_ops.insert('rules', 'rule_id', rule.ruleId, rule);
+  }
   console.log(`  Checkpoint Rules: ${checkpointRules.length}`);
 
   // Seed experiments
   for (let i = 0; i < 12; i++) {
     const exp = generateExperiment();
-    db_ops.insert('experiments', 'experiment_id', exp.experimentId, exp);
+    await db_ops.insert('experiments', 'experiment_id', exp.experimentId, exp);
   }
 
   // Seed datasets
   for (let i = 0; i < 25; i++) {
     const dataset = generateDataset();
-    db_ops.insert('datasets', 'dataset_id', dataset.datasetId, dataset);
+    await db_ops.insert('datasets', 'dataset_id', dataset.datasetId, dataset);
   }
 
   console.log('Database seeded successfully!');
-  console.log(`  Sellers: ${db_ops.count('sellers')}`);
-  console.log(`  Transactions: ${db_ops.count('transactions')}`);
-  console.log(`  Listings: ${db_ops.count('listings')}`);
-  console.log(`  ML Models: ${db_ops.count('ml_models')}`);
-  console.log(`  Rules: ${db_ops.count('rules')}`);
-  console.log(`  Experiments: ${db_ops.count('experiments')}`);
-  console.log(`  Account Setups: ${db_ops.count('account_setups')}`);
-  console.log(`  Item Setups: ${db_ops.count('item_setups')}`);
-  console.log(`  Pricing Records: ${db_ops.count('pricing_records')}`);
-  console.log(`  Profile Updates: ${db_ops.count('profile_updates')}`);
-  console.log(`  Shipments (combined): ${db_ops.count('shipments')}`);
-  console.log(`  Returns: ${db_ops.count('returns')}`);
+  console.log(`  Sellers: ${await db_ops.count('sellers')}`);
+  console.log(`  Transactions: ${await db_ops.count('transactions')}`);
+  console.log(`  Listings: ${await db_ops.count('listings')}`);
+  console.log(`  ML Models: ${await db_ops.count('ml_models')}`);
+  console.log(`  Rules: ${await db_ops.count('rules')}`);
+  console.log(`  Experiments: ${await db_ops.count('experiments')}`);
+  console.log(`  Account Setups: ${await db_ops.count('account_setups')}`);
+  console.log(`  Item Setups: ${await db_ops.count('item_setups')}`);
+  console.log(`  Pricing Records: ${await db_ops.count('pricing_records')}`);
+  console.log(`  Profile Updates: ${await db_ops.count('profile_updates')}`);
+  console.log(`  Shipments (combined): ${await db_ops.count('shipments')}`);
+  console.log(`  Returns: ${await db_ops.count('returns')}`);
 
   // Seed risk profiles for existing sellers
   const { emitRiskEvent } = await import('../services/risk-profile/emit-event.js');
-  const allSellersForRisk = db_ops.getAll('sellers', 100, 0).map(s => s.data);
+  const allSellersForRisk = (await db_ops.getAll('sellers', 100, 0)).map(s => s.data);
 
   allSellersForRisk.forEach(seller => {
     const baseScore = seller.riskScore || Math.floor(Math.random() * 100);
@@ -234,15 +247,15 @@ async function seedDatabase() {
     }
   });
 
-  console.log(`  Risk Profiles: ${db_ops.count('seller_risk_profiles')}`);
-  console.log(`  Risk Events: ${db_ops.count('risk_events')}`);
+  console.log(`  Risk Profiles: ${await db_ops.count('seller_risk_profiles')}`);
+  console.log(`  Risk Events: ${await db_ops.count('risk_events')}`);
 
   // Seed knowledge base with historical data
   const { getKnowledgeBase } = await import('../agents/core/knowledge-base.js');
   const kb = getKnowledgeBase();
 
   // Seed transaction knowledge
-  const allTx = db_ops.getAll('transactions', 100, 0).map(t => t.data);
+  const allTx = (await db_ops.getAll('transactions', 100, 0)).map(t => t.data);
   kb.addKnowledge('transactions', allTx.slice(0, 50).map(tx => ({
     _id: tx.transactionId,
     text: `Transaction ${tx.transactionId}: amount $${tx.amount}, merchant ${tx.merchant || 'Unknown'}, risk score ${tx.riskScore || 0}. Decision: ${tx.decision || 'APPROVED'}`,
@@ -255,7 +268,7 @@ async function seedDatabase() {
   })));
 
   // Seed onboarding knowledge
-  const allOnboarding = db_ops.getAll('sellers', 100, 0).map(s => s.data);
+  const allOnboarding = (await db_ops.getAll('sellers', 100, 0)).map(s => s.data);
   kb.addKnowledge('onboarding', allOnboarding.slice(0, 50).map(s => ({
     _id: s.sellerId,
     text: `Seller ${s.businessName}: category ${s.businessCategory || 'Unknown'}, country ${s.country || 'US'}, status ${s.status || 'ACTIVE'}, risk ${s.riskTier || 'LOW'}`,
@@ -270,9 +283,10 @@ async function seedDatabase() {
   console.log(`  Knowledge Base: ${kb.getStats().totalEntries} entries`);
 
   // Seed investigation cases from recent transactions
-  const txForCases = db_ops.getAll('transactions', 100, 0).map(t => t.data);
+  const txForCases = (await db_ops.getAll('transactions', 100, 0)).map(t => t.data);
+  const allRulesForCases = (await db_ops.getAll('rules', 10000, 0)).map(r => r.data);
   let caseCount = 0;
-  txForCases.slice(0, 30).forEach(tx => {
+  for (const tx of txForCases.slice(0, 30)) {
     if (tx.riskScore > 50 || Math.random() > 0.7) {
       const riskScore = tx.riskScore || Math.floor(Math.random() * 60) + 30;
       let priority = 'LOW';
@@ -286,10 +300,8 @@ async function seedDatabase() {
       const analysts = ['alice@fraud-team.com', 'bob@fraud-team.com', 'carol@fraud-team.com', null, null];
       const checkpoint = checkpoints[Math.floor(Math.random() * checkpoints.length)];
 
-      // Pick 1-3 random rule IDs from seeded rules matching this checkpoint
-      const allRules = db_ops.getAll('rules', 10000, 0).map(r => r.data);
-      const matchingRules = allRules.filter(r => r.checkpoint === checkpoint);
-      const rulePool = matchingRules.length > 0 ? matchingRules : allRules;
+      const matchingRules = allRulesForCases.filter(r => r.checkpoint === checkpoint);
+      const rulePool = matchingRules.length > 0 ? matchingRules : allRulesForCases;
       const shuffled = rulePool.sort(() => Math.random() - 0.5);
       const pickedRules = shuffled.slice(0, Math.floor(Math.random() * 3) + 1).map(r => r.ruleId);
 
@@ -314,10 +326,10 @@ async function seedDatabase() {
         updatedAt: new Date().toISOString()
       };
 
-      db_ops.insert('cases', 'case_id', caseId, caseData);
+      await db_ops.insert('cases', 'case_id', caseId, caseData);
       caseCount++;
     }
-  });
+  }
   console.log(`  Cases: ${caseCount}`);
 }
 
@@ -390,19 +402,27 @@ app.use((req, res, next) => {
   next();
 });
 
-// Initialize database and seed with data
-await initializeDatabase();
+// Initialize database (Postgres if configured, SQLite fallback) and seed
+await initializeDb();
+const db_ops = getDbOps();
+if (!db_ops) {
+  console.error('[server] FATAL: No database backend available');
+  process.exit(1);
+}
+async function isSeeded() {
+  try { return (await db_ops.count('sellers')) > 0; } catch { return _isSeededSqlite(); }
+}
 await seedDatabase();
 
 // Initialize ML models (async, but don't block startup)
-initializeMLModels().catch(err => {
+initializeMLModels().catch(async err => {
   console.error('Warning: ML model initialization failed:', err.message);
   console.log('ML inference will initialize models on first request');
 });
 
 // Initialize OFAC SDN screening (fire-and-forget, non-blocking)
 import { initOFACScreening } from '../agents/tools/ofac-screening.js';
-initOFACScreening().catch(err => {
+initOFACScreening().catch(async err => {
   console.warn('OFAC screening initialization failed:', err.message);
 });
 
@@ -422,7 +442,7 @@ import { getGraphEngine } from '../graph/graph-engine.js';
 import { buildFromSellers } from '../graph/relationship-builder.js';
 
 const graphEngine = getGraphEngine();
-buildFromSellers();
+await buildFromSellers();
 console.log(`Graph built: ${graphEngine.nodes.size} nodes, ${graphEngine.edges.size} edges`);
 
 // Initialize Autonomous Agents

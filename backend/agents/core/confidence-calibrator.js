@@ -42,9 +42,9 @@ class ConfidenceCalibrator {
   /**
    * Load bucket data from SQLite on startup. Graceful fallback to empty buckets.
    */
-  _loadFromDb() {
+  async _loadFromDb() {
     try {
-      const row = db_ops.getById(TABLE, PK_FIELD, SINGLETON_ID);
+      const row = await db_ops.getById(TABLE, PK_FIELD, SINGLETON_ID);
       if (row?.data) {
         const data = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
         if (Array.isArray(data.buckets) && data.buckets.length === 5) {
@@ -62,9 +62,9 @@ class ConfidenceCalibrator {
   /**
    * Persist current bucket data to SQLite.
    */
-  _saveToDb() {
+  async _saveToDb() {
     try {
-      db_ops.insert(TABLE, PK_FIELD, SINGLETON_ID, {
+      await db_ops.insert(TABLE, PK_FIELD, SINGLETON_ID, {
         buckets: this.buckets.map((b, i) => ({
           range: BUCKET_RANGES[i].label,
           predictionCount: b.predictionCount,

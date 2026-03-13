@@ -7,11 +7,11 @@ import { getNetworkIntelligenceAgent } from '../../../agents/specialized/network
 const router = express.Router();
 
 // Get all network scans
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { limit = 50, offset = 0, sellerId, status, scanType } = req.query;
 
-    let scans = db_ops.getAll('network_scans', parseInt(limit), parseInt(offset));
+    let scans = await db_ops.getAll('network_scans', parseInt(limit), parseInt(offset));
     scans = scans.map(s => s.data);
 
     if (sellerId) scans = scans.filter(s => s.sellerId === sellerId);
@@ -24,7 +24,7 @@ router.get('/', (req, res) => {
       pagination: {
         limit: parseInt(limit),
         offset: parseInt(offset),
-        total: db_ops.count('network_scans')
+        total: await db_ops.count('network_scans')
       }
     });
   } catch (error) {
@@ -33,9 +33,9 @@ router.get('/', (req, res) => {
 });
 
 // Get network scan statistics
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
-    const allScans = db_ops.getAll('network_scans', 10000, 0).map(s => s.data);
+    const allScans = (await db_ops.getAll('network_scans', 10000, 0)).map(s => s.data);
 
     const stats = {
       total: allScans.length,
@@ -72,9 +72,9 @@ router.get('/stats', (req, res) => {
 });
 
 // Get network scan by ID
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
-    const scan = db_ops.getById('network_scans', 'scan_id', req.params.id);
+    const scan = await db_ops.getById('network_scans', 'scan_id', req.params.id);
     if (!scan) {
       return res.status(404).json({ success: false, error: 'Network scan not found' });
     }
@@ -89,7 +89,7 @@ router.post('/', async (req, res) => {
   try {
     const { sellerId, scanType, linkedSellers, sharedInfrastructure, deviceFingerprints, bankAccounts } = req.body;
 
-    const seller = db_ops.getById('sellers', 'seller_id', sellerId);
+    const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
     if (!seller) {
       return res.status(404).json({ success: false, error: 'Seller not found' });
     }
@@ -111,7 +111,7 @@ router.post('/', async (req, res) => {
       createdAt: new Date().toISOString()
     };
 
-    db_ops.insert('network_scans', 'scan_id', scanId, record);
+    await db_ops.insert('network_scans', 'scan_id', scanId, record);
 
     res.status(202).json({
       success: true,
@@ -141,7 +141,7 @@ router.post('/', async (req, res) => {
       evaluationType: 'network_intelligence',
       _correlationId: correlationId
     })
-      .then(agentResult => {
+      .then(async agentResult => {
         const rec = agentResult.result?.recommendation || agentResult.result?.decision;
         const decision = rec?.action || 'BLOCK';
         const riskScore = agentResult.result?.overallRisk?.score ?? 75;
@@ -150,7 +150,7 @@ router.post('/', async (req, res) => {
 
         const riskLevel = riskScore >= 66 ? 'CRITICAL' : riskScore >= 40 ? 'HIGH' : riskScore >= 20 ? 'MEDIUM' : 'LOW';
 
-        db_ops.update('network_scans', 'scan_id', scanId, {
+        await db_ops.update('network_scans', 'scan_id', scanId, {
           ...record,
           status: decision,
           riskScore,
@@ -172,7 +172,7 @@ router.post('/', async (req, res) => {
             status: 'OPEN', sellerId, entityId: scanId, entityType: 'NETWORK_SCAN',
             decision, riskScore, reasoning, agentId, createdAt: new Date().toISOString()
           };
-          db_ops.insert('cases', 'case_id', caseId, caseData);
+          await db_ops.insert('cases', 'case_id', caseId, caseData);
         }
 
         try {
@@ -186,9 +186,9 @@ router.post('/', async (req, res) => {
 
         console.log(`[NetworkService] Completed: ${scanId} → ${decision} (risk: ${riskScore})`);
       })
-      .catch(error => {
+      .catch(async error => {
         console.error(`[NetworkService] Agent error for ${scanId}:`, error.message);
-        db_ops.update('network_scans', 'scan_id', scanId, {
+        await db_ops.update('network_scans', 'scan_id', scanId, {
           ...record,
           status: 'BLOCK',
           riskScore: 75,
@@ -210,10 +210,10 @@ router.post('/', async (req, res) => {
 });
 
 // Update network scan status
-router.patch('/:id/status', (req, res) => {
+router.patch('/:id/status', async (req, res) => {
   try {
     const { status, reason } = req.body;
-    const scan = db_ops.getById('network_scans', 'scan_id', req.params.id);
+    const scan = await db_ops.getById('network_scans', 'scan_id', req.params.id);
     if (!scan) {
       return res.status(404).json({ success: false, error: 'Network scan not found' });
     }
@@ -223,7 +223,7 @@ router.patch('/:id/status', (req, res) => {
       return res.status(400).json({ success: false, error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
     }
 
-    db_ops.update('network_scans', 'scan_id', req.params.id, {
+    await db_ops.update('network_scans', 'scan_id', req.params.id, {
       ...scan.data,
       status,
       statusReason: reason,

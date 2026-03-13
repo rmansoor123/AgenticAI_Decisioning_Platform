@@ -62,7 +62,7 @@ export class FeatureEngineeringAgent extends BaseAgent {
           if (!tableSchema) return { success: false, error: `Table ${table} not found` };
 
           // Sample data to understand column types
-          const sample = db_ops.getAll(table, 50, 0);
+          const sample = await db_ops.getAll(table, 50, 0);
           const sampleData = sample.map(r => r.data || r);
 
           // Suggest features per column
@@ -147,7 +147,7 @@ export class FeatureEngineeringAgent extends BaseAgent {
         const table = tableName || this._entityToTable(entity);
 
         try {
-          const rows = db_ops.getAll(table, 1000, 0).map(r => r.data || r);
+          const rows = (await db_ops.getAll(table, 1000, 0)).map(r => r.data || r);
           let entityRows = rows;
 
           // Filter to specific entity if provided
@@ -236,7 +236,7 @@ export class FeatureEngineeringAgent extends BaseAgent {
         if (!tableName) return { success: false, error: 'tableName is required' };
 
         try {
-          const rows = db_ops.getAll(tableName, 500, 0);
+          const rows = await db_ops.getAll(tableName, 500, 0);
           const data = rows.map(r => r.data || r);
           if (data.length === 0) return { success: true, data: { profiles: {}, message: 'No data' } };
 
@@ -298,7 +298,7 @@ export class FeatureEngineeringAgent extends BaseAgent {
           const baselineEnd = currentStart;
 
           // Fetch baseline and current windows
-          const allRows = db_ops.getAll(tableName, 5000, 0);
+          const allRows = await db_ops.getAll(tableName, 5000, 0);
           const allData = allRows.map(r => {
             const data = r.data || r;
             const ts = r.created_at || data.createdAt || data.timestamp || '';
@@ -356,7 +356,7 @@ export class FeatureEngineeringAgent extends BaseAgent {
       'List all stored feature definitions from the datasets table',
       async () => {
         try {
-          const allDatasets = db_ops.getAll('datasets', 1000, 0).map(d => d.data || d);
+          const allDatasets = (await db_ops.getAll('datasets', 1000, 0)).map(d => d.data || d);
           const featureDefinitions = allDatasets.filter(d => d.type === 'FEATURE_DEFINITION');
 
           return {
@@ -386,7 +386,7 @@ export class FeatureEngineeringAgent extends BaseAgent {
         if (!tableName) return { success: false, error: 'tableName is required' };
 
         try {
-          const rows = db_ops.getAll(tableName, 500, 0).map(r => r.data || r);
+          const rows = (await db_ops.getAll(tableName, 500, 0)).map(r => r.data || r);
           if (rows.length < 10) return { success: true, data: { importance: [], message: 'Insufficient data' } };
 
           const targetValues = rows.map(r => r[targetColumn]).filter(v => typeof v === 'number');
@@ -474,7 +474,7 @@ export class FeatureEngineeringAgent extends BaseAgent {
             createdBy: 'FEATURE_ENGINEERING'
           };
 
-          db_ops.insert('datasets', 'dataset_id', datasetId, featureData);
+          await db_ops.insert('datasets', 'dataset_id', datasetId, featureData);
 
           return {
             success: true,

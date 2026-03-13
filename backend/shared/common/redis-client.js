@@ -57,7 +57,7 @@ export function getRedisClient() {
     });
 
     // Eagerly connect
-    instance.connect().catch((err) => {
+    instance.connect().catch(async (err) => {
       available = false;
       console.warn(`[redis-client] Initial connect failed: ${err.message}`);
     });

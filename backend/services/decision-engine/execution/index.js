@@ -9,14 +9,13 @@ const router = express.Router();
 const decisionHistory = [];
 
 // Execute decision for a transaction
-router.post('/evaluate', (req, res) => {
+router.post('/evaluate', async (req, res) => {
   try {
     const { transaction, context, dryRun = false } = req.body;
     const startTime = Date.now();
 
     // Get all active rules sorted by priority
-    const rules = db_ops.getAll('rules', 1000, 0)
-      .map(r => r.data)
+    const rules = (await db_ops.getAll('rules', 1000, 0)).map(r => r.data)
       .filter(r => r.status === 'ACTIVE' || (dryRun && r.status === 'SHADOW'))
       .sort((a, b) => (a.priority || 100) - (b.priority || 100));
 
@@ -44,7 +43,7 @@ router.post('/evaluate', (req, res) => {
       // Record rule evaluation to rule_performance table (fire-and-forget)
       if (!dryRun) {
         try {
-          db_ops.run(
+          await db_ops.run(
             'INSERT INTO rule_performance (id, rule_id, transaction_id, triggered, decision, latency_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
             [uuidv4(), rule.ruleId, transaction.transactionId || null, result.triggered ? 1 : 0, result.triggered ? rule.action : null, ruleLatency, new Date().toISOString()]
           );
@@ -114,13 +113,12 @@ router.post('/evaluate', (req, res) => {
 });
 
 // Batch evaluation
-router.post('/evaluate/batch', (req, res) => {
+router.post('/evaluate/batch', async (req, res) => {
   try {
     const { transactions, dryRun = false } = req.body;
     const startTime = Date.now();
 
-    const rules = db_ops.getAll('rules', 1000, 0)
-      .map(r => r.data)
+    const rules = (await db_ops.getAll('rules', 1000, 0)).map(r => r.data)
       .filter(r => r.status === 'ACTIVE')
       .sort((a, b) => (a.priority || 100) - (b.priority || 100));
 
@@ -171,7 +169,7 @@ router.post('/evaluate/batch', (req, res) => {
 });
 
 // Get decision by ID
-router.get('/decisions/:decisionId', (req, res) => {
+router.get('/decisions/:decisionId', async (req, res) => {
   try {
     const decision = decisionHistory.find(d => d.decisionId === req.params.decisionId);
     if (!decision) {
@@ -184,7 +182,7 @@ router.get('/decisions/:decisionId', (req, res) => {
 });
 
 // Get decision history
-router.get('/history', (req, res) => {
+router.get('/history', async (req, res) => {
   try {
     const { limit = 50, decision, transactionId } = req.query;
 
@@ -203,7 +201,7 @@ router.get('/history', (req, res) => {
 });
 
 // Override decision (manual review)
-router.post('/decisions/:decisionId/override', (req, res) => {
+router.post('/decisions/:decisionId/override', async (req, res) => {
   try {
     const { newDecision, reason, overriddenBy } = req.body;
     const decision = decisionHistory.find(d => d.decisionId === req.params.decisionId);
@@ -228,7 +226,7 @@ router.post('/decisions/:decisionId/override', (req, res) => {
 });
 
 // Get decision statistics
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
     const { timeRange = '24h' } = req.query;
 
@@ -280,9 +278,9 @@ router.get('/stats', (req, res) => {
 });
 
 // Health check
-router.get('/health', (req, res) => {
+router.get('/health', async (req, res) => {
   try {
-    const rules = db_ops.getAll('rules', 1000, 0).map(r => r.data);
+    const rules = (await db_ops.getAll('rules', 1000, 0)).map(r => r.data);
     const activeRules = rules.filter(r => r.status === 'ACTIVE');
 
     res.json({
@@ -305,7 +303,7 @@ router.get('/health', (req, res) => {
 // Shared rule evaluation functions (extracted for reuse by platform-integrator)
 import { evaluateRule, calculateRiskScore, getNestedValue, mapActionToDecision } from './rule-evaluator.js';
 
-function createCaseFromDecision(decision, triggeredRules, transaction) {
+async function createCaseFromDecision(decision, triggeredRules, transaction) {
   const caseId = `CASE-${uuidv4().substring(0, 10).toUpperCase()}`;
 
   const riskScore = decision.riskScore || 0;
@@ -339,7 +337,7 @@ function createCaseFromDecision(decision, triggeredRules, transaction) {
   };
 
   try {
-    db_ops.insert('cases', 'case_id', caseId, caseData);
+    await db_ops.insert('cases', 'case_id', caseId, caseData);
   } catch (e) {
     console.error('Failed to create case:', e.message);
   }

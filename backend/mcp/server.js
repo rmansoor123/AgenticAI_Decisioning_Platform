@@ -338,7 +338,7 @@ async function main() {
   console.error(`Tools registered: 17`);
 }
 
-main().catch((error) => {
+main().catch(async (error) => {
   console.error('Fatal error:', error);
   process.exit(1);
 });

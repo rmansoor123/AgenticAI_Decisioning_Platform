@@ -159,8 +159,8 @@ class EvalTracker {
   /**
    * Persist evaluation to database.
    */
-  _persistEvaluation(evaluation) {
-    db_ops.insert('agent_evaluations', 'evaluation_id', evaluation.evaluationId, evaluation);
+  async _persistEvaluation(evaluation) {
+    await db_ops.insert('agent_evaluations', 'evaluation_id', evaluation.evaluationId, evaluation);
 
     this.recentEvals.push(evaluation);
     if (this.recentEvals.length > this.maxRecent) {
@@ -172,12 +172,12 @@ class EvalTracker {
   /**
    * Update hourly time-series aggregation.
    */
-  _updateHistory(agentId, evaluation) {
+  async _updateHistory(agentId, evaluation) {
     const now = new Date();
     const windowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours()).toISOString();
     const historyId = `EVALH-${agentId.slice(0, 12)}-${windowStart.replace(/[^0-9]/g, '').slice(0, 10)}`;
 
-    const existing = db_ops.getById('agent_eval_history', 'history_id', historyId);
+    const existing = await db_ops.getById('agent_eval_history', 'history_id', historyId);
     const existingData = existing?.data ? (typeof existing.data === 'string' ? JSON.parse(existing.data) : existing.data) : null;
 
     if (existingData) {
@@ -189,10 +189,10 @@ class EvalTracker {
       existingData.minScore = Math.min(existingData.minScore, evaluation.aggregateScore || 1);
       existingData.maxScore = Math.max(existingData.maxScore, evaluation.aggregateScore || 0);
 
-      db_ops.insert('agent_eval_history', 'history_id', historyId, existingData);
+      await db_ops.insert('agent_eval_history', 'history_id', historyId, existingData);
     } else {
       const windowEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours() + 1).toISOString();
-      db_ops.insert('agent_eval_history', 'history_id', historyId, {
+      await db_ops.insert('agent_eval_history', 'history_id', historyId, {
         historyId,
         agentId,
         windowStart,

@@ -30,7 +30,7 @@ class EventPersister {
   /**
    * Fire-and-forget persist of a single event
    */
-  _persist(event) {
+  async _persist(event) {
     try {
       const correlationId = event.data?.correlationId || null;
       const eventType = event.type || null;
@@ -43,15 +43,7 @@ class EventPersister {
         timestamp: event.timestamp
       };
 
-      db_ops.insert('agent_events', 'event_id', event.id, payload);
-
-      // Update promoted indexed columns for direct querying
-      if (correlationId || eventType) {
-        db_ops.run(
-          `UPDATE agent_events SET correlation_id = ?, event_type = ? WHERE event_id = ?`,
-          [correlationId, eventType, event.id]
-        );
-      }
+      await db_ops.insert('agent_events', 'event_id', event.id, payload);
 
       this.stats.persisted++;
     } catch (error) {
@@ -65,8 +57,8 @@ class EventPersister {
    * Uses in-memory filtering since the db_ops.query in-memory fallback
    * ignores WHERE clauses when better-sqlite3 is not installed.
    */
-  getByCorrelationId(correlationId, limit = 500) {
-    const all = db_ops.getAll('agent_events', 10000, 0);
+  async getByCorrelationId(correlationId, limit = 500) {
+    const all = await db_ops.getAll('agent_events', 10000, 0);
     const filtered = all
       .filter(row => {
         const cid = row.data?.correlationId;

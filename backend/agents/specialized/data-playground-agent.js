@@ -46,7 +46,7 @@ export class DataPlaygroundAgent extends BaseAgent {
     this._registerTools();
   }
 
-  _registerTools() {
+  async _registerTools() {
     // 1. Natural Language to SQL
     this.registerTool(
       'nl_to_sql',
@@ -112,20 +112,17 @@ export class DataPlaygroundAgent extends BaseAgent {
         if (!sellerId) return { success: false, error: 'sellerId is required' };
 
         try {
-          const seller = db_ops.getById('sellers', 'seller_id', sellerId);
-          const transactions = db_ops.getAll('transactions', 1000, 0)
-            .map(t => t.data || t)
+          const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
+          const transactions = (await db_ops.getAll('transactions', 1000, 0)).map(t => t.data || t)
             .filter(t => t.sellerId === sellerId);
-          const payouts = db_ops.getAll('payouts', 1000, 0)
-            .map(p => p.data || p)
+          const payouts = (await db_ops.getAll('payouts', 1000, 0)).map(p => p.data || p)
             .filter(p => p.sellerId === sellerId);
-          const listings = db_ops.getAll('listings', 1000, 0)
-            .map(l => l.data || l)
+          const listings = (await db_ops.getAll('listings', 1000, 0)).map(l => l.data || l)
             .filter(l => l.sellerId === sellerId);
-          const riskEvents = db_ops.raw(
+          const riskEvents = (await db_ops.raw(
             "SELECT * FROM risk_events WHERE json_extract(data, '$.sellerId') = ? ORDER BY created_at DESC LIMIT 50",
             [sellerId]
-          ).map(r => r.data ? (typeof r.data === 'string' ? JSON.parse(r.data) : r.data) : r);
+          )).map(r => r.data ? (typeof r.data === 'string' ? JSON.parse(r.data) : r.data) : r);
 
           const amounts = transactions.map(t => t.amount).filter(a => typeof a === 'number');
           const amountStats = amounts.length > 0 ? computeDistribution(amounts) : null;
@@ -185,7 +182,7 @@ export class DataPlaygroundAgent extends BaseAgent {
               })
               .filter(v => !isNaN(v));
           } else if (tableName && column) {
-            const rows = db_ops.getAll(tableName, 500, 0);
+            const rows = await db_ops.getAll(tableName, 500, 0);
             values = rows
               .map(r => {
                 const data = r.data || r;
@@ -273,7 +270,7 @@ export class DataPlaygroundAgent extends BaseAgent {
               return typeof val === 'number' ? val : parseFloat(val);
             }).filter(v => !isNaN(v));
           } else if (tableName && column) {
-            const rows = db_ops.getAll(tableName, 500, 0);
+            const rows = await db_ops.getAll(tableName, 500, 0);
             values = rows.map(r => {
               const data = r.data || r;
               return typeof data[column] === 'number' ? data[column] : parseFloat(data[column]);

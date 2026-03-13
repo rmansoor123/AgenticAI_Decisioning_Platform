@@ -36,7 +36,7 @@ router.post('/', async (req, res) => {
       createdAt: new Date().toISOString()
     };
 
-    db_ops.insert('cases', 'case_id', caseId, caseData);
+    await db_ops.insert('cases', 'case_id', caseId, caseData);
 
     // Non-blocking: run AlertTriageAgent to evaluate priority + routing
     triageCase(caseData).catch(() => {});
@@ -48,11 +48,11 @@ router.post('/', async (req, res) => {
 });
 
 // GET /cases — List cases with filters
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { status, priority, checkpoint, assignee, limit = 100, offset = 0 } = req.query;
 
-    let cases = db_ops.getAll('cases', 10000, 0).map(r => r.data);
+    let cases = (await db_ops.getAll('cases', 10000, 0)).map(r => r.data);
 
     if (status) cases = cases.filter(c => c.status === status.toUpperCase());
     if (priority) cases = cases.filter(c => c.priority === priority.toUpperCase());
@@ -77,9 +77,9 @@ router.get('/', (req, res) => {
 });
 
 // GET /cases/stats — Queue statistics
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
-    const allCases = db_ops.getAll('cases', 10000, 0).map(r => r.data);
+    const allCases = (await db_ops.getAll('cases', 10000, 0)).map(r => r.data);
 
     const byStatus = { OPEN: 0, IN_REVIEW: 0, RESOLVED: 0 };
     const byPriority = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
@@ -119,9 +119,9 @@ router.get('/stats', (req, res) => {
 });
 
 // GET /cases/:caseId — Full case detail
-router.get('/:caseId', (req, res) => {
+router.get('/:caseId', async (req, res) => {
   try {
-    const record = db_ops.getById('cases', 'case_id', req.params.caseId);
+    const record = await db_ops.getById('cases', 'case_id', req.params.caseId);
     if (!record) {
       return res.status(404).json({ success: false, error: 'Case not found' });
     }
@@ -130,7 +130,7 @@ router.get('/:caseId', (req, res) => {
 
     // Enrich with seller info
     if (caseData.sellerId) {
-      const sellerRecord = db_ops.getById('sellers', 'seller_id', caseData.sellerId);
+      const sellerRecord = await db_ops.getById('sellers', 'seller_id', caseData.sellerId);
       if (sellerRecord) {
         caseData.seller = {
           businessName: sellerRecord.data.businessName,
@@ -144,8 +144,8 @@ router.get('/:caseId', (req, res) => {
 
     // Enrich with triggered rule details
     if (caseData.triggeredRules && caseData.triggeredRules.length > 0) {
-      caseData.ruleDetails = caseData.triggeredRules.map(ruleId => {
-        const ruleRecord = db_ops.getById('rules', 'rule_id', ruleId);
+      caseData.ruleDetails = caseData.triggeredRules.map(async ruleId => {
+        const ruleRecord = await db_ops.getById('rules', 'rule_id', ruleId);
         return ruleRecord ? { ruleId, name: ruleRecord.data.name, type: ruleRecord.data.type, severity: ruleRecord.data.severity, action: ruleRecord.data.action } : { ruleId, name: 'Unknown Rule' };
       });
     }
@@ -157,7 +157,7 @@ router.get('/:caseId', (req, res) => {
 });
 
 // PATCH /cases/:caseId/status — Update case status
-router.patch('/:caseId/status', (req, res) => {
+router.patch('/:caseId/status', async (req, res) => {
   try {
     const { status } = req.body;
     const validStatuses = ['OPEN', 'IN_REVIEW', 'RESOLVED'];
@@ -166,7 +166,7 @@ router.patch('/:caseId/status', (req, res) => {
       return res.status(400).json({ success: false, error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
     }
 
-    const record = db_ops.getById('cases', 'case_id', req.params.caseId);
+    const record = await db_ops.getById('cases', 'case_id', req.params.caseId);
     if (!record) {
       return res.status(404).json({ success: false, error: 'Case not found' });
     }
@@ -186,7 +186,7 @@ router.patch('/:caseId/status', (req, res) => {
       updated.resolvedAt = new Date().toISOString();
     }
 
-    db_ops.update('cases', 'case_id', req.params.caseId, updated);
+    await db_ops.update('cases', 'case_id', req.params.caseId, updated);
     res.json({ success: true, data: updated });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -194,14 +194,14 @@ router.patch('/:caseId/status', (req, res) => {
 });
 
 // PATCH /cases/:caseId/assign — Assign case
-router.patch('/:caseId/assign', (req, res) => {
+router.patch('/:caseId/assign', async (req, res) => {
   try {
     const { assignee } = req.body;
     if (!assignee) {
       return res.status(400).json({ success: false, error: 'assignee is required' });
     }
 
-    const record = db_ops.getById('cases', 'case_id', req.params.caseId);
+    const record = await db_ops.getById('cases', 'case_id', req.params.caseId);
     if (!record) {
       return res.status(404).json({ success: false, error: 'Case not found' });
     }
@@ -213,7 +213,7 @@ router.patch('/:caseId/assign', (req, res) => {
       updatedAt: new Date().toISOString()
     };
 
-    db_ops.update('cases', 'case_id', req.params.caseId, updated);
+    await db_ops.update('cases', 'case_id', req.params.caseId, updated);
     res.json({ success: true, data: updated });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -221,14 +221,14 @@ router.patch('/:caseId/assign', (req, res) => {
 });
 
 // POST /cases/:caseId/notes — Add note
-router.post('/:caseId/notes', (req, res) => {
+router.post('/:caseId/notes', async (req, res) => {
   try {
     const { author, text } = req.body;
     if (!author || !text) {
       return res.status(400).json({ success: false, error: 'author and text are required' });
     }
 
-    const record = db_ops.getById('cases', 'case_id', req.params.caseId);
+    const record = await db_ops.getById('cases', 'case_id', req.params.caseId);
     if (!record) {
       return res.status(404).json({ success: false, error: 'Case not found' });
     }
@@ -240,7 +240,7 @@ router.post('/:caseId/notes', (req, res) => {
       updatedAt: new Date().toISOString()
     };
 
-    db_ops.update('cases', 'case_id', req.params.caseId, updated);
+    await db_ops.update('cases', 'case_id', req.params.caseId, updated);
     res.json({ success: true, data: updated });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -296,7 +296,7 @@ async function triageCase(caseData) {
     changed = true;
 
     if (changed) {
-      db_ops.update('cases', 'case_id', caseData.caseId, updates);
+      await db_ops.update('cases', 'case_id', caseData.caseId, updates);
       console.log(`[CaseQueue] Triage: ${caseData.caseId} → priority: ${updates.priority}, team: ${updates.assignedTeam || 'unassigned'}`);
     }
   } catch (err) {

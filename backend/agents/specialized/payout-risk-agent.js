@@ -114,7 +114,7 @@ export class PayoutRiskAgent extends AutonomousAgent {
         }
 
         try {
-          const allPayouts = db_ops.getAll('payouts', 1000, 0);
+          const allPayouts = await db_ops.getAll('payouts', 1000, 0);
           const sellerPayouts = allPayouts
             .map(e => e.data || e)
             .filter(p => p.sellerId === sellerId)
@@ -145,7 +145,7 @@ export class PayoutRiskAgent extends AutonomousAgent {
         }
 
         try {
-          const allPayouts = db_ops.getAll('payouts', 1000, 0);
+          const allPayouts = await db_ops.getAll('payouts', 1000, 0);
           const sellerPayouts = allPayouts
             .map(e => e.data || e)
             .filter(p => p.sellerId === sellerId);
@@ -198,14 +198,14 @@ export class PayoutRiskAgent extends AutonomousAgent {
 
         try {
           // Get profile updates for this seller
-          const allUpdates = db_ops.getAll('profile_updates', 1000, 0);
+          const allUpdates = await db_ops.getAll('profile_updates', 1000, 0);
           const bankChanges = allUpdates
             .map(e => e.data || e)
             .filter(u => u.sellerId === sellerId && (u.type || '').toLowerCase().includes('bank'))
             .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
           // Get most recent payouts
-          const allPayouts = db_ops.getAll('payouts', 1000, 0);
+          const allPayouts = await db_ops.getAll('payouts', 1000, 0);
           const recentPayouts = allPayouts
             .map(e => e.data || e)
             .filter(p => p.sellerId === sellerId)
@@ -248,7 +248,7 @@ export class PayoutRiskAgent extends AutonomousAgent {
         }
 
         try {
-          const allCases = db_ops.getAll('cases', 500, 0);
+          const allCases = await db_ops.getAll('cases', 500, 0);
           const sellerCases = allCases
             .map(e => e.data || e)
             .filter(c => c.sellerId === sellerId);
@@ -285,12 +285,12 @@ export class PayoutRiskAgent extends AutonomousAgent {
         }
 
         try {
-          const allPayouts = db_ops.getAll('payouts', 1000, 0);
+          const allPayouts = await db_ops.getAll('payouts', 1000, 0);
           const sellerPayouts = allPayouts
             .map(e => e.data || e)
             .filter(p => p.sellerId === sellerId);
 
-          const allTransactions = db_ops.getAll('transactions', 1000, 0);
+          const allTransactions = await db_ops.getAll('transactions', 1000, 0);
           const sellerTransactions = allTransactions
             .map(e => e.data || e)
             .filter(t => t.sellerId === sellerId);

@@ -82,7 +82,7 @@ export class CrossDomainCorrelationAgent extends AutonomousAgent {
         }
 
         try {
-          const allEvents = db_ops.getAll('risk_events', 10000, 0);
+          const allEvents = await db_ops.getAll('risk_events', 10000, 0);
           const sellerEvents = allEvents
             .map(e => e.data)
             .filter(e => e.sellerId === sellerId)
@@ -116,7 +116,7 @@ export class CrossDomainCorrelationAgent extends AutonomousAgent {
         const cutoff = Date.now() - window * 24 * 60 * 60 * 1000;
 
         try {
-          const allEvents = db_ops.getAll('risk_events', 10000, 0);
+          const allEvents = await db_ops.getAll('risk_events', 10000, 0);
           const filtered = allEvents
             .map(e => e.data)
             .filter(e => {
@@ -157,7 +157,7 @@ export class CrossDomainCorrelationAgent extends AutonomousAgent {
 
         try {
           // Get this seller's timeline
-          const allEvents = db_ops.getAll('risk_events', 10000, 0);
+          const allEvents = await db_ops.getAll('risk_events', 10000, 0);
           const timeline = allEvents
             .map(e => e.data)
             .filter(e => e.sellerId === sellerId)
@@ -177,7 +177,7 @@ export class CrossDomainCorrelationAgent extends AutonomousAgent {
           const similarSellers = [];
           for (const match of matches) {
             try {
-              const kbResults = this.knowledgeBase.searchKnowledge(
+              const kbResults = await this.knowledgeBase.searchKnowledge(
                 'risk-events',
                 `${match.patternId} cross-domain detection`,
                 {},
@@ -227,7 +227,7 @@ export class CrossDomainCorrelationAgent extends AutonomousAgent {
 
         try {
           // Get seller timeline
-          const allEvents = db_ops.getAll('risk_events', 10000, 0);
+          const allEvents = await db_ops.getAll('risk_events', 10000, 0);
           const timeline = allEvents
             .map(e => e.data)
             .filter(e => e.sellerId === sellerId)

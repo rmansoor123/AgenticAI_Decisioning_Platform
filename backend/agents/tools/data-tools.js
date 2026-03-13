@@ -16,7 +16,7 @@ const KNOWN_TABLES = [
   'rule_performance', 'experiment_events', 'knowledge_entries'
 ];
 
-export function getTableSchemas() {
+export async function getTableSchemas() {
   const schemas = {};
   for (const table of KNOWN_TABLES) {
     try {
@@ -28,7 +28,7 @@ export function getTableSchemas() {
             type: col.type,
             notnull: !!col.notnull
           })),
-          rowCount: db_ops.count(table)
+          rowCount: await db_ops.count(table)
         };
       }
     } catch (_) {

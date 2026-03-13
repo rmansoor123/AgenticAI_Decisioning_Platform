@@ -245,7 +245,7 @@ router.post('/onboarding/evaluate', async (req, res) => {
     // If only sellerId provided, fetch from database
     let seller = sellerData;
     if (sellerId && !sellerData) {
-      const sellerRecord = db_ops.getById('sellers', 'seller_id', sellerId);
+      const sellerRecord = await db_ops.getById('sellers', 'seller_id', sellerId);
       if (!sellerRecord) {
         return res.status(404).json({ success: false, error: 'Seller not found' });
       }

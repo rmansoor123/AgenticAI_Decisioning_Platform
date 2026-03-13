@@ -27,6 +27,10 @@ export async function initializeDb() {
       if (connected && isPostgresAvailable()) {
         activeDbOps = db_ops_pg;
         activeBackend = 'postgres';
+        // Inject Postgres backend into database.js so all services using
+        // `import { db_ops } from './database.js'` automatically delegate to Postgres
+        const { setFactoryBackend } = await import('./database.js');
+        setFactoryBackend(db_ops_pg);
         console.log('[database-factory] Using PostgreSQL backend');
         return activeBackend;
       }

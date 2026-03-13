@@ -7,11 +7,11 @@ import { getComplianceAgent } from '../../../agents/specialized/compliance-agent
 const router = express.Router();
 
 // Get all compliance checks
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { limit = 50, offset = 0, sellerId, status, checkType } = req.query;
 
-    let checks = db_ops.getAll('compliance_checks', parseInt(limit), parseInt(offset));
+    let checks = await db_ops.getAll('compliance_checks', parseInt(limit), parseInt(offset));
     checks = checks.map(c => c.data);
 
     if (sellerId) checks = checks.filter(c => c.sellerId === sellerId);
@@ -24,7 +24,7 @@ router.get('/', (req, res) => {
       pagination: {
         limit: parseInt(limit),
         offset: parseInt(offset),
-        total: db_ops.count('compliance_checks')
+        total: await db_ops.count('compliance_checks')
       }
     });
   } catch (error) {
@@ -33,9 +33,9 @@ router.get('/', (req, res) => {
 });
 
 // Get compliance check statistics
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
-    const allChecks = db_ops.getAll('compliance_checks', 10000, 0).map(c => c.data);
+    const allChecks = (await db_ops.getAll('compliance_checks', 10000, 0)).map(c => c.data);
 
     const stats = {
       total: allChecks.length,
@@ -72,9 +72,9 @@ router.get('/stats', (req, res) => {
 });
 
 // Get compliance check by ID
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
-    const check = db_ops.getById('compliance_checks', 'check_id', req.params.id);
+    const check = await db_ops.getById('compliance_checks', 'check_id', req.params.id);
     if (!check) {
       return res.status(404).json({ success: false, error: 'Compliance check not found' });
     }
@@ -89,7 +89,7 @@ router.post('/', async (req, res) => {
   try {
     const { sellerId, checkType, transactionVolume, linkedAccounts, jurisdiction, cryptoActivity } = req.body;
 
-    const seller = db_ops.getById('sellers', 'seller_id', sellerId);
+    const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
     if (!seller) {
       return res.status(404).json({ success: false, error: 'Seller not found' });
     }
@@ -111,7 +111,7 @@ router.post('/', async (req, res) => {
       createdAt: new Date().toISOString()
     };
 
-    db_ops.insert('compliance_checks', 'check_id', checkId, record);
+    await db_ops.insert('compliance_checks', 'check_id', checkId, record);
 
     res.status(202).json({
       success: true,
@@ -141,7 +141,7 @@ router.post('/', async (req, res) => {
       evaluationType: 'compliance_aml',
       _correlationId: correlationId
     })
-      .then(agentResult => {
+      .then(async agentResult => {
         const rec = agentResult.result?.recommendation || agentResult.result?.decision;
         const decision = rec?.action || 'BLOCK';
         const riskScore = agentResult.result?.overallRisk?.score ?? 75;
@@ -150,7 +150,7 @@ router.post('/', async (req, res) => {
 
         const riskLevel = riskScore >= 66 ? 'CRITICAL' : riskScore >= 40 ? 'HIGH' : riskScore >= 20 ? 'MEDIUM' : 'LOW';
 
-        db_ops.update('compliance_checks', 'check_id', checkId, {
+        await db_ops.update('compliance_checks', 'check_id', checkId, {
           ...record,
           status: decision,
           riskScore,
@@ -172,7 +172,7 @@ router.post('/', async (req, res) => {
             status: 'OPEN', sellerId, entityId: checkId, entityType: 'COMPLIANCE_CHECK',
             decision, riskScore, reasoning, agentId, createdAt: new Date().toISOString()
           };
-          db_ops.insert('cases', 'case_id', caseId, caseData);
+          await db_ops.insert('cases', 'case_id', caseId, caseData);
         }
 
         try {
@@ -186,9 +186,9 @@ router.post('/', async (req, res) => {
 
         console.log(`[ComplianceService] Completed: ${checkId} → ${decision} (risk: ${riskScore})`);
       })
-      .catch(error => {
+      .catch(async error => {
         console.error(`[ComplianceService] Agent error for ${checkId}:`, error.message);
-        db_ops.update('compliance_checks', 'check_id', checkId, {
+        await db_ops.update('compliance_checks', 'check_id', checkId, {
           ...record,
           status: 'BLOCK',
           riskScore: 75,
@@ -210,10 +210,10 @@ router.post('/', async (req, res) => {
 });
 
 // Update compliance check status
-router.patch('/:id/status', (req, res) => {
+router.patch('/:id/status', async (req, res) => {
   try {
     const { status, reason } = req.body;
-    const check = db_ops.getById('compliance_checks', 'check_id', req.params.id);
+    const check = await db_ops.getById('compliance_checks', 'check_id', req.params.id);
     if (!check) {
       return res.status(404).json({ success: false, error: 'Compliance check not found' });
     }
@@ -223,7 +223,7 @@ router.patch('/:id/status', (req, res) => {
       return res.status(400).json({ success: false, error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
     }
 
-    db_ops.update('compliance_checks', 'check_id', req.params.id, {
+    await db_ops.update('compliance_checks', 'check_id', req.params.id, {
       ...check.data,
       status,
       statusReason: reason,

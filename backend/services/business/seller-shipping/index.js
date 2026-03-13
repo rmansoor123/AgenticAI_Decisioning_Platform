@@ -8,11 +8,11 @@ import { getShippingRiskAgent } from '../../../agents/specialized/shipping-risk-
 const router = express.Router();
 
 // Get all shipments
-router.get('/shipments', (req, res) => {
+router.get('/shipments', async (req, res) => {
   try {
     const { limit = 50, offset = 0, sellerId, status, carrier } = req.query;
 
-    let shipments = db_ops.getAll('shipments', parseInt(limit), parseInt(offset));
+    let shipments = await db_ops.getAll('shipments', parseInt(limit), parseInt(offset));
     shipments = shipments.map(s => s.data);
 
     if (sellerId) shipments = shipments.filter(s => s.sellerId === sellerId);
@@ -25,7 +25,7 @@ router.get('/shipments', (req, res) => {
       pagination: {
         limit: parseInt(limit),
         offset: parseInt(offset),
-        total: db_ops.count('shipments')
+        total: await db_ops.count('shipments')
       }
     });
   } catch (error) {
@@ -34,9 +34,9 @@ router.get('/shipments', (req, res) => {
 });
 
 // Get shipment by ID
-router.get('/shipments/:shipmentId', (req, res) => {
+router.get('/shipments/:shipmentId', async (req, res) => {
   try {
-    const shipment = db_ops.getById('shipments', 'shipment_id', req.params.shipmentId);
+    const shipment = await db_ops.getById('shipments', 'shipment_id', req.params.shipmentId);
     if (!shipment) {
       return res.status(404).json({ success: false, error: 'Shipment not found' });
     }
@@ -51,7 +51,7 @@ router.post('/shipments', async (req, res) => {
   try {
     const { sellerId, address, carrier, weight, value, category, transactionId } = req.body;
 
-    const seller = db_ops.getById('sellers', 'seller_id', sellerId || req.body.sellerId);
+    const seller = await db_ops.getById('sellers', 'seller_id', sellerId || req.body.sellerId);
     if (!seller) {
       return res.status(404).json({ success: false, error: 'Seller not found' });
     }
@@ -62,7 +62,7 @@ router.post('/shipments', async (req, res) => {
 
     shipmentData.status = 'EVALUATING';
     shipmentData.riskAssessment = null;
-    db_ops.insert('shipments', 'shipment_id', shipmentId, shipmentData);
+    await db_ops.insert('shipments', 'shipment_id', shipmentId, shipmentData);
 
     res.status(202).json({
       success: true,
@@ -92,7 +92,7 @@ router.post('/shipments', async (req, res) => {
       evaluationType: 'shipping_risk',
       _correlationId: correlationId
     })
-      .then(agentResult => {
+      .then(async agentResult => {
         const rec = agentResult.result?.recommendation || agentResult.result?.decision;
         const decision = rec?.action || 'FLAG';
         const riskScore = agentResult.result?.overallRisk?.score ?? 50;
@@ -104,7 +104,7 @@ router.post('/shipments', async (req, res) => {
         else if (decision === 'HOLD') shipmentStatus = 'ON_HOLD';
         else shipmentStatus = 'FLAGGED';
 
-        db_ops.update('shipments', 'shipment_id', shipmentId, {
+        await db_ops.update('shipments', 'shipment_id', shipmentId, {
           ...shipmentData,
           status: shipmentStatus,
           riskAssessment: { riskScore, decision, reasoning, agentId, evaluatedAt: new Date().toISOString() }
@@ -118,7 +118,7 @@ router.post('/shipments', async (req, res) => {
 
         if (decision === 'HOLD' || decision === 'FLAG') {
           const caseId = 'CASE-' + randomUUID().substring(0, 8).toUpperCase();
-          db_ops.insert('cases', 'case_id', caseId, {
+          await db_ops.insert('cases', 'case_id', caseId, {
             caseId, checkpoint: 'SHIPPING_RISK',
             priority: riskScore >= 80 ? 'CRITICAL' : riskScore >= 60 ? 'HIGH' : 'MEDIUM',
             status: 'OPEN', sellerId: sellerId || req.body.sellerId, entityId: shipmentId, entityType: 'SHIPMENT',
@@ -137,9 +137,9 @@ router.post('/shipments', async (req, res) => {
 
         console.log(`[ShippingService] Completed: ${shipmentId} → ${decision} (risk: ${riskScore})`);
       })
-      .catch(error => {
+      .catch(async error => {
         console.error(`[ShippingService] Agent error for ${shipmentId}:`, error.message);
-        db_ops.update('shipments', 'shipment_id', shipmentId, {
+        await db_ops.update('shipments', 'shipment_id', shipmentId, {
           ...shipmentData,
           status: 'FLAGGED',
           riskAssessment: { riskScore: 50, decision: 'FLAG', reasoning: `Agent error — defaulting to FLAG: ${error.message}`, agentId: 'SHIPPING_RISK', evaluatedAt: new Date().toISOString() }
@@ -156,10 +156,10 @@ router.post('/shipments', async (req, res) => {
 });
 
 // Update shipment status
-router.patch('/shipments/:shipmentId/status', (req, res) => {
+router.patch('/shipments/:shipmentId/status', async (req, res) => {
   try {
     const { status, trackingUpdate } = req.body;
-    const existing = db_ops.getById('shipments', 'shipment_id', req.params.shipmentId);
+    const existing = await db_ops.getById('shipments', 'shipment_id', req.params.shipmentId);
 
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Shipment not found' });
@@ -182,7 +182,7 @@ router.patch('/shipments/:shipmentId/status', (req, res) => {
       updated.actualDelivery = new Date().toISOString();
     }
 
-    db_ops.update('shipments', 'shipment_id', req.params.shipmentId, updated);
+    await db_ops.update('shipments', 'shipment_id', req.params.shipmentId, updated);
 
     if (req.body.status === 'DELIVERED') {
       emitRiskEvent({
@@ -198,11 +198,10 @@ router.patch('/shipments/:shipmentId/status', (req, res) => {
 });
 
 // Get shipments for a seller
-router.get('/sellers/:sellerId/shipments', (req, res) => {
+router.get('/sellers/:sellerId/shipments', async (req, res) => {
   try {
     const { limit = 50, status } = req.query;
-    let shipments = db_ops.getAll('shipments', 1000, 0)
-      .map(s => s.data)
+    let shipments = (await db_ops.getAll('shipments', 1000, 0)).map(s => s.data)
       .filter(s => s.sellerId === req.params.sellerId);
 
     if (status) shipments = shipments.filter(s => s.status === status);
@@ -214,10 +213,9 @@ router.get('/sellers/:sellerId/shipments', (req, res) => {
 });
 
 // Get shipment by tracking number
-router.get('/track/:trackingNumber', (req, res) => {
+router.get('/track/:trackingNumber', async (req, res) => {
   try {
-    const shipments = db_ops.getAll('shipments', 10000, 0)
-      .map(s => s.data)
+    const shipments = (await db_ops.getAll('shipments', 10000, 0)).map(s => s.data)
       .filter(s => s.trackingNumber === req.params.trackingNumber);
 
     if (shipments.length === 0) {
@@ -231,12 +229,11 @@ router.get('/track/:trackingNumber', (req, res) => {
 });
 
 // Get flagged shipments
-router.get('/flagged', (req, res) => {
+router.get('/flagged', async (req, res) => {
   try {
     const { limit = 50 } = req.query;
 
-    const flaggedShipments = db_ops.getAll('shipments', 1000, 0)
-      .map(s => s.data)
+    const flaggedShipments = (await db_ops.getAll('shipments', 1000, 0)).map(s => s.data)
       .filter(s => {
         const flags = s.riskFlags || {};
         return Object.values(flags).some(v => v === true);
@@ -250,7 +247,7 @@ router.get('/flagged', (req, res) => {
 });
 
 // Verify address
-router.post('/verify-address', (req, res) => {
+router.post('/verify-address', async (req, res) => {
   try {
     const { address } = req.body;
 
@@ -280,9 +277,9 @@ router.post('/verify-address', (req, res) => {
 });
 
 // Shipping statistics
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
-    const allShipments = db_ops.getAll('shipments', 10000, 0).map(s => s.data);
+    const allShipments = (await db_ops.getAll('shipments', 10000, 0)).map(s => s.data);
 
     const stats = {
       total: allShipments.length,

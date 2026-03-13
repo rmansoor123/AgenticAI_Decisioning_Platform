@@ -9,10 +9,10 @@ const COLLECTION = 'returns';
 const ID_FIELD = 'return_id';
 
 // GET / — List with filters/pagination
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { limit = 50, offset = 0, sellerId, status } = req.query;
-    let records = db_ops.getAll(COLLECTION, parseInt(limit), parseInt(offset)).map(r => r.data);
+    let records = (await db_ops.getAll(COLLECTION, parseInt(limit), parseInt(offset))).map(r => r.data);
     if (sellerId) records = records.filter(r => r.sellerId === sellerId);
     if (status) records = records.filter(r => r.status === status);
     res.json({
@@ -21,7 +21,7 @@ router.get('/', (req, res) => {
       pagination: {
         limit: parseInt(limit),
         offset: parseInt(offset),
-        total: db_ops.count(COLLECTION)
+        total: await db_ops.count(COLLECTION)
       }
     });
   } catch (error) {
@@ -30,9 +30,9 @@ router.get('/', (req, res) => {
 });
 
 // GET /stats — Domain statistics
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
-    const all = db_ops.getAll(COLLECTION, 10000, 0).map(r => r.data);
+    const all = (await db_ops.getAll(COLLECTION, 10000, 0)).map(r => r.data);
     const byStatus = {};
     const byReason = {};
     let flagged = 0;
@@ -56,10 +56,9 @@ router.get('/stats', (req, res) => {
 });
 
 // GET /:id — Get by ID
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
-    const record = db_ops.getAll(COLLECTION, 10000, 0)
-      .map(r => r.data)
+    const record = (await db_ops.getAll(COLLECTION, 10000, 0)).map(r => r.data)
       .find(r => r[ID_FIELD] === req.params.id);
     if (!record) {
       return res.status(404).json({ success: false, error: 'Record not found' });
@@ -88,7 +87,7 @@ router.post('/', async (req, res) => {
       updatedAt: new Date().toISOString()
     };
 
-    db_ops.insert(COLLECTION, record);
+    await db_ops.insert(COLLECTION, ID_FIELD, id, record);
 
     // Return HTTP 202 immediately
     res.status(202).json({
@@ -121,7 +120,7 @@ router.post('/', async (req, res) => {
       evaluationType: 'returns_abuse',
       _correlationId: correlationId
     })
-      .then(agentResult => {
+      .then(async agentResult => {
         const rec = agentResult.result?.recommendation || agentResult.result?.decision;
         const decision = rec?.action || 'INVESTIGATE';
         const riskScore = agentResult.result?.overallRisk?.score ?? 50;
@@ -136,7 +135,7 @@ router.post('/', async (req, res) => {
         else status = 'UNDER_INVESTIGATION';
 
         // Update record with final decision
-        db_ops.update(COLLECTION, id, {
+        await db_ops.update(COLLECTION, ID_FIELD, id, {
           ...record,
           status,
           riskScore,
@@ -157,7 +156,7 @@ router.post('/', async (req, res) => {
         // Create case on INVESTIGATE or DENY
         if (decision === 'INVESTIGATE' || decision === 'DENY') {
           const caseId = 'CASE-' + randomUUID().substring(0, 8).toUpperCase();
-          db_ops.insert('cases', 'case_id', caseId, {
+          await db_ops.insert('cases', 'case_id', caseId, {
             caseId, checkpoint: 'RETURNS_REVIEW',
             priority: riskScore >= 80 ? 'CRITICAL' : riskScore >= 60 ? 'HIGH' : 'MEDIUM',
             status: 'OPEN', sellerId: req.body.sellerId, entityId: id, entityType: 'RETURN',
@@ -177,9 +176,9 @@ router.post('/', async (req, res) => {
 
         console.log(`[ReturnsService] Completed: ${id} → ${decision} (risk: ${riskScore})`);
       })
-      .catch(error => {
+      .catch(async error => {
         console.error(`[ReturnsService] Agent error for ${id}:`, error.message);
-        db_ops.update(COLLECTION, id, {
+        await db_ops.update(COLLECTION, ID_FIELD, id, {
           ...record,
           status: 'UNDER_INVESTIGATION',
           riskScore: 50,
@@ -201,21 +200,21 @@ router.post('/', async (req, res) => {
 });
 
 // PATCH /:id/status — Update status
-router.patch('/:id/status', (req, res) => {
+router.patch('/:id/status', async (req, res) => {
   try {
     const { status } = req.body;
     if (!status) {
       return res.status(400).json({ success: false, error: 'Status is required' });
     }
 
-    const records = db_ops.getAll(COLLECTION, 10000, 0);
+    const records = await db_ops.getAll(COLLECTION, 10000, 0);
     const entry = records.find(r => r.data[ID_FIELD] === req.params.id);
     if (!entry) {
       return res.status(404).json({ success: false, error: 'Record not found' });
     }
 
     const updated = { ...entry.data, status, updatedAt: new Date().toISOString() };
-    db_ops.update(COLLECTION, entry.id, updated);
+    await db_ops.update(COLLECTION, ID_FIELD, entry.id, updated);
 
     res.json({ success: true, data: updated });
   } catch (error) {

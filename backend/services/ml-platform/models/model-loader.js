@@ -138,7 +138,7 @@ class ModelLoader {
     ];
 
     const loadPromises = modelsToLoad.map(id =>
-      this.loadModel(id).catch(err => {
+      this.loadModel(id).catch(async err => {
         console.error(`Failed to load model ${id}:`, err.message);
         return null;
       })
@@ -158,7 +158,7 @@ class ModelLoader {
     for (const [id, model] of this.loadedModels) {
       if (model && typeof model.warmup === 'function') {
         warmupPromises.push(
-          model.warmup().catch(err => {
+          model.warmup().catch(async err => {
             console.error(`Failed to warmup model ${id}:`, err.message);
           })
         );

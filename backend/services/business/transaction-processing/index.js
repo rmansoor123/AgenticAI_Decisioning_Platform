@@ -7,11 +7,11 @@ import { getTransactionRiskAgent } from '../../../agents/specialized/transaction
 const router = express.Router();
 
 // Get all transactions
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { limit = 50, offset = 0, sellerId, status, riskLevel } = req.query;
 
-    let transactions = db_ops.getAll('transactions', parseInt(limit), parseInt(offset));
+    let transactions = await db_ops.getAll('transactions', parseInt(limit), parseInt(offset));
     transactions = transactions.map(t => t.data);
 
     if (sellerId) transactions = transactions.filter(t => t.sellerId === sellerId);
@@ -24,7 +24,7 @@ router.get('/', (req, res) => {
       pagination: {
         limit: parseInt(limit),
         offset: parseInt(offset),
-        total: db_ops.count('transactions')
+        total: await db_ops.count('transactions')
       }
     });
   } catch (error) {
@@ -33,9 +33,9 @@ router.get('/', (req, res) => {
 });
 
 // Get transaction statistics
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
-    const allTransactions = db_ops.getAll('transactions', 10000, 0).map(t => t.data);
+    const allTransactions = (await db_ops.getAll('transactions', 10000, 0)).map(t => t.data);
 
     const stats = {
       total: allTransactions.length,
@@ -74,9 +74,9 @@ router.get('/stats', (req, res) => {
 });
 
 // Get transaction by ID
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
-    const transaction = db_ops.getById('transactions', 'transaction_id', req.params.id);
+    const transaction = await db_ops.getById('transactions', 'transaction_id', req.params.id);
     if (!transaction) {
       return res.status(404).json({ success: false, error: 'Transaction not found' });
     }
@@ -91,7 +91,7 @@ router.post('/', async (req, res) => {
   try {
     const { sellerId, amount, buyerId, paymentMethod, itemId, shippingAddress, deviceFingerprint } = req.body;
 
-    const seller = db_ops.getById('sellers', 'seller_id', sellerId);
+    const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
     if (!seller) {
       return res.status(404).json({ success: false, error: 'Seller not found' });
     }
@@ -114,7 +114,7 @@ router.post('/', async (req, res) => {
       createdAt: new Date().toISOString()
     };
 
-    db_ops.insert('transactions', 'transaction_id', transactionId, record);
+    await db_ops.insert('transactions', 'transaction_id', transactionId, record);
 
     res.status(202).json({
       success: true,
@@ -145,7 +145,7 @@ router.post('/', async (req, res) => {
       evaluationType: 'transaction_risk',
       _correlationId: correlationId
     })
-      .then(agentResult => {
+      .then(async agentResult => {
         const rec = agentResult.result?.recommendation || agentResult.result?.decision;
         const decision = rec?.action || 'BLOCK';
         const riskScore = agentResult.result?.overallRisk?.score ?? 75;
@@ -154,7 +154,7 @@ router.post('/', async (req, res) => {
 
         const riskLevel = riskScore >= 66 ? 'CRITICAL' : riskScore >= 40 ? 'HIGH' : riskScore >= 20 ? 'MEDIUM' : 'LOW';
 
-        db_ops.update('transactions', 'transaction_id', transactionId, {
+        await db_ops.update('transactions', 'transaction_id', transactionId, {
           ...record,
           status: decision,
           riskScore,
@@ -176,7 +176,7 @@ router.post('/', async (req, res) => {
             status: 'OPEN', sellerId, entityId: transactionId, entityType: 'TRANSACTION',
             decision, riskScore, reasoning, agentId, createdAt: new Date().toISOString()
           };
-          db_ops.insert('cases', 'case_id', caseId, caseData);
+          await db_ops.insert('cases', 'case_id', caseId, caseData);
         }
 
         try {
@@ -190,9 +190,9 @@ router.post('/', async (req, res) => {
 
         console.log(`[TransactionService] Completed: ${transactionId} → ${decision} (risk: ${riskScore})`);
       })
-      .catch(error => {
+      .catch(async error => {
         console.error(`[TransactionService] Agent error for ${transactionId}:`, error.message);
-        db_ops.update('transactions', 'transaction_id', transactionId, {
+        await db_ops.update('transactions', 'transaction_id', transactionId, {
           ...record,
           status: 'BLOCK',
           riskScore: 75,
@@ -214,10 +214,10 @@ router.post('/', async (req, res) => {
 });
 
 // Update transaction status
-router.patch('/:id/status', (req, res) => {
+router.patch('/:id/status', async (req, res) => {
   try {
     const { status, reason } = req.body;
-    const transaction = db_ops.getById('transactions', 'transaction_id', req.params.id);
+    const transaction = await db_ops.getById('transactions', 'transaction_id', req.params.id);
     if (!transaction) {
       return res.status(404).json({ success: false, error: 'Transaction not found' });
     }
@@ -227,7 +227,7 @@ router.patch('/:id/status', (req, res) => {
       return res.status(400).json({ success: false, error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
     }
 
-    db_ops.update('transactions', 'transaction_id', req.params.id, {
+    await db_ops.update('transactions', 'transaction_id', req.params.id, {
       ...transaction.data,
       status,
       statusReason: reason,

@@ -408,9 +408,9 @@ class AgentOrchestrator {
   }
 
   // Save workflow checkpoint for resumability
-  saveCheckpoint(executionId, stepIndex, state) {
+  async saveCheckpoint(executionId, stepIndex, state) {
     const checkpointId = `${executionId}-step-${stepIndex}`;
-    db_ops.insert('workflow_checkpoints', 'checkpoint_id', checkpointId, {
+    await db_ops.insert('workflow_checkpoints', 'checkpoint_id', checkpointId, {
       executionId,
       stepIndex,
       state,
@@ -420,9 +420,8 @@ class AgentOrchestrator {
   }
 
   // Load the latest checkpoint for an execution
-  loadCheckpoint(executionId) {
-    const all = db_ops.getAll('workflow_checkpoints', 100, 0)
-      .map(r => r.data)
+  async loadCheckpoint(executionId) {
+    const all = (await db_ops.getAll('workflow_checkpoints', 100, 0)).map(r => r.data)
       .filter(c => c.executionId === executionId)
       .sort((a, b) => b.stepIndex - a.stepIndex);
     return all[0] || null;

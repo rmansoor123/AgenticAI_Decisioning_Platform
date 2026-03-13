@@ -48,12 +48,11 @@ class AnalyticsSQLiteBackend {
   /**
    * Risk trends — avg score + count by time bucket and domain.
    */
-  queryRiskTrends({ domain, timeWindow = '24h', sellerId, granularity = '1h' } = {}) {
+  async queryRiskTrends({ domain, timeWindow = '24h', sellerId, granularity = '1h' } = {}) {
     const cutoff = cutoffISO(parseTimeWindow(timeWindow));
     const granMs = granularityMs(granularity);
 
-    let events = db_ops.getAll('risk_events', 100_000, 0)
-      .map(r => r.data)
+    let events = (await db_ops.getAll('risk_events', 100_000, 0)).map(r => r.data)
       .filter(e => e.createdAt >= cutoff);
 
     if (domain) events = events.filter(e => e.domain === domain);
@@ -82,11 +81,10 @@ class AnalyticsSQLiteBackend {
   /**
    * Agent performance — execution count + latency percentiles + success rate.
    */
-  queryAgentPerformance({ agentId, timeWindow = '24h' } = {}) {
+  async queryAgentPerformance({ agentId, timeWindow = '24h' } = {}) {
     const cutoff = cutoffISO(parseTimeWindow(timeWindow));
 
-    let decisions = db_ops.getAll('agent_decisions', 100_000, 0)
-      .map(r => r.data)
+    let decisions = (await db_ops.getAll('agent_decisions', 100_000, 0)).map(r => r.data)
       .filter(d => d.createdAt >= cutoff);
 
     if (agentId) decisions = decisions.filter(d => d.agentId === agentId);
@@ -120,12 +118,11 @@ class AnalyticsSQLiteBackend {
   /**
    * Velocity — event count + unique sellers by time bucket.
    */
-  queryVelocity({ sellerId, deviceFingerprint, timeWindow = '1h' } = {}) {
+  async queryVelocity({ sellerId, deviceFingerprint, timeWindow = '1h' } = {}) {
     const cutoff = cutoffISO(parseTimeWindow(timeWindow));
     const granMs = granularityMs('5m');
 
-    let events = db_ops.getAll('risk_events', 100_000, 0)
-      .map(r => r.data)
+    let events = (await db_ops.getAll('risk_events', 100_000, 0)).map(r => r.data)
       .filter(e => e.createdAt >= cutoff);
 
     if (sellerId) events = events.filter(e => e.sellerId === sellerId);
@@ -147,11 +144,10 @@ class AnalyticsSQLiteBackend {
   /**
    * Decision distribution — count + avg risk by agent + action.
    */
-  queryDecisionDistribution({ agentId, action, timeWindow = '24h' } = {}) {
+  async queryDecisionDistribution({ agentId, action, timeWindow = '24h' } = {}) {
     const cutoff = cutoffISO(parseTimeWindow(timeWindow));
 
-    let decisions = db_ops.getAll('agent_decisions', 100_000, 0)
-      .map(r => r.data)
+    let decisions = (await db_ops.getAll('agent_decisions', 100_000, 0)).map(r => r.data)
       .filter(d => d.createdAt >= cutoff);
 
     if (agentId) decisions = decisions.filter(d => d.agentId === agentId);
@@ -176,9 +172,9 @@ class AnalyticsSQLiteBackend {
   /**
    * Health check.
    */
-  health() {
+  async health() {
     try {
-      const eventCount = db_ops.count('risk_events');
+      const eventCount = await db_ops.count('risk_events');
       return { status: 'ok', backend: 'sqlite', details: { eventCount } };
     } catch (err) {
       return { status: 'degraded', backend: 'sqlite', details: { error: err.message } };

@@ -54,11 +54,11 @@ class MetricsCollector {
     return Array.from(this.metrics.keys()).map(id => this.getMetrics(id));
   }
 
-  flush() {
+  async flush() {
     const allMetrics = this.getAllMetrics();
     for (const m of allMetrics) {
       const metricId = `MET-${m.agentId}-${Date.now().toString(36)}`;
-      db_ops.insert('agent_metrics', 'metric_id', metricId, {
+      await db_ops.insert('agent_metrics', 'metric_id', metricId, {
         ...m,
         flushedAt: new Date().toISOString()
       });

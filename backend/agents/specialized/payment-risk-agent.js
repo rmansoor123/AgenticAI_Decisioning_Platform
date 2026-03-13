@@ -47,12 +47,12 @@ export class PaymentRiskAgent extends BaseAgent {
     return this._thresholdManager.getThresholds(this.agentId);
   }
 
-  registerTools() {
+  async registerTools() {
     // Tool 1: Detect card testing — micro-transactions under $1 in rapid bursts
     this.registerTool('detect_card_testing', 'Detect micro-transaction probes under $1 in rapid succession indicating card testing', async (params) => {
       const { sellerId } = params;
 
-      const allTxns = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTxns = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(r => r.data)
         .filter(r => r.sellerId === sellerId);
 
@@ -92,7 +92,7 @@ export class PaymentRiskAgent extends BaseAgent {
     this.registerTool('detect_bin_attack', 'Detect sequential card numbers from the same BIN range suggesting enumeration attack', async (params) => {
       const { sellerId } = params;
 
-      const allTxns = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTxns = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(r => r.data)
         .filter(r => r.sellerId === sellerId &&
           (Date.now() - new Date(r.createdAt || r.timestamp)) < 24 * 60 * 60 * 1000
@@ -146,7 +146,7 @@ export class PaymentRiskAgent extends BaseAgent {
     this.registerTool('check_stolen_card_velocity', 'Detect multiple cards used from mismatched geographic locations', async (params) => {
       const { sellerId } = params;
 
-      const allTxns = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTxns = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(r => r.data)
         .filter(r => r.sellerId === sellerId &&
           (Date.now() - new Date(r.createdAt || r.timestamp)) < 48 * 60 * 60 * 1000
@@ -192,7 +192,7 @@ export class PaymentRiskAgent extends BaseAgent {
     this.registerTool('detect_3ds_bypass', 'Detect patterns indicating 3D Secure authentication bypass attempts', async (params) => {
       const { sellerId } = params;
 
-      const allTxns = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTxns = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(r => r.data)
         .filter(r => r.sellerId === sellerId &&
           (Date.now() - new Date(r.createdAt || r.timestamp)) < 24 * 60 * 60 * 1000
@@ -237,7 +237,7 @@ export class PaymentRiskAgent extends BaseAgent {
     this.registerTool('check_virtual_card_velocity', 'Detect bursts of prepaid or virtual card usage indicating laundering', async (params) => {
       const { sellerId } = params;
 
-      const allTxns = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTxns = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(r => r.data)
         .filter(r => r.sellerId === sellerId &&
           (Date.now() - new Date(r.createdAt || r.timestamp)) < 72 * 60 * 60 * 1000
@@ -282,13 +282,13 @@ export class PaymentRiskAgent extends BaseAgent {
     // Agentic tools
     this.registerTool('search_knowledge_base', 'Search knowledge base for similar payment fraud cases', async (params) => {
       const { query, sellerId } = params;
-      const results = this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
+      const results = await this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
       return { success: true, data: { results, count: results.length } };
     });
 
     this.registerTool('retrieve_memory', 'Retrieve relevant payment fraud patterns from long-term memory', async (params) => {
       const { context } = params;
-      const memories = this.memoryStore.queryLongTerm(this.agentId, context, 5);
+      const memories = await this.memoryStore.queryLongTerm(this.agentId, context, 5);
       return { success: true, data: { memories, count: memories.length } };
     });
   }

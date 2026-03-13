@@ -27,7 +27,7 @@ function generateFeedbackId() {
 
 // ─── POST / — Submit feedback on a decision ───────────────────────────────
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const { decisionId, correctLabel, reason, analystId, notes } = req.body;
 
@@ -63,13 +63,13 @@ router.post('/', (req, res) => {
     };
 
     // Persist feedback
-    db_ops.insert('agent_feedback', 'feedback_id', feedbackId, entry);
+    await db_ops.insert('agent_feedback', 'feedback_id', feedbackId, entry);
 
     // Feed into confidence calibrator
     try {
       const calibrator = getConfidenceCalibrator();
       // Look up the original decision to get its confidence score
-      const decisionRecord = db_ops.getById('agent_decisions', 'decision_id', decisionId);
+      const decisionRecord = await db_ops.getById('agent_decisions', 'decision_id', decisionId);
       if (decisionRecord?.data) {
         const confidence = decisionRecord.data.confidence
           || decisionRecord.data._rawConfidence
@@ -90,16 +90,16 @@ router.post('/', (req, res) => {
 
 // ─── GET /queue — Decisions pending review (sorted by confidence ASC) ─────
 
-router.get('/queue', (req, res) => {
+router.get('/queue', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
     const agentId = req.query.agentId || null;
 
     // Get all decisions
-    const allDecisions = db_ops.getAll('agent_decisions', 10000, 0);
+    const allDecisions = await db_ops.getAll('agent_decisions', 10000, 0);
 
     // Get all feedback to determine which decisions have already been reviewed
-    const allFeedback = db_ops.getAll('agent_feedback', 10000, 0);
+    const allFeedback = await db_ops.getAll('agent_feedback', 10000, 0);
     const reviewedDecisionIds = new Set(
       allFeedback.map(f => f.data?.decisionId).filter(Boolean)
     );
@@ -133,9 +133,9 @@ router.get('/queue', (req, res) => {
 
 // ─── GET /stats — Feedback statistics ─────────────────────────────────────
 
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
-    const allFeedback = db_ops.getAll('agent_feedback', 10000, 0).map(r => r.data);
+    const allFeedback = (await db_ops.getAll('agent_feedback', 10000, 0)).map(r => r.data);
 
     const total = allFeedback.length;
     let correct = 0;

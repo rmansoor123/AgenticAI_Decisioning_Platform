@@ -11,7 +11,7 @@ class DecisionLogger {
     this.stats = { totalDecisions: 0 };
   }
 
-  logDecision(agentId, decision, context = {}, reasoning = '') {
+  async logDecision(agentId, decision, context = {}, reasoning = '') {
     const decisionId = `DEC-${agentId.slice(0, 8)}-${Date.now().toString(36)}`;
     const entry = {
       decisionId,
@@ -27,7 +27,7 @@ class DecisionLogger {
       this.recentDecisions = this.recentDecisions.slice(-this.maxRecent);
     }
 
-    db_ops.insert('agent_decisions', 'decision_id', decisionId, entry);
+    await db_ops.insert('agent_decisions', 'decision_id', decisionId, entry);
     this.stats.totalDecisions++;
 
     return entry;

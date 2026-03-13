@@ -8,11 +8,11 @@ import { getATODetectionAgent } from '../../../agents/specialized/ato-detection-
 const router = express.Router();
 
 // Get all ATO events
-router.get('/events', (req, res) => {
+router.get('/events', async (req, res) => {
   try {
     const { limit = 50, offset = 0, sellerId, riskLevel, eventType } = req.query;
 
-    let events = db_ops.getAll('ato_events', parseInt(limit), parseInt(offset));
+    let events = await db_ops.getAll('ato_events', parseInt(limit), parseInt(offset));
     events = events.map(e => e.data);
 
     if (sellerId) events = events.filter(e => e.sellerId === sellerId);
@@ -25,7 +25,7 @@ router.get('/events', (req, res) => {
       pagination: {
         limit: parseInt(limit),
         offset: parseInt(offset),
-        total: db_ops.count('ato_events')
+        total: await db_ops.count('ato_events')
       }
     });
   } catch (error) {
@@ -34,9 +34,9 @@ router.get('/events', (req, res) => {
 });
 
 // Get ATO event by ID
-router.get('/events/:eventId', (req, res) => {
+router.get('/events/:eventId', async (req, res) => {
   try {
-    const event = db_ops.getById('ato_events', 'event_id', req.params.eventId);
+    const event = await db_ops.getById('ato_events', 'event_id', req.params.eventId);
     if (!event) {
       return res.status(404).json({ success: false, error: 'Event not found' });
     }
@@ -51,7 +51,7 @@ router.post('/evaluate', async (req, res) => {
   try {
     const { sellerId, eventType, deviceInfo, location, sessionData } = req.body;
 
-    const seller = db_ops.getById('sellers', 'seller_id', sellerId);
+    const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
     if (!seller) {
       return res.status(404).json({ success: false, error: 'Seller not found' });
     }
@@ -73,7 +73,7 @@ router.post('/evaluate', async (req, res) => {
       timestamp: new Date().toISOString()
     };
 
-    db_ops.insert('ato_events', 'event_id', event.eventId, event);
+    await db_ops.insert('ato_events', 'event_id', event.eventId, event);
 
     // Return HTTP 202 immediately
     res.status(202).json({
@@ -103,7 +103,7 @@ router.post('/evaluate', async (req, res) => {
       evaluationType: 'ato_detection',
       _correlationId: correlationId
     })
-      .then(agentResult => {
+      .then(async agentResult => {
         const rec = agentResult.result?.recommendation || agentResult.result?.decision;
         const decision = rec?.action || 'BLOCK';
         const riskScore = agentResult.result?.overallRisk?.score ?? 75;
@@ -117,7 +117,7 @@ router.post('/evaluate', async (req, res) => {
 
         const riskLevel = riskScore >= 66 ? 'CRITICAL' : riskScore >= 40 ? 'HIGH' : riskScore >= 20 ? 'MEDIUM' : 'LOW';
 
-        db_ops.update('ato_events', 'event_id', eventId, {
+        await db_ops.update('ato_events', 'event_id', eventId, {
           ...event,
           riskLevel,
           riskScore,
@@ -139,7 +139,7 @@ router.post('/evaluate', async (req, res) => {
             status: 'OPEN', sellerId, entityId: eventId, entityType: 'ATO_EVENT',
             decision, riskScore, reasoning, agentId, createdAt: new Date().toISOString()
           };
-          db_ops.insert('cases', 'case_id', caseId, caseData);
+          await db_ops.insert('cases', 'case_id', caseId, caseData);
         }
 
         try {
@@ -153,9 +153,9 @@ router.post('/evaluate', async (req, res) => {
 
         console.log(`[ATOService] Completed: ${eventId} → ${decision} (risk: ${riskScore})`);
       })
-      .catch(error => {
+      .catch(async error => {
         console.error(`[ATOService] Agent error for ${eventId}:`, error.message);
-        db_ops.update('ato_events', 'event_id', eventId, {
+        await db_ops.update('ato_events', 'event_id', eventId, {
           ...event,
           riskLevel: 'HIGH',
           riskScore: 75,
@@ -177,11 +177,10 @@ router.post('/evaluate', async (req, res) => {
 });
 
 // Get ATO events for a specific seller
-router.get('/sellers/:sellerId/events', (req, res) => {
+router.get('/sellers/:sellerId/events', async (req, res) => {
   try {
     const { limit = 50 } = req.query;
-    const events = db_ops.getAll('ato_events', 1000, 0)
-      .map(e => e.data)
+    const events = (await db_ops.getAll('ato_events', 1000, 0)).map(e => e.data)
       .filter(e => e.sellerId === req.params.sellerId)
       .slice(0, parseInt(limit));
 
@@ -192,9 +191,9 @@ router.get('/sellers/:sellerId/events', (req, res) => {
 });
 
 // Get ATO statistics
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
-    const allEvents = db_ops.getAll('ato_events', 10000, 0).map(e => e.data);
+    const allEvents = (await db_ops.getAll('ato_events', 10000, 0)).map(e => e.data);
 
     const stats = {
       total: allEvents.length,
@@ -239,13 +238,12 @@ router.get('/stats', (req, res) => {
 });
 
 // Get device trust score
-router.get('/device/:fingerprint/trust', (req, res) => {
+router.get('/device/:fingerprint/trust', async (req, res) => {
   try {
     const { fingerprint } = req.params;
 
     // Find all events with this device
-    const events = db_ops.getAll('ato_events', 10000, 0)
-      .map(e => e.data)
+    const events = (await db_ops.getAll('ato_events', 10000, 0)).map(e => e.data)
       .filter(e => e.deviceInfo?.fingerprint === fingerprint);
 
     const trustScore = calculateDeviceTrust(events);

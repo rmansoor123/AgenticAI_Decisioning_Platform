@@ -30,7 +30,7 @@ export function getObservabilityBackendType() {
  * Phoenix trace collector — forwards traces to Phoenix via the eval service.
  * Wraps the SQLite trace collector and additionally sends to Phoenix.
  */
-function createPhoenixTraceCollector(sqliteCollector) {
+async function createPhoenixTraceCollector(sqliteCollector) {
   return {
     async startTrace(agentId, input, context) {
       const traceId = await sqliteCollector.startTrace(agentId, input, context);

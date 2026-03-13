@@ -237,11 +237,11 @@ async function runTests() {
   };
 
   try {
-    db_ops.insert('sellers', 'seller_id', 'SLR-TEST001', testSeller);
+    await db_ops.insert('sellers', 'seller_id', 'SLR-TEST001', testSeller);
     console.log('  Seeded test seller: SLR-TEST001');
   } catch (e) {
     // Already exists — update it
-    db_ops.update('sellers', 'seller_id', 'SLR-TEST001', testSeller);
+    await db_ops.update('sellers', 'seller_id', 'SLR-TEST001', testSeller);
     console.log('  Test seller SLR-TEST001 already exists, updated');
   }
 
@@ -290,7 +290,7 @@ async function runTests() {
 
       // Assert: record exists in DB
       if (entityId) {
-        const record = db_ops.getById(svc.dbTable, svc.dbKeyColumn, entityId);
+        const record = await db_ops.getById(svc.dbTable, svc.dbKeyColumn, entityId);
         assert(record !== undefined && record !== null, `${svc.name} record exists in ${svc.dbTable}`);
 
         if (record) {
@@ -307,7 +307,7 @@ async function runTests() {
 
       // Check if agent updated the record status (from EVALUATING to a decision)
       if (entityId) {
-        const updatedRecord = db_ops.getById(svc.dbTable, svc.dbKeyColumn, entityId);
+        const updatedRecord = await db_ops.getById(svc.dbTable, svc.dbKeyColumn, entityId);
         if (updatedRecord) {
           const updatedData = updatedRecord.data || updatedRecord;
           const statusUpdated = updatedData.status !== 'EVALUATING';

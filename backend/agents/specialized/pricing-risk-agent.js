@@ -40,10 +40,10 @@ export class PricingRiskAgent extends BaseAgent {
 
   get autonomyThresholds() { return this._thresholdManager.getThresholds(this.agentId); }
 
-  registerTools() {
+  async registerTools() {
     this.registerTool('detect_below_cost_pricing', 'Detect price below category median * 0.3', async (params) => {
       const { price, category } = params;
-      const listings = (db_ops.getAll('listings', 10000, 0) || [])
+      const listings = (await db_ops.getAll('listings', 10000, 0) || [])
         .map(l => l.data).filter(l => l.category === category && l.price > 0);
       const prices = listings.map(l => l.price).sort((a, b) => a - b);
       const median = prices.length > 0 ? prices[Math.floor(prices.length / 2)] : 100;
@@ -64,7 +64,7 @@ export class PricingRiskAgent extends BaseAgent {
 
     this.registerTool('detect_price_manipulation', 'Detect frequent changes and coordinated patterns', async (params) => {
       const { sellerId, listingId } = params;
-      const pricingRecords = (db_ops.getAll('pricing_records', 10000, 0) || [])
+      const pricingRecords = (await db_ops.getAll('pricing_records', 10000, 0) || [])
         .map(r => r.data).filter(r => r.sellerId === sellerId);
       const now = Date.now();
       const changes24h = pricingRecords.filter(r => now - new Date(r.createdAt) < 86400000).length;
@@ -92,7 +92,7 @@ export class PricingRiskAgent extends BaseAgent {
     this.registerTool('check_arbitrage_patterns', 'Detect cross-marketplace price exploitation', async (params) => {
       const { sellerId, price, category } = params;
       // Check if seller has multiple listings with extreme price variance
-      const sellerListings = (db_ops.getAll('listings', 10000, 0) || [])
+      const sellerListings = (await db_ops.getAll('listings', 10000, 0) || [])
         .map(l => l.data).filter(l => l.sellerId === sellerId && l.category === category);
       const prices = sellerListings.map(l => l.price).filter(p => p > 0);
 
@@ -116,7 +116,7 @@ export class PricingRiskAgent extends BaseAgent {
 
     this.registerTool('get_category_price_stats', 'Get median/mean/stddev from listings for category', async (params) => {
       const { category, price } = params;
-      const listings = (db_ops.getAll('listings', 10000, 0) || [])
+      const listings = (await db_ops.getAll('listings', 10000, 0) || [])
         .map(l => l.data).filter(l => l.category === category && l.price > 0);
       const prices = listings.map(l => l.price);
 
@@ -145,7 +145,7 @@ export class PricingRiskAgent extends BaseAgent {
 
     this.registerTool('check_price_change_velocity', 'Check frequency and magnitude of price changes', async (params) => {
       const { sellerId } = params;
-      const records = (db_ops.getAll('pricing_records', 10000, 0) || [])
+      const records = (await db_ops.getAll('pricing_records', 10000, 0) || [])
         .map(r => r.data).filter(r => r.sellerId === sellerId);
       const now = Date.now();
       const recent = records.filter(r => now - new Date(r.createdAt) < 86400000);
@@ -173,13 +173,13 @@ export class PricingRiskAgent extends BaseAgent {
 
     this.registerTool('search_knowledge_base', 'Search KB for similar pricing cases', async (params) => {
       const { query, sellerId } = params;
-      const results = this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
+      const results = await this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
       return { success: true, data: { results, count: results.length } };
     });
 
     this.registerTool('retrieve_memory', 'Retrieve pricing risk patterns from memory', async (params) => {
       const { context } = params;
-      const memories = this.memoryStore.queryLongTerm(this.agentId, context, 5);
+      const memories = await this.memoryStore.queryLongTerm(this.agentId, context, 5);
       return { success: true, data: { memories, count: memories.length } };
     });
   }

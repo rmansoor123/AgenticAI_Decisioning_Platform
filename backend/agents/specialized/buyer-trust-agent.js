@@ -47,13 +47,13 @@ export class BuyerTrustAgent extends BaseAgent {
     return this._thresholdManager.getThresholds(this.agentId);
   }
 
-  registerTools() {
+  async registerTools() {
     // Tool 1: Check first purchase risk — new buyer with high value first purchase
     this.registerTool('check_first_purchase_risk', 'Analyze new buyer + high value first purchase risk', async (params) => {
       const { sellerId, buyerData } = params;
 
       const buyerId = buyerData?.buyerId;
-      const allTransactions = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTransactions = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.buyerId === buyerId);
 
@@ -107,7 +107,7 @@ export class BuyerTrustAgent extends BaseAgent {
       const { sellerId, buyerData } = params;
 
       const buyerId = buyerData?.buyerId;
-      const allTransactions = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTransactions = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.buyerId === buyerId);
 
@@ -170,7 +170,7 @@ export class BuyerTrustAgent extends BaseAgent {
       const buyerAddress = buyerData?.shippingAddress;
 
       // Find other buyers sharing same IP
-      const allTransactions = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTransactions = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(e => e.data);
 
       const sameIPBuyers = buyerIP
@@ -178,7 +178,7 @@ export class BuyerTrustAgent extends BaseAgent {
         : [];
 
       // Find other buyers sharing same device fingerprint
-      const atoEvents = (db_ops.getAll('ato_events', 10000, 0) || [])
+      const atoEvents = (await db_ops.getAll('ato_events', 10000, 0) || [])
         .map(e => e.data);
 
       const sameDeviceBuyers = buyerDevice
@@ -230,7 +230,7 @@ export class BuyerTrustAgent extends BaseAgent {
       const { sellerId, buyerData } = params;
 
       const buyerId = buyerData?.buyerId;
-      const allTransactions = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTransactions = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.buyerId === buyerId);
 
@@ -294,7 +294,7 @@ export class BuyerTrustAgent extends BaseAgent {
       const { sellerId, buyerData } = params;
 
       const buyerId = buyerData?.buyerId;
-      const allTransactions = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTransactions = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.buyerId === buyerId);
 
@@ -357,13 +357,13 @@ export class BuyerTrustAgent extends BaseAgent {
     // Agentic tools
     this.registerTool('search_knowledge_base', 'Search knowledge base for similar buyer fraud cases', async (params) => {
       const { query, sellerId } = params;
-      const results = this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
+      const results = await this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
       return { success: true, data: { results, count: results.length } };
     });
 
     this.registerTool('retrieve_memory', 'Retrieve relevant buyer fraud patterns from long-term memory', async (params) => {
       const { context } = params;
-      const memories = this.memoryStore.queryLongTerm(this.agentId, context, 5);
+      const memories = await this.memoryStore.queryLongTerm(this.agentId, context, 5);
       return { success: true, data: { memories, count: memories.length } };
     });
   }

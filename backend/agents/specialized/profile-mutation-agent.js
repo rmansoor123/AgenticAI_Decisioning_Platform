@@ -82,7 +82,7 @@ export class ProfileMutationAgent extends AutonomousAgent {
         if (!sellerId) return { success: false, error: 'sellerId is required' };
 
         try {
-          const allUpdates = db_ops.getAll('profile_updates', 1000, 0);
+          const allUpdates = await db_ops.getAll('profile_updates', 1000, 0);
           const updates = allUpdates
             .map(e => e.data || e)
             .filter(u => u.sellerId === sellerId)
@@ -107,7 +107,7 @@ export class ProfileMutationAgent extends AutonomousAgent {
         if (!sellerId) return { success: false, error: 'sellerId is required' };
 
         try {
-          const allUpdates = db_ops.getAll('profile_updates', 1000, 0);
+          const allUpdates = await db_ops.getAll('profile_updates', 1000, 0);
           const updates = allUpdates
             .map(e => e.data || e)
             .filter(u => u.sellerId === sellerId);
@@ -144,7 +144,7 @@ export class ProfileMutationAgent extends AutonomousAgent {
         if (!sellerId) return { success: false, error: 'sellerId is required' };
 
         try {
-          const allAto = db_ops.getAll('ato_events', 500, 0);
+          const allAto = await db_ops.getAll('ato_events', 500, 0);
           const sellerDevices = allAto
             .map(e => e.data || e)
             .filter(a => a.sellerId === sellerId)
@@ -179,7 +179,7 @@ export class ProfileMutationAgent extends AutonomousAgent {
         if (!sellerId) return { success: false, error: 'sellerId is required' };
 
         try {
-          const allCases = db_ops.getAll('cases', 500, 0);
+          const allCases = await db_ops.getAll('cases', 500, 0);
           const sellerCases = allCases
             .map(e => e.data || e)
             .filter(c => c.sellerId === sellerId);
@@ -188,7 +188,7 @@ export class ProfileMutationAgent extends AutonomousAgent {
             (c.status || '').toLowerCase() === 'open' || (c.status || '').toLowerCase() === 'in_review'
           );
 
-          const allUpdates = db_ops.getAll('profile_updates', 1000, 0);
+          const allUpdates = await db_ops.getAll('profile_updates', 1000, 0);
           const recentChanges = allUpdates
             .map(e => e.data || e)
             .filter(u => u.sellerId === sellerId)
@@ -229,7 +229,7 @@ export class ProfileMutationAgent extends AutonomousAgent {
         if (!sellerId) return { success: false, error: 'sellerId is required' };
 
         try {
-          const allUpdates = db_ops.getAll('profile_updates', 1000, 0);
+          const allUpdates = await db_ops.getAll('profile_updates', 1000, 0);
           const docChanges = allUpdates
             .map(e => e.data || e)
             .filter(u => {

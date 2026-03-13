@@ -47,12 +47,12 @@ export class ReviewIntegrityAgent extends BaseAgent {
     return this._thresholdManager.getThresholds(this.agentId);
   }
 
-  registerTools() {
+  async registerTools() {
     // Tool 1: Detect incentivized reviews — review seeding from new accounts with timing clusters
     this.registerTool('detect_incentivized_reviews', 'Detect review seeding patterns — timing clusters from new accounts', async (params) => {
       const { sellerId } = params;
 
-      const allReviews = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allReviews = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId && e.reviewData);
 
@@ -122,7 +122,7 @@ export class ReviewIntegrityAgent extends BaseAgent {
     this.registerTool('detect_feedback_manipulation', 'Detect coordinated positive/negative review patterns', async (params) => {
       const { sellerId } = params;
 
-      const allReviews = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allReviews = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId && e.reviewData);
 
@@ -177,7 +177,7 @@ export class ReviewIntegrityAgent extends BaseAgent {
     this.registerTool('detect_review_bombing', 'Detect sudden spike of negative reviews on a seller from connected accounts', async (params) => {
       const { sellerId } = params;
 
-      const allReviews = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allReviews = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId && e.reviewData);
 
@@ -244,7 +244,7 @@ export class ReviewIntegrityAgent extends BaseAgent {
     this.registerTool('detect_paid_reviews', 'Detect paid reviews via generic language, identical phrases, reviewer overlap', async (params) => {
       const { sellerId } = params;
 
-      const allReviews = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allReviews = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId && e.reviewData);
 
@@ -267,7 +267,7 @@ export class ReviewIntegrityAgent extends BaseAgent {
 
       // Reviewer overlap with other sellers
       const reviewerIds = allReviews.map(r => r.reviewData?.reviewerId).filter(Boolean);
-      const allOtherReviews = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allOtherReviews = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId !== sellerId && e.reviewData);
       const otherReviewerIds = new Set(allOtherReviews.map(r => r.reviewData?.reviewerId).filter(Boolean));
@@ -308,7 +308,7 @@ export class ReviewIntegrityAgent extends BaseAgent {
     this.registerTool('check_review_timing', 'Detect abnormal timing patterns — reviews posted within minutes of purchase', async (params) => {
       const { sellerId } = params;
 
-      const allReviews = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allReviews = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId && e.reviewData);
 
@@ -371,13 +371,13 @@ export class ReviewIntegrityAgent extends BaseAgent {
     // Agentic tools
     this.registerTool('search_knowledge_base', 'Search knowledge base for similar review fraud cases', async (params) => {
       const { query, sellerId } = params;
-      const results = this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
+      const results = await this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
       return { success: true, data: { results, count: results.length } };
     });
 
     this.registerTool('retrieve_memory', 'Retrieve relevant review fraud patterns from long-term memory', async (params) => {
       const { context } = params;
-      const memories = this.memoryStore.queryLongTerm(this.agentId, context, 5);
+      const memories = await this.memoryStore.queryLongTerm(this.agentId, context, 5);
       return { success: true, data: { memories, count: memories.length } };
     });
   }

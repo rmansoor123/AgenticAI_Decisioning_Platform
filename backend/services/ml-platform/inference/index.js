@@ -28,10 +28,10 @@ router.post('/predict', async (req, res) => {
     // Get model info from database (for metadata)
     let modelRecord = null;
     if (modelId) {
-      modelRecord = db_ops.getById('ml_models', 'model_id', modelId);
+      modelRecord = await db_ops.getById('ml_models', 'model_id', modelId);
     } else {
       // Use default production model
-      const models = db_ops.getAll('ml_models', 100, 0).map(m => m.data);
+      const models = (await db_ops.getAll('ml_models', 100, 0)).map(m => m.data);
       modelRecord = { data: models.find(m => m.status === 'PRODUCTION') || models[0] };
     }
 
@@ -75,7 +75,7 @@ router.post('/predict', async (req, res) => {
 
     // Persist prediction for monitoring (fire-and-forget)
     try {
-      db_ops.run(
+      await db_ops.run(
         'INSERT INTO prediction_history (prediction_id, model_id, features, score, decision, created_at) VALUES (?, ?, ?, ?, ?, ?)',
         [predictionId, modelMeta.modelId, JSON.stringify(extractedFeatures.normalized || {}), mlResult.score, prediction.label, new Date().toISOString()]
       );
@@ -112,7 +112,7 @@ router.post('/batch-predict', async (req, res) => {
     }
 
     // Get model metadata
-    const models = db_ops.getAll('ml_models', 100, 0).map(m => m.data);
+    const models = (await db_ops.getAll('ml_models', 100, 0)).map(m => m.data);
     const modelMeta = modelId
       ? models.find(m => m.modelId === modelId)
       : models.find(m => m.status === 'PRODUCTION') || models[0];
@@ -165,7 +165,7 @@ router.post('/batch-predict', async (req, res) => {
 /**
  * Get prediction by ID
  */
-router.get('/predictions/:predictionId', (req, res) => {
+router.get('/predictions/:predictionId', async (req, res) => {
   try {
     const prediction = predictionCache.get(req.params.predictionId);
     if (!prediction) {
@@ -180,9 +180,9 @@ router.get('/predictions/:predictionId', (req, res) => {
 /**
  * Get model endpoints
  */
-router.get('/models', (req, res) => {
+router.get('/models', async (req, res) => {
   try {
-    const models = db_ops.getAll('ml_models', 100, 0).map(m => m.data);
+    const models = (await db_ops.getAll('ml_models', 100, 0)).map(m => m.data);
 
     const endpoints = models
       .filter(m => ['PRODUCTION', 'SHADOW', 'CANARY'].includes(m.status))
@@ -215,9 +215,9 @@ router.get('/models', (req, res) => {
 /**
  * Health check for model serving
  */
-router.get('/health', (req, res) => {
+router.get('/health', async (req, res) => {
   try {
-    const models = db_ops.getAll('ml_models', 100, 0).map(m => m.data);
+    const models = (await db_ops.getAll('ml_models', 100, 0)).map(m => m.data);
     const productionModels = models.filter(m => m.status === 'PRODUCTION');
     const loaderStats = modelLoader.getStats();
 
@@ -303,7 +303,7 @@ router.post('/explain', async (req, res) => {
 /**
  * Inference statistics
  */
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
     const predictions = Array.from(predictionCache.values());
 
@@ -364,7 +364,7 @@ router.get('/stats', (req, res) => {
 /**
  * Feature importance endpoint
  */
-router.get('/feature-importance', (req, res) => {
+router.get('/feature-importance', async (req, res) => {
   try {
     const importance = getFeatureImportance();
     res.json({ success: true, data: importance });

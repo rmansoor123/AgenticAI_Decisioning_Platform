@@ -47,16 +47,16 @@ export class PolicyEnforcementAgent extends BaseAgent {
     return this._thresholdManager.getThresholds(this.agentId);
   }
 
-  registerTools() {
+  async registerTools() {
     // Tool 1: Detect metrics gaming — seller gaming performance metrics via fake orders and self-purchases
     this.registerTool('detect_metrics_gaming', 'Detect seller gaming performance metrics — fake orders, self-purchases', async (params) => {
       const { sellerId } = params;
 
-      const transactions = (db_ops.getAll('transactions', 10000, 0) || [])
+      const transactions = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId);
 
-      const seller = db_ops.getById('sellers', 'seller_id', sellerId);
+      const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
       const sellerData = seller?.data || {};
 
       // Self-purchase detection — buyer IP/address matches seller
@@ -117,7 +117,7 @@ export class PolicyEnforcementAgent extends BaseAgent {
     this.registerTool('detect_search_manipulation', 'Detect keyword stuffing and review manipulation for search rank', async (params) => {
       const { sellerId } = params;
 
-      const listings = (db_ops.getAll('listings', 10000, 0) || [])
+      const listings = (await db_ops.getAll('listings', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId);
 
@@ -190,11 +190,11 @@ export class PolicyEnforcementAgent extends BaseAgent {
     this.registerTool('check_repeat_offender', 'Check seller with multiple prior violations and escalation pattern', async (params) => {
       const { sellerId } = params;
 
-      const riskEvents = (db_ops.getAll('risk_events', 10000, 0) || [])
+      const riskEvents = (await db_ops.getAll('risk_events', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId);
 
-      const cases = (db_ops.getAll('cases', 10000, 0) || [])
+      const cases = (await db_ops.getAll('cases', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId);
 
@@ -254,7 +254,7 @@ export class PolicyEnforcementAgent extends BaseAgent {
     this.registerTool('check_cross_service_correlation', 'Detect policy violations across multiple services', async (params) => {
       const { sellerId } = params;
 
-      const riskEvents = (db_ops.getAll('risk_events', 10000, 0) || [])
+      const riskEvents = (await db_ops.getAll('risk_events', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId && e.riskScore >= 40);
 
@@ -318,18 +318,18 @@ export class PolicyEnforcementAgent extends BaseAgent {
     this.registerTool('check_seller_compliance_score', 'Calculate overall compliance score based on seller history', async (params) => {
       const { sellerId } = params;
 
-      const seller = db_ops.getById('sellers', 'seller_id', sellerId);
+      const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
       const sellerData = seller?.data || {};
 
-      const riskEvents = (db_ops.getAll('risk_events', 10000, 0) || [])
+      const riskEvents = (await db_ops.getAll('risk_events', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId);
 
-      const cases = (db_ops.getAll('cases', 10000, 0) || [])
+      const cases = (await db_ops.getAll('cases', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId);
 
-      const transactions = (db_ops.getAll('transactions', 10000, 0) || [])
+      const transactions = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId);
 
@@ -392,13 +392,13 @@ export class PolicyEnforcementAgent extends BaseAgent {
     // Agentic tools
     this.registerTool('search_knowledge_base', 'Search knowledge base for similar policy violation cases', async (params) => {
       const { query, sellerId } = params;
-      const results = this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
+      const results = await this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
       return { success: true, data: { results, count: results.length } };
     });
 
     this.registerTool('retrieve_memory', 'Retrieve relevant policy enforcement patterns from long-term memory', async (params) => {
       const { context } = params;
-      const memories = this.memoryStore.queryLongTerm(this.agentId, context, 5);
+      const memories = await this.memoryStore.queryLongTerm(this.agentId, context, 5);
       return { success: true, data: { memories, count: memories.length } };
     });
   }

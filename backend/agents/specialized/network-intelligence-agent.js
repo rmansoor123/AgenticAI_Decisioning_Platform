@@ -48,12 +48,12 @@ export class NetworkIntelligenceAgent extends BaseAgent {
     return this._thresholdManager.getThresholds(this.agentId);
   }
 
-  registerTools() {
+  async registerTools() {
     // Tool 1: Detect shill ring — circular bidding patterns via shared IPs/devices
     this.registerTool('detect_shill_ring', 'Detect coordinated bidding rings via shared IPs, devices, or circular transaction patterns', async (params) => {
       const { sellerId } = params;
 
-      const allTxns = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTxns = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(r => r.data);
 
       const sellerTxns = allTxns.filter(t => t.sellerId === sellerId);
@@ -125,10 +125,10 @@ export class NetworkIntelligenceAgent extends BaseAgent {
     this.registerTool('detect_mule_network', 'Detect mule networks via shared bank accounts, addresses, or devices across sellers', async (params) => {
       const { sellerId } = params;
 
-      const seller = db_ops.getById('sellers', 'seller_id', sellerId);
+      const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
       const sellerData = seller?.data || {};
 
-      const allSellers = (db_ops.getAll('sellers', 5000, 0) || []).map(r => r.data);
+      const allSellers = (await db_ops.getAll('sellers', 5000, 0) || []).map(r => r.data);
       const otherSellers = allSellers.filter(s => s.seller_id !== sellerId);
 
       // Shared bank account
@@ -144,7 +144,7 @@ export class NetworkIntelligenceAgent extends BaseAgent {
       ) : [];
 
       // Shared device fingerprint (from ATO events or transactions)
-      const allAtoEvents = (db_ops.getAll('ato_events', 10000, 0) || []).map(r => r.data);
+      const allAtoEvents = (await db_ops.getAll('ato_events', 10000, 0) || []).map(r => r.data);
       const sellerDevices = new Set(
         allAtoEvents.filter(e => e.sellerId === sellerId).map(e => e.deviceInfo?.fingerprint).filter(Boolean)
       );
@@ -187,7 +187,7 @@ export class NetworkIntelligenceAgent extends BaseAgent {
     this.registerTool('detect_seller_collusion', 'Detect seller collusion via shared shipping origins, warehouses, or fulfillment patterns', async (params) => {
       const { sellerId } = params;
 
-      const allShipments = (db_ops.getAll('shipments', 10000, 0) || []).map(r => r.data);
+      const allShipments = (await db_ops.getAll('shipments', 10000, 0) || []).map(r => r.data);
       const sellerShipments = allShipments.filter(s => s.sellerId === sellerId);
 
       // Extract unique origin addresses/zip codes
@@ -195,7 +195,7 @@ export class NetworkIntelligenceAgent extends BaseAgent {
 
       // Find other sellers shipping from same origins
       const colludingSellers = new Set();
-      const allSellers = (db_ops.getAll('sellers', 5000, 0) || []).map(r => r.data);
+      const allSellers = (await db_ops.getAll('sellers', 5000, 0) || []).map(r => r.data);
 
       allSellers.forEach(s => {
         if (s.seller_id === sellerId) return;
@@ -207,7 +207,7 @@ export class NetworkIntelligenceAgent extends BaseAgent {
       });
 
       // Check for identical product listings across colluding sellers
-      const allListings = (db_ops.getAll('listings', 10000, 0) || []).map(r => r.data);
+      const allListings = (await db_ops.getAll('listings', 10000, 0) || []).map(r => r.data);
       const sellerListings = allListings.filter(l => l.sellerId === sellerId);
       const sellerTitles = new Set(sellerListings.map(l => (l.title || '').toLowerCase().trim()).filter(Boolean));
 
@@ -247,9 +247,9 @@ export class NetworkIntelligenceAgent extends BaseAgent {
     this.registerTool('resolve_entity_links', 'Cross-reference accounts to identify multi-account operations via shared identifiers', async (params) => {
       const { sellerId } = params;
 
-      const seller = db_ops.getById('sellers', 'seller_id', sellerId);
+      const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
       const sellerData = seller?.data || {};
-      const allSellers = (db_ops.getAll('sellers', 5000, 0) || []).map(r => r.data);
+      const allSellers = (await db_ops.getAll('sellers', 5000, 0) || []).map(r => r.data);
       const otherSellers = allSellers.filter(s => s.seller_id !== sellerId);
 
       const links = {
@@ -285,7 +285,7 @@ export class NetworkIntelligenceAgent extends BaseAgent {
       }
 
       // IP match from ATO events
-      const allAtoEvents = (db_ops.getAll('ato_events', 10000, 0) || []).map(r => r.data);
+      const allAtoEvents = (await db_ops.getAll('ato_events', 10000, 0) || []).map(r => r.data);
       const sellerIPs = new Set(allAtoEvents.filter(e => e.sellerId === sellerId).map(e => e.location?.ip).filter(Boolean));
       if (sellerIPs.size > 0) {
         const ipLinked = new Set();
@@ -340,11 +340,11 @@ export class NetworkIntelligenceAgent extends BaseAgent {
     this.registerTool('detect_dormant_reactivation', 'Detect dormant accounts reactivating in a coordinated burst pattern', async (params) => {
       const { sellerId } = params;
 
-      const seller = db_ops.getById('sellers', 'seller_id', sellerId);
+      const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
       const sellerData = seller?.data || {};
 
       // Calculate dormancy: time between account creation and latest activity
-      const allTxns = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTxns = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(r => r.data)
         .filter(r => r.sellerId === sellerId);
 
@@ -367,14 +367,14 @@ export class NetworkIntelligenceAgent extends BaseAgent {
       const recentBurst = wasDormant && recentTxns.length >= 10;
 
       // Check for coordinated reactivation — other dormant sellers reactivating around the same time
-      const allSellers = (db_ops.getAll('sellers', 5000, 0) || []).map(r => r.data);
+      const allSellers = (await db_ops.getAll('sellers', 5000, 0) || []).map(r => r.data);
       let coordinatedReactivation = 0;
 
-      allSellers.forEach(s => {
-        if (s.seller_id === sellerId) return;
+      for (const s of allSellers) {
+        if (s.seller_id === sellerId) continue;
         const sCreated = s.createdAt ? new Date(s.createdAt) : null;
-        if (!sCreated) return;
-        const sTxns = (db_ops.getAll('transactions', 10000, 0) || [])
+        if (!sCreated) continue;
+        const sTxns = (await db_ops.getAll('transactions', 10000, 0) || [])
           .map(r => r.data)
           .filter(r => r.sellerId === s.seller_id);
         const sSorted = sTxns.sort((a, b) => new Date(a.createdAt || a.timestamp) - new Date(b.createdAt || b.timestamp));
@@ -388,7 +388,7 @@ export class NetworkIntelligenceAgent extends BaseAgent {
           );
           if (sRecent.length >= 5) coordinatedReactivation++;
         }
-      });
+      }
 
       const coordinatedPattern = coordinatedReactivation >= 2;
       const dormantReactivation = wasDormant && recentBurst;
@@ -420,13 +420,13 @@ export class NetworkIntelligenceAgent extends BaseAgent {
     // Agentic tools
     this.registerTool('search_knowledge_base', 'Search knowledge base for similar network fraud cases', async (params) => {
       const { query, sellerId } = params;
-      const results = this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
+      const results = await this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
       return { success: true, data: { results, count: results.length } };
     });
 
     this.registerTool('retrieve_memory', 'Retrieve relevant network fraud patterns from long-term memory', async (params) => {
       const { context } = params;
-      const memories = this.memoryStore.queryLongTerm(this.agentId, context, 5);
+      const memories = await this.memoryStore.queryLongTerm(this.agentId, context, 5);
       return { success: true, data: { memories, count: memories.length } };
     });
   }

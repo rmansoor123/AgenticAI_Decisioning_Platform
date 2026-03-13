@@ -85,11 +85,11 @@ function createPairwiseEdges(graph, nodeIds, edgeTypeDef) {
  *
  * @returns {{ nodes: number, edges: number, edgesByType: Record<string, number> }}
  */
-export function buildFromSellers() {
+export async function buildFromSellers() {
   const graph = getGraphEngine();
 
   // -- Step 1: Load all sellers -------------------------------------------------
-  const sellerRows = db_ops.getAll('sellers', 10000, 0);
+  const sellerRows = await db_ops.getAll('sellers', 10000, 0);
   const sellers = sellerRows.map(s => s.data);
 
   // -- Step 2: Add every seller as a node ---------------------------------------

@@ -172,11 +172,11 @@ class CostTracker {
   /**
    * Flush cost data to SQLite.
    */
-  flush() {
+  async flush() {
     const allAgentCosts = this.getAllAgentCosts();
     for (const agentCost of allAgentCosts) {
       const costId = `COST-${agentCost.agentId}-${Date.now().toString(36)}`;
-      db_ops.insert('agent_costs', 'cost_id', costId, {
+      await db_ops.insert('agent_costs', 'cost_id', costId, {
         ...agentCost,
         flushedAt: new Date().toISOString()
       });

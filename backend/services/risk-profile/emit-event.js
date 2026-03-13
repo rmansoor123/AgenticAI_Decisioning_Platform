@@ -51,8 +51,8 @@ function determineActions(tier) {
   }
 }
 
-function recalculateProfile(sellerId) {
-  const allEvents = db_ops.getAll('risk_events', 100000, 0)
+async function recalculateProfile(sellerId) {
+  const allEvents = (await db_ops.getAll('risk_events', 100000, 0))
     .map(e => e.data)
     .filter(e => e.sellerId === sellerId);
 
@@ -79,7 +79,7 @@ function recalculateProfile(sellerId) {
   compositeScore = Math.min(100, Math.max(0, Math.round(compositeScore * 100) / 100));
 
   const newTier = determineTier(compositeScore);
-  const existing = db_ops.getById('seller_risk_profiles', 'seller_id', sellerId);
+  const existing = await db_ops.getById('seller_risk_profiles', 'seller_id', sellerId);
   const existingData = existing?.data;
   let effectiveTier = newTier;
 
@@ -106,15 +106,15 @@ function recalculateProfile(sellerId) {
   };
 
   if (existing) {
-    db_ops.update('seller_risk_profiles', 'seller_id', sellerId, profile);
+    await db_ops.update('seller_risk_profiles', 'seller_id', sellerId, profile);
   } else {
-    db_ops.insert('seller_risk_profiles', 'seller_id', sellerId, profile);
+    await db_ops.insert('seller_risk_profiles', 'seller_id', sellerId, profile);
   }
 
   return profile;
 }
 
-export function emitRiskEvent({ sellerId, domain, eventType, riskScore, metadata }) {
+export async function emitRiskEvent({ sellerId, domain, eventType, riskScore, metadata }) {
   try {
     const eventId = `RE-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
     const now = new Date().toISOString();
@@ -125,7 +125,7 @@ export function emitRiskEvent({ sellerId, domain, eventType, riskScore, metadata
       createdAt: now
     };
 
-    db_ops.insert('risk_events', 'event_id', eventId, event);
+    await db_ops.insert('risk_events', 'event_id', eventId, event);
 
     // Fire-and-forget: push to event bus for analytics ingestion
     try {
@@ -134,7 +134,7 @@ export function emitRiskEvent({ sellerId, domain, eventType, riskScore, metadata
       }).catch(() => {});
     } catch (_) { /* analytics ingestion is best-effort */ }
 
-    recalculateProfile(sellerId);
+    await recalculateProfile(sellerId);
     return event;
   } catch (error) {
     console.error(`[RiskProfile] Failed to emit event for ${sellerId}:`, error.message);

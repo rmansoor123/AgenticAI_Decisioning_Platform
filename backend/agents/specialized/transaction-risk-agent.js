@@ -47,12 +47,12 @@ export class TransactionRiskAgent extends BaseAgent {
     return this._thresholdManager.getThresholds(this.agentId);
   }
 
-  registerTools() {
+  async registerTools() {
     // Tool 1: Check transaction velocity for a seller in 1h and 24h windows
     this.registerTool('check_transaction_velocity', 'Count transactions in 1h/24h windows and detect checkout bursts', async (params) => {
       const { sellerId } = params;
 
-      const allTxns = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTxns = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(r => r.data)
         .filter(r => r.sellerId === sellerId);
 
@@ -93,7 +93,7 @@ export class TransactionRiskAgent extends BaseAgent {
     this.registerTool('detect_shill_bidding', 'Check if buyer and seller share IPs, devices, or accounts suggesting collusion', async (params) => {
       const { sellerId, buyerId } = params;
 
-      const allTxns = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTxns = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(r => r.data);
 
       const sellerTxns = allTxns.filter(t => t.sellerId === sellerId);
@@ -138,7 +138,7 @@ export class TransactionRiskAgent extends BaseAgent {
     this.registerTool('check_wash_trading', 'Detect circular transaction patterns where funds cycle between accounts', async (params) => {
       const { sellerId } = params;
 
-      const allTxns = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTxns = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(r => r.data)
         .filter(r => (Date.now() - new Date(r.createdAt || r.timestamp)) < 30 * 24 * 60 * 60 * 1000);
 
@@ -184,7 +184,7 @@ export class TransactionRiskAgent extends BaseAgent {
     this.registerTool('detect_off_platform_diversion', 'Check for email addresses, phone numbers, or URLs in transaction messages', async (params) => {
       const { sellerId } = params;
 
-      const allTxns = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTxns = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(r => r.data)
         .filter(r => r.sellerId === sellerId);
 
@@ -231,7 +231,7 @@ export class TransactionRiskAgent extends BaseAgent {
     this.registerTool('check_gift_card_laundering', 'Detect high-value gift card purchases and rapid redemption patterns', async (params) => {
       const { sellerId } = params;
 
-      const allTxns = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTxns = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(r => r.data)
         .filter(r => r.sellerId === sellerId);
 
@@ -278,13 +278,13 @@ export class TransactionRiskAgent extends BaseAgent {
     // Agentic tools
     this.registerTool('search_knowledge_base', 'Search knowledge base for similar transaction fraud cases', async (params) => {
       const { query, sellerId } = params;
-      const results = this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
+      const results = await this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
       return { success: true, data: { results, count: results.length } };
     });
 
     this.registerTool('retrieve_memory', 'Retrieve relevant transaction fraud patterns from long-term memory', async (params) => {
       const { context } = params;
-      const memories = this.memoryStore.queryLongTerm(this.agentId, context, 5);
+      const memories = await this.memoryStore.queryLongTerm(this.agentId, context, 5);
       return { success: true, data: { memories, count: memories.length } };
     });
   }

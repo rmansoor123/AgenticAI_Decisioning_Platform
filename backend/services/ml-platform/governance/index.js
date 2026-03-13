@@ -5,11 +5,11 @@ import { generateMLModel } from '../../../shared/synthetic-data/generators.js';
 const router = express.Router();
 
 // Get all models (model registry)
-router.get('/models', (req, res) => {
+router.get('/models', async (req, res) => {
   try {
     const { limit = 50, status, type } = req.query;
 
-    let models = db_ops.getAll('ml_models', parseInt(limit), 0);
+    let models = await db_ops.getAll('ml_models', parseInt(limit), 0);
     models = models.map(m => m.data);
 
     if (status) models = models.filter(m => m.status === status);
@@ -18,7 +18,7 @@ router.get('/models', (req, res) => {
     res.json({
       success: true,
       data: models,
-      total: db_ops.count('ml_models')
+      total: await db_ops.count('ml_models')
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -26,9 +26,9 @@ router.get('/models', (req, res) => {
 });
 
 // Get model by ID
-router.get('/models/:modelId', (req, res) => {
+router.get('/models/:modelId', async (req, res) => {
   try {
-    const model = db_ops.getById('ml_models', 'model_id', req.params.modelId);
+    const model = await db_ops.getById('ml_models', 'model_id', req.params.modelId);
     if (!model) {
       return res.status(404).json({ success: false, error: 'Model not found' });
     }
@@ -39,13 +39,13 @@ router.get('/models/:modelId', (req, res) => {
 });
 
 // Register new model
-router.post('/models', (req, res) => {
+router.post('/models', async (req, res) => {
   try {
     const modelData = req.body.modelId ? req.body : generateMLModel();
     modelData.registeredAt = new Date().toISOString();
     modelData.status = modelData.status || 'TRAINING';
 
-    db_ops.insert('ml_models', 'model_id', modelData.modelId, modelData);
+    await db_ops.insert('ml_models', 'model_id', modelData.modelId, modelData);
 
     res.status(201).json({ success: true, data: modelData });
   } catch (error) {
@@ -54,10 +54,10 @@ router.post('/models', (req, res) => {
 });
 
 // Update model status (promote/demote)
-router.patch('/models/:modelId/status', (req, res) => {
+router.patch('/models/:modelId/status', async (req, res) => {
   try {
     const { status, reason, approvedBy } = req.body;
-    const existing = db_ops.getById('ml_models', 'model_id', req.params.modelId);
+    const existing = await db_ops.getById('ml_models', 'model_id', req.params.modelId);
 
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Model not found' });
@@ -98,7 +98,7 @@ router.patch('/models/:modelId/status', (req, res) => {
       updated.deployedAt = new Date().toISOString();
     }
 
-    db_ops.update('ml_models', 'model_id', req.params.modelId, updated);
+    await db_ops.update('ml_models', 'model_id', req.params.modelId, updated);
 
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -107,9 +107,9 @@ router.patch('/models/:modelId/status', (req, res) => {
 });
 
 // Get model versions
-router.get('/models/:modelId/versions', (req, res) => {
+router.get('/models/:modelId/versions', async (req, res) => {
   try {
-    const models = db_ops.getAll('ml_models', 1000, 0).map(m => m.data);
+    const models = (await db_ops.getAll('ml_models', 1000, 0)).map(m => m.data);
     const model = models.find(m => m.modelId === req.params.modelId);
 
     if (!model) {
@@ -128,9 +128,9 @@ router.get('/models/:modelId/versions', (req, res) => {
 });
 
 // Get model lineage
-router.get('/models/:modelId/lineage', (req, res) => {
+router.get('/models/:modelId/lineage', async (req, res) => {
   try {
-    const model = db_ops.getById('ml_models', 'model_id', req.params.modelId);
+    const model = await db_ops.getById('ml_models', 'model_id', req.params.modelId);
     if (!model) {
       return res.status(404).json({ success: false, error: 'Model not found' });
     }
@@ -196,9 +196,9 @@ router.get('/models/:modelId/lineage', (req, res) => {
 });
 
 // Get model approvals/audit log
-router.get('/models/:modelId/audit', (req, res) => {
+router.get('/models/:modelId/audit', async (req, res) => {
   try {
-    const model = db_ops.getById('ml_models', 'model_id', req.params.modelId);
+    const model = await db_ops.getById('ml_models', 'model_id', req.params.modelId);
     if (!model) {
       return res.status(404).json({ success: false, error: 'Model not found' });
     }
@@ -225,12 +225,12 @@ router.get('/models/:modelId/audit', (req, res) => {
 });
 
 // Compare models
-router.post('/compare', (req, res) => {
+router.post('/compare', async (req, res) => {
   try {
     const { modelIds } = req.body;
 
-    const models = modelIds.map(id => {
-      const model = db_ops.getById('ml_models', 'model_id', id);
+    const models = modelIds.map(async id => {
+      const model = await db_ops.getById('ml_models', 'model_id', id);
       return model?.data;
     }).filter(Boolean);
 
@@ -273,9 +273,9 @@ router.post('/compare', (req, res) => {
 });
 
 // Get governance statistics
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
-    const models = db_ops.getAll('ml_models', 1000, 0).map(m => m.data);
+    const models = (await db_ops.getAll('ml_models', 1000, 0)).map(m => m.data);
 
     const stats = {
       total: models.length,

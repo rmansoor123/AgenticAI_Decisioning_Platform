@@ -8,11 +8,11 @@ import { getPayoutRiskAgent } from '../../../agents/specialized/payout-risk-agen
 const router = express.Router();
 
 // Get all payouts
-router.get('/payouts', (req, res) => {
+router.get('/payouts', async (req, res) => {
   try {
     const { limit = 50, offset = 0, sellerId, status } = req.query;
 
-    let payouts = db_ops.getAll('payouts', parseInt(limit), parseInt(offset));
+    let payouts = await db_ops.getAll('payouts', parseInt(limit), parseInt(offset));
     payouts = payouts.map(p => p.data);
 
     if (sellerId) payouts = payouts.filter(p => p.sellerId === sellerId);
@@ -24,7 +24,7 @@ router.get('/payouts', (req, res) => {
       pagination: {
         limit: parseInt(limit),
         offset: parseInt(offset),
-        total: db_ops.count('payouts')
+        total: await db_ops.count('payouts')
       }
     });
   } catch (error) {
@@ -33,9 +33,9 @@ router.get('/payouts', (req, res) => {
 });
 
 // Get payout by ID
-router.get('/payouts/:payoutId', (req, res) => {
+router.get('/payouts/:payoutId', async (req, res) => {
   try {
-    const payout = db_ops.getById('payouts', 'payout_id', req.params.payoutId);
+    const payout = await db_ops.getById('payouts', 'payout_id', req.params.payoutId);
     if (!payout) {
       return res.status(404).json({ success: false, error: 'Payout not found' });
     }
@@ -51,7 +51,7 @@ router.post('/payouts', async (req, res) => {
     const { sellerId, amount, method } = req.body;
 
     // Get seller info
-    const seller = db_ops.getById('sellers', 'seller_id', sellerId);
+    const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
     if (!seller) {
       return res.status(404).json({ success: false, error: 'Seller not found' });
     }
@@ -79,7 +79,7 @@ router.post('/payouts', async (req, res) => {
       createdAt: new Date().toISOString()
     };
 
-    db_ops.insert('payouts', 'payout_id', payout.payoutId, payout);
+    await db_ops.insert('payouts', 'payout_id', payout.payoutId, payout);
 
     // Return HTTP 202 immediately
     res.status(202).json({
@@ -93,8 +93,7 @@ router.post('/payouts', async (req, res) => {
     // Fire-and-forget: run PayoutRiskAgent asynchronously
     console.log(`[PayoutService] Evaluating payout: ${payoutId} (correlation: ${correlationId})`);
 
-    const recentPayouts = db_ops.getAll('payouts', 1000, 0)
-      .map(p => p.data)
+    const recentPayouts = (await db_ops.getAll('payouts', 1000, 0)).map(p => p.data)
       .filter(p => p.sellerId === sellerId);
 
     const agent = getPayoutRiskAgent();
@@ -112,7 +111,7 @@ router.post('/payouts', async (req, res) => {
       evaluationType: 'payout_risk',
       _correlationId: correlationId
     })
-      .then(agentResult => {
+      .then(async agentResult => {
         const rec = agentResult.result?.recommendation || agentResult.result?.decision;
         const decision = rec?.action || 'HOLD';
         const riskScore = agentResult.result?.overallRisk?.score ?? 50;
@@ -126,7 +125,7 @@ router.post('/payouts', async (req, res) => {
         else payoutStatus = 'ON_HOLD';
 
         // Update payout with final decision
-        db_ops.update('payouts', 'payout_id', payoutId, {
+        await db_ops.update('payouts', 'payout_id', payoutId, {
           ...payout,
           status: payoutStatus,
           riskHold: payoutStatus === 'ON_HOLD',
@@ -150,7 +149,7 @@ router.post('/payouts', async (req, res) => {
             status: 'OPEN', sellerId, entityId: payoutId, entityType: 'PAYOUT',
             decision, riskScore, reasoning, agentId, createdAt: new Date().toISOString()
           };
-          db_ops.insert('cases', 'case_id', caseId, caseData);
+          await db_ops.insert('cases', 'case_id', caseId, caseData);
           triageCase(caseData).catch(() => {});
         }
 
@@ -166,10 +165,10 @@ router.post('/payouts', async (req, res) => {
 
         console.log(`[PayoutService] Completed: ${payoutId} → ${decision} (risk: ${riskScore})`);
       })
-      .catch(error => {
+      .catch(async error => {
         console.error(`[PayoutService] Agent error for ${payoutId}:`, error.message);
         // Default to HOLD on error
-        db_ops.update('payouts', 'payout_id', payoutId, {
+        await db_ops.update('payouts', 'payout_id', payoutId, {
           ...payout,
           status: 'ON_HOLD',
           riskHold: true,
@@ -191,10 +190,10 @@ router.post('/payouts', async (req, res) => {
 });
 
 // Update payout status
-router.patch('/payouts/:payoutId/status', (req, res) => {
+router.patch('/payouts/:payoutId/status', async (req, res) => {
   try {
     const { status, reason } = req.body;
-    const existing = db_ops.getById('payouts', 'payout_id', req.params.payoutId);
+    const existing = await db_ops.getById('payouts', 'payout_id', req.params.payoutId);
 
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Payout not found' });
@@ -213,7 +212,7 @@ router.patch('/payouts/:payoutId/status', (req, res) => {
       updated.completedAt = new Date().toISOString();
     }
 
-    db_ops.update('payouts', 'payout_id', req.params.payoutId, updated);
+    await db_ops.update('payouts', 'payout_id', req.params.payoutId, updated);
 
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -222,10 +221,10 @@ router.patch('/payouts/:payoutId/status', (req, res) => {
 });
 
 // Release held payout
-router.post('/payouts/:payoutId/release', (req, res) => {
+router.post('/payouts/:payoutId/release', async (req, res) => {
   try {
     const { approvedBy, notes } = req.body;
-    const existing = db_ops.getById('payouts', 'payout_id', req.params.payoutId);
+    const existing = await db_ops.getById('payouts', 'payout_id', req.params.payoutId);
 
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Payout not found' });
@@ -246,7 +245,7 @@ router.post('/payouts/:payoutId/release', (req, res) => {
       }
     };
 
-    db_ops.update('payouts', 'payout_id', req.params.payoutId, updated);
+    await db_ops.update('payouts', 'payout_id', req.params.payoutId, updated);
 
     // Emit positive risk event for payout release
     emitRiskEvent({
@@ -261,11 +260,10 @@ router.post('/payouts/:payoutId/release', (req, res) => {
 });
 
 // Get payouts for a seller
-router.get('/sellers/:sellerId/payouts', (req, res) => {
+router.get('/sellers/:sellerId/payouts', async (req, res) => {
   try {
     const { limit = 50 } = req.query;
-    const payouts = db_ops.getAll('payouts', 1000, 0)
-      .map(p => p.data)
+    const payouts = (await db_ops.getAll('payouts', 1000, 0)).map(p => p.data)
       .filter(p => p.sellerId === req.params.sellerId)
       .slice(0, parseInt(limit));
 
@@ -276,16 +274,14 @@ router.get('/sellers/:sellerId/payouts', (req, res) => {
 });
 
 // Get seller payout balance
-router.get('/sellers/:sellerId/balance', (req, res) => {
+router.get('/sellers/:sellerId/balance', async (req, res) => {
   try {
     const sellerId = req.params.sellerId;
 
-    const transactions = db_ops.getAll('transactions', 10000, 0)
-      .map(t => t.data)
+    const transactions = (await db_ops.getAll('transactions', 10000, 0)).map(t => t.data)
       .filter(t => t.sellerId === sellerId);
 
-    const payouts = db_ops.getAll('payouts', 1000, 0)
-      .map(p => p.data)
+    const payouts = (await db_ops.getAll('payouts', 1000, 0)).map(p => p.data)
       .filter(p => p.sellerId === sellerId);
 
     const salesTotal = transactions
@@ -326,9 +322,9 @@ router.get('/sellers/:sellerId/balance', (req, res) => {
 });
 
 // Payout statistics
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
-    const allPayouts = db_ops.getAll('payouts', 10000, 0).map(p => p.data);
+    const allPayouts = (await db_ops.getAll('payouts', 10000, 0)).map(p => p.data);
 
     const stats = {
       total: allPayouts.length,
@@ -385,7 +381,7 @@ async function triageCase(caseData) {
       if (updatedPriority) updates.priority = updatedPriority;
       if (assignedTeam) updates.assignedTeam = assignedTeam;
       updates.triageResult = { agentId: 'ALERT_TRIAGE', evaluatedAt: new Date().toISOString() };
-      db_ops.update('cases', 'case_id', caseData.caseId, { ...caseData, ...updates });
+      await db_ops.update('cases', 'case_id', caseData.caseId, { ...caseData, ...updates });
     }
   } catch (err) {
     console.warn(`[PayoutService] Case triage failed for ${caseData.caseId}:`, err.message);

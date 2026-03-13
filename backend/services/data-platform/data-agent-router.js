@@ -21,10 +21,10 @@ router.post('/reason', (req, res) => {
 
   // Fire and forget
   agent.reason(req.body, { correlationId })
-    .then(result => {
+    .then(async result => {
       console.log(`[DataAgent] Completed ${correlationId}`);
     })
-    .catch(err => {
+    .catch(async err => {
       console.error(`[DataAgent] Error ${correlationId}:`, err.message);
     });
 

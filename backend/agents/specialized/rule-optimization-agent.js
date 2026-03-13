@@ -40,7 +40,7 @@ export class RuleOptimizationAgent extends BaseAgent {
   registerTools() {
     // Tool: Get all rules with performance metrics
     this.registerTool('get_rules_performance', 'Retrieve rules with their performance metrics', async (params) => {
-      const rules = db_ops.getAll('rules', 100, 0);
+      const rules = await db_ops.getAll('rules', 100, 0);
       return {
         success: true,
         data: rules.map(r => ({

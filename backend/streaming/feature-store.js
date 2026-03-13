@@ -184,7 +184,7 @@ class FeatureStore {
    * Uses a composite key of entityId:group for the latest version, and
    * entityId:group:timestamp for point-in-time lookups.
    */
-  _writeToOfflineStore(entityId, group, features, timestamp) {
+  async _writeToOfflineStore(entityId, group, features, timestamp) {
     const data = {
       entityId,
       group,
@@ -200,13 +200,13 @@ class FeatureStore {
     const pitKey = this._offlineKey(entityId, group, timestamp);
 
     try {
-      db_ops.insert('feature_store', 'feature_key', latestKey, data);
+      await db_ops.insert('feature_store', 'feature_key', latestKey, data);
     } catch (err) {
       // Table may not exist — silently degrade
     }
 
     try {
-      db_ops.insert('feature_store', 'feature_key', pitKey, data);
+      await db_ops.insert('feature_store', 'feature_key', pitKey, data);
     } catch (err) {
       // Table may not exist — silently degrade
     }
@@ -223,13 +223,13 @@ class FeatureStore {
    * @param {number} timestamp  - Unix epoch milliseconds for the lookup.
    * @returns {object|null}     - The features payload or null.
    */
-  getFeaturesAsOf(entityId, group, timestamp) {
+  async getFeaturesAsOf(entityId, group, timestamp) {
     this.stats.reads++;
 
     // Attempt an exact point-in-time hit first
     const exactKey = this._offlineKey(entityId, group, timestamp);
     try {
-      const exactRow = db_ops.getById('feature_store', 'feature_key', exactKey);
+      const exactRow = await db_ops.getById('feature_store', 'feature_key', exactKey);
       if (exactRow && exactRow.data) {
         this.stats.hits++;
         if (this.stats.freshness[group]) {
@@ -244,7 +244,7 @@ class FeatureStore {
     // Fallback: scan the latest key and verify temporal validity
     const latestKey = this._offlineKey(entityId, group);
     try {
-      const latestRow = db_ops.getById('feature_store', 'feature_key', latestKey);
+      const latestRow = await db_ops.getById('feature_store', 'feature_key', latestKey);
       if (latestRow && latestRow.data && latestRow.data.updatedAt <= timestamp) {
         this.stats.hits++;
         if (this.stats.freshness[group]) {

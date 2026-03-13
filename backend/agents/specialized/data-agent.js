@@ -123,15 +123,15 @@ export class DataAgent extends BaseAgent {
       'Read pipeline_runs and dead_letter_queue tables for pipeline status',
       async () => {
         try {
-          const recentRuns = db_ops.raw(
+          const recentRuns = (await db_ops.raw(
             'SELECT * FROM pipeline_runs ORDER BY started_at DESC LIMIT 20',
             []
-          ).map(r => ({
+          )).map(r => ({
             ...r,
             data: typeof r.data === 'string' ? JSON.parse(r.data) : r.data
           }));
 
-          const dlqCount = db_ops.count('dead_letter_queue');
+          const dlqCount = await db_ops.count('dead_letter_queue');
           const recentDLQ = db_ops.raw(
             'SELECT * FROM dead_letter_queue ORDER BY created_at DESC LIMIT 10',
             []
@@ -178,7 +178,7 @@ export class DataAgent extends BaseAgent {
         const { type, tag, search, limit = 50 } = params || {};
 
         try {
-          let datasets = db_ops.getAll('datasets', parseInt(limit), 0).map(d => d.data || d);
+          let datasets = (await db_ops.getAll('datasets', parseInt(limit), 0)).map(d => d.data || d);
 
           if (type) datasets = datasets.filter(d => d.type === type);
           if (tag) datasets = datasets.filter(d => d.tags?.includes(tag));
@@ -331,10 +331,10 @@ export class DataAgent extends BaseAgent {
                 errorsLastHour: recentDLQ[0]?.count || 0
               },
               tables: {
-                transactions: db_ops.count('transactions'),
-                sellers: db_ops.count('sellers'),
-                payouts: db_ops.count('payouts'),
-                listings: db_ops.count('listings')
+                transactions: await db_ops.count('transactions'),
+                sellers: await db_ops.count('sellers'),
+                payouts: await db_ops.count('payouts'),
+                listings: await db_ops.count('listings')
               }
             }
           };

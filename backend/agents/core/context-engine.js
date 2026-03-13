@@ -103,7 +103,7 @@ class ContextEngine {
     // 3. Short-term memory
     if (sessionId) {
       try {
-        const recentMemory = this.memoryStore.getShortTerm(agentId, sessionId);
+        const recentMemory = await this.memoryStore.getShortTerm(agentId, sessionId);
         if (recentMemory.length > 0) {
           const memoryText = this.promptBuilder.formatMemoryEntries(recentMemory, 5);
           sections.shortTermMemory = this.promptBuilder.truncateToTokenBudget(memoryText, SOURCE_BUDGETS.shortTermMemory.maxTokens);
@@ -174,7 +174,7 @@ class ContextEngine {
           // Sparse: local TF-IDF search
           (async () => {
             try {
-              const results = this.knowledgeBase.searchKnowledge(namespace, sq, selfQueryFilters, topK * 2);
+              const results = await this.knowledgeBase.searchKnowledge(namespace, sq, selfQueryFilters, topK * 2);
               return results.map((r, i) => ({
                 ...r,
                 _rank: i + 1,
@@ -275,7 +275,7 @@ class ContextEngine {
 
     // 5. Long-term memory
     try {
-      const longTermResults = this.memoryStore.queryLongTerm(agentId, queryText, 5);
+      const longTermResults = await this.memoryStore.queryLongTerm(agentId, queryText, 5);
       if (longTermResults.length > 0) {
         const ltmText = this.promptBuilder.formatMemoryEntries(longTermResults, 5);
         sections.longTermMemory = this.promptBuilder.truncateToTokenBudget(ltmText, SOURCE_BUDGETS.longTermMemory.maxTokens);
@@ -306,7 +306,7 @@ class ContextEngine {
     // 7. Cross-agent context (seller risk profile + recent agent decisions across all domains)
     if (sellerId) {
       try {
-        const riskProfile = db_ops.getById('seller_risk_profiles', 'seller_id', sellerId);
+        const riskProfile = await db_ops.getById('seller_risk_profiles', 'seller_id', sellerId);
         if (riskProfile) {
           const p = typeof riskProfile.data === 'string' ? JSON.parse(riskProfile.data) : (riskProfile.data || riskProfile);
           const compositeScore = Math.round(p.compositeScore || p.composite_score || 0);
@@ -328,7 +328,7 @@ class ContextEngine {
           // Query last 5 risk events for this seller
           let recentDecisions = '';
           try {
-            const eventsRows = db_ops.query(
+            const eventsRows = await db_ops.query(
               'risk_events',
               "json_extract(data,'$.sellerId') = ?",
               [sellerId],

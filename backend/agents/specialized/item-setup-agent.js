@@ -40,7 +40,7 @@ export class ItemSetupAgent extends BaseAgent {
 
   get autonomyThresholds() { return this._thresholdManager.getThresholds(this.agentId); }
 
-  registerTools() {
+  async registerTools() {
     this.registerTool('check_restricted_category', 'Check for prohibited/restricted item categories', async (params) => {
       const { category } = params;
       const prohibited = ['WEAPONS', 'DRUGS', 'COUNTERFEIT', 'STOLEN_GOODS', 'HUMAN_ORGANS'];
@@ -77,7 +77,7 @@ export class ItemSetupAgent extends BaseAgent {
       const { title, sellerId } = params;
       if (!title) return { success: true, data: { duplicateFound: false, riskScore: 0, riskLevel: 'LOW' } };
 
-      const removedItems = (db_ops.getAll('item_setups', 10000, 0) || [])
+      const removedItems = (await db_ops.getAll('item_setups', 10000, 0) || [])
         .map(r => r.data)
         .filter(r => r.status === 'REJECTED' || r.status === 'REMOVED');
 
@@ -125,7 +125,7 @@ export class ItemSetupAgent extends BaseAgent {
 
     this.registerTool('get_seller_item_pattern', 'Analyze item listing velocity and category diversity', async (params) => {
       const { sellerId } = params;
-      const items = (db_ops.getAll('item_setups', 10000, 0) || [])
+      const items = (await db_ops.getAll('item_setups', 10000, 0) || [])
         .map(r => r.data).filter(r => r.sellerId === sellerId);
       const now = Date.now();
       const last24h = items.filter(i => now - new Date(i.createdAt) < 86400000).length;
@@ -148,13 +148,13 @@ export class ItemSetupAgent extends BaseAgent {
 
     this.registerTool('search_knowledge_base', 'Search KB for similar item setup cases', async (params) => {
       const { query, sellerId } = params;
-      const results = this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
+      const results = await this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
       return { success: true, data: { results, count: results.length } };
     });
 
     this.registerTool('retrieve_memory', 'Retrieve item setup patterns from memory', async (params) => {
       const { context } = params;
-      const memories = this.memoryStore.queryLongTerm(this.agentId, context, 5);
+      const memories = await this.memoryStore.queryLongTerm(this.agentId, context, 5);
       return { success: true, data: { memories, count: memories.length } };
     });
   }

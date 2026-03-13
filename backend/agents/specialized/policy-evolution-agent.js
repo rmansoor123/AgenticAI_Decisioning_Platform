@@ -69,7 +69,7 @@ export class PolicyEvolutionAgent extends AutonomousAgent {
       'Query recent transactions where fraud was missed (APPROVED but high risk)',
       async () => {
         try {
-          const transactions = db_ops.getAll('transactions', 500, 0);
+          const transactions = await db_ops.getAll('transactions', 500, 0);
           const falseNegatives = transactions
             .filter(t => {
               const data = t.data || t;
@@ -104,7 +104,7 @@ export class PolicyEvolutionAgent extends AutonomousAgent {
       'Query recent transactions that were incorrectly blocked (BLOCKED/REVIEW but low risk)',
       async () => {
         try {
-          const transactions = db_ops.getAll('transactions', 500, 0);
+          const transactions = await db_ops.getAll('transactions', 500, 0);
           const falsePositives = transactions
             .filter(t => {
               const data = t.data || t;
@@ -139,7 +139,7 @@ export class PolicyEvolutionAgent extends AutonomousAgent {
       'Get all rules with performance stats sorted by false positive rate descending',
       async () => {
         try {
-          const rules = db_ops.getAll('rules', 500, 0);
+          const rules = await db_ops.getAll('rules', 500, 0);
           const rulePerformance = rules
             .map(r => {
               const data = r.data || r;
@@ -327,7 +327,7 @@ export class PolicyEvolutionAgent extends AutonomousAgent {
         }
 
         try {
-          const transactions = db_ops.getAll('transactions', 500, 0);
+          const transactions = await db_ops.getAll('transactions', 500, 0);
           let wouldTrigger = 0;
           let wouldBlock = 0;
           let truePositiveEstimate = 0;
@@ -400,7 +400,7 @@ export class PolicyEvolutionAgent extends AutonomousAgent {
         };
 
         // Persist to database
-        db_ops.insert('rules', 'rule_id', ruleId, shadowRule);
+        await db_ops.insert('rules', 'rule_id', ruleId, shadowRule);
 
         // Track in pipeline
         this.rulePipeline.set(ruleId, {
@@ -441,7 +441,7 @@ export class PolicyEvolutionAgent extends AutonomousAgent {
         let estimatedCatchRate = 0;
         let estimatedFPRate = 0;
         try {
-          const transactions = db_ops.getAll('transactions', 200, 0);
+          const transactions = await db_ops.getAll('transactions', 200, 0);
           let triggers = 0;
           let truePositives = 0;
 
@@ -496,7 +496,7 @@ export class PolicyEvolutionAgent extends AutonomousAgent {
         const pipelineEntry = this.rulePipeline.get(ruleId);
 
         // Update rule in database
-        const existing = db_ops.getById('rules', 'rule_id', ruleId);
+        const existing = await db_ops.getById('rules', 'rule_id', ruleId);
         const ruleData = existing?.data || pipelineEntry?.rule || {};
         const updatedRule = {
           ...ruleData,
@@ -504,7 +504,7 @@ export class PolicyEvolutionAgent extends AutonomousAgent {
           promotedAt: new Date().toISOString()
         };
 
-        db_ops.update('rules', 'rule_id', ruleId, updatedRule);
+        await db_ops.update('rules', 'rule_id', ruleId, updatedRule);
 
         // Update pipeline tracking
         if (pipelineEntry) {
@@ -537,7 +537,7 @@ export class PolicyEvolutionAgent extends AutonomousAgent {
         const deprecationReason = reason || 'Deprecated by Policy Evolution Agent';
 
         // Update rule in database
-        const existing = db_ops.getById('rules', 'rule_id', ruleId);
+        const existing = await db_ops.getById('rules', 'rule_id', ruleId);
         const ruleData = existing?.data || {};
         const updatedRule = {
           ...ruleData,
@@ -546,7 +546,7 @@ export class PolicyEvolutionAgent extends AutonomousAgent {
           deprecationReason
         };
 
-        db_ops.update('rules', 'rule_id', ruleId, updatedRule);
+        await db_ops.update('rules', 'rule_id', ruleId, updatedRule);
 
         // Update pipeline tracking
         const pipelineEntry = this.rulePipeline.get(ruleId);

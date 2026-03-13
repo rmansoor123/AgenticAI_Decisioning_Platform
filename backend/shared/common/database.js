@@ -217,9 +217,20 @@ function getIdField(table) {
 }
 
 /**
- * Database operations - works with both SQLite and in-memory storage
+ * Allow the database-factory to inject the active backend (e.g. Postgres).
+ * When set, all db_ops calls delegate to the factory backend.
  */
-export const db_ops = {
+let _factoryBackend = null;
+export function setFactoryBackend(backend) {
+  _factoryBackend = backend;
+  console.log(`[database] Factory backend injected: ${backend ? 'active' : 'none'}`);
+}
+
+/**
+ * Database operations - works with both SQLite and in-memory storage.
+ * If a factory backend (Postgres) has been injected, delegates to it.
+ */
+const _sqlite_db_ops = {
   /**
    * Insert a record
    */
@@ -547,9 +558,9 @@ export const db_ops = {
     ];
 
     const stats = { usingSqlite };
-    tables.forEach(table => {
+    tables.forEach(async table => {
       try {
-        stats[table] = db_ops.count(table);
+        stats[table] = await db_ops.count(table);
       } catch {
         stats[table] = 0;
       }
@@ -558,6 +569,19 @@ export const db_ops = {
     return stats;
   }
 };
+
+/**
+ * Proxy that delegates to Postgres (if injected) or falls back to SQLite/in-memory.
+ * This lets all services keep `import { db_ops } from './database.js'` unchanged.
+ */
+export const db_ops = new Proxy(_sqlite_db_ops, {
+  get(target, prop) {
+    if (_factoryBackend && typeof _factoryBackend[prop] === 'function') {
+      return _factoryBackend[prop].bind(_factoryBackend);
+    }
+    return target[prop];
+  }
+});
 
 // Handle process exit
 process.on('exit', closeDatabase);

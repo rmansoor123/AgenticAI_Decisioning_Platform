@@ -47,11 +47,11 @@ export class ShippingRiskAgent extends BaseAgent {
     return this._thresholdManager.getThresholds(this.agentId);
   }
 
-  registerTools() {
+  async registerTools() {
     // Tool 1: Check address mismatch
     this.registerTool('check_address_mismatch', 'Check destination vs seller registered address', async (params) => {
       const { sellerId, destinationAddress } = params;
-      const seller = db_ops.getById('sellers', 'seller_id', sellerId);
+      const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
       const sellerCountry = seller?.data?.country || seller?.data?.address?.country || 'US';
       const destCountry = destinationAddress?.country || 'US';
       const countryMismatch = sellerCountry !== destCountry;
@@ -88,7 +88,7 @@ export class ShippingRiskAgent extends BaseAgent {
     // Tool 3: Check shipping velocity
     this.registerTool('check_shipping_velocity', 'Check shipment count in 1h/24h/7d windows', async (params) => {
       const { sellerId } = params;
-      const shipments = (db_ops.getAll('shipments', 10000, 0) || [])
+      const shipments = (await db_ops.getAll('shipments', 10000, 0) || [])
         .map(s => s.data).filter(s => s.sellerId === sellerId);
       const now = Date.now();
       const counts = {
@@ -137,7 +137,7 @@ export class ShippingRiskAgent extends BaseAgent {
       const trustedCarriers = ['UPS', 'FEDEX', 'USPS', 'DHL'];
       const isTrusted = trustedCarriers.includes((carrier || '').toUpperCase());
 
-      const sellerShipments = (db_ops.getAll('shipments', 10000, 0) || [])
+      const sellerShipments = (await db_ops.getAll('shipments', 10000, 0) || [])
         .map(s => s.data).filter(s => s.sellerId === sellerId);
       const withTracking = sellerShipments.filter(s => s.trackingNumber).length;
       const trackingRate = sellerShipments.length > 0 ? withTracking / sellerShipments.length : 1;
@@ -155,13 +155,13 @@ export class ShippingRiskAgent extends BaseAgent {
 
     this.registerTool('search_knowledge_base', 'Search knowledge base for similar shipping cases', async (params) => {
       const { query, sellerId } = params;
-      const results = this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
+      const results = await this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
       return { success: true, data: { results, count: results.length } };
     });
 
     this.registerTool('retrieve_memory', 'Retrieve shipping fraud patterns from memory', async (params) => {
       const { context } = params;
-      const memories = this.memoryStore.queryLongTerm(this.agentId, context, 5);
+      const memories = await this.memoryStore.queryLongTerm(this.agentId, context, 5);
       return { success: true, data: { memories, count: memories.length } };
     });
   }

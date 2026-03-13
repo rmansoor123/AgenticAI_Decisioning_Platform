@@ -9,10 +9,10 @@ const COLLECTION = 'profile_updates';
 const ID_FIELD = 'update_id';
 
 // GET / — List with filters/pagination (includes updateType filter)
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { limit = 50, offset = 0, sellerId, status, updateType } = req.query;
-    let records = db_ops.getAll(COLLECTION, parseInt(limit), parseInt(offset)).map(r => r.data);
+    let records = (await db_ops.getAll(COLLECTION, parseInt(limit), parseInt(offset))).map(r => r.data);
     if (sellerId) records = records.filter(r => r.sellerId === sellerId);
     if (status) records = records.filter(r => r.status === status);
     if (updateType) records = records.filter(r => r.updateType === updateType);
@@ -22,7 +22,7 @@ router.get('/', (req, res) => {
       pagination: {
         limit: parseInt(limit),
         offset: parseInt(offset),
-        total: db_ops.count(COLLECTION)
+        total: await db_ops.count(COLLECTION)
       }
     });
   } catch (error) {
@@ -31,9 +31,9 @@ router.get('/', (req, res) => {
 });
 
 // GET /stats — Domain statistics
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
-    const all = db_ops.getAll(COLLECTION, 10000, 0).map(r => r.data);
+    const all = (await db_ops.getAll(COLLECTION, 10000, 0)).map(r => r.data);
     const byStatus = {};
     const byType = {};
     let flagged = 0;
@@ -55,10 +55,9 @@ router.get('/stats', (req, res) => {
 });
 
 // GET /:id — Get by ID
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
-    const record = db_ops.getAll(COLLECTION, 10000, 0)
-      .map(r => r.data)
+    const record = (await db_ops.getAll(COLLECTION, 10000, 0)).map(r => r.data)
       .find(r => r[ID_FIELD] === req.params.id);
     if (!record) {
       return res.status(404).json({ success: false, error: 'Record not found' });
@@ -87,7 +86,7 @@ router.post('/', async (req, res) => {
       updatedAt: new Date().toISOString()
     };
 
-    db_ops.insert(COLLECTION, record);
+    await db_ops.insert(COLLECTION, ID_FIELD, id, record);
 
     // Return HTTP 202 immediately
     res.status(202).json({
@@ -117,7 +116,7 @@ router.post('/', async (req, res) => {
       evaluationType: 'profile_mutation',
       _correlationId: correlationId
     })
-      .then(agentResult => {
+      .then(async agentResult => {
         const rec = agentResult.result?.recommendation || agentResult.result?.decision;
         const decision = rec?.action || 'STEP_UP';
         const riskScore = agentResult.result?.overallRisk?.score ?? 50;
@@ -132,7 +131,7 @@ router.post('/', async (req, res) => {
         else status = 'STEP_UP_REQUIRED';
 
         // Update record with final decision
-        db_ops.update(COLLECTION, id, {
+        await db_ops.update(COLLECTION, ID_FIELD, id, {
           ...record,
           status,
           riskScore,
@@ -152,9 +151,9 @@ router.post('/', async (req, res) => {
 
         // On LOCK: update seller status
         if (decision === 'LOCK' && req.body.sellerId) {
-          const seller = db_ops.getById('sellers', 'seller_id', req.body.sellerId);
+          const seller = await db_ops.getById('sellers', 'seller_id', req.body.sellerId);
           if (seller) {
-            db_ops.update('sellers', 'seller_id', req.body.sellerId, {
+            await db_ops.update('sellers', 'seller_id', req.body.sellerId, {
               ...seller.data, status: 'UNDER_REVIEW', lockReason: reasoning, lockedAt: new Date().toISOString()
             });
           }
@@ -163,7 +162,7 @@ router.post('/', async (req, res) => {
         // Create case on STEP_UP or LOCK
         if (decision === 'STEP_UP' || decision === 'LOCK') {
           const caseId = 'CASE-' + randomUUID().substring(0, 8).toUpperCase();
-          db_ops.insert('cases', 'case_id', caseId, {
+          await db_ops.insert('cases', 'case_id', caseId, {
             caseId, checkpoint: 'PROFILE_UPDATE',
             priority: riskScore >= 80 ? 'CRITICAL' : riskScore >= 60 ? 'HIGH' : 'MEDIUM',
             status: 'OPEN', sellerId: req.body.sellerId, entityId: id, entityType: 'PROFILE_UPDATE',
@@ -183,9 +182,9 @@ router.post('/', async (req, res) => {
 
         console.log(`[ProfileUpdatesService] Completed: ${id} → ${decision} (risk: ${riskScore})`);
       })
-      .catch(error => {
+      .catch(async error => {
         console.error(`[ProfileUpdatesService] Agent error for ${id}:`, error.message);
-        db_ops.update(COLLECTION, id, {
+        await db_ops.update(COLLECTION, ID_FIELD, id, {
           ...record,
           status: 'STEP_UP_REQUIRED',
           riskScore: 50,
@@ -207,21 +206,21 @@ router.post('/', async (req, res) => {
 });
 
 // PATCH /:id/status — Update status
-router.patch('/:id/status', (req, res) => {
+router.patch('/:id/status', async (req, res) => {
   try {
     const { status } = req.body;
     if (!status) {
       return res.status(400).json({ success: false, error: 'Status is required' });
     }
 
-    const records = db_ops.getAll(COLLECTION, 10000, 0);
+    const records = await db_ops.getAll(COLLECTION, 10000, 0);
     const entry = records.find(r => r.data[ID_FIELD] === req.params.id);
     if (!entry) {
       return res.status(404).json({ success: false, error: 'Record not found' });
     }
 
     const updated = { ...entry.data, status, updatedAt: new Date().toISOString() };
-    db_ops.update(COLLECTION, entry.id, updated);
+    await db_ops.update(COLLECTION, ID_FIELD, entry.id, updated);
 
     res.json({ success: true, data: updated });
   } catch (error) {

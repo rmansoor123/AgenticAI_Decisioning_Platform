@@ -35,7 +35,7 @@ class MemoryStore {
    * @param {Object} entry - The memory entry to store
    * @returns {string} The generated memoryId
    */
-  saveShortTerm(agentId, sessionId, entry) {
+  async saveShortTerm(agentId, sessionId, entry) {
     const timestamp = Date.now();
     const memoryId = `STM-${agentId}-${sessionId}-${timestamp}`;
     const expiresAt = new Date(timestamp + SHORT_TERM_TTL_MS).toISOString();
@@ -49,7 +49,7 @@ class MemoryStore {
       createdAt: new Date(timestamp).toISOString()
     };
 
-    db_ops.insert('agent_short_term_memory', 'memory_id', memoryId, record);
+    await db_ops.insert('agent_short_term_memory', 'memory_id', memoryId, record);
     this.stats.writes++;
 
     // Enforce max entries per session via FIFO eviction
@@ -65,10 +65,10 @@ class MemoryStore {
    * @param {string} sessionId - The session ID
    * @returns {Array<Object>} Array of entry objects (not full records)
    */
-  getShortTerm(agentId, sessionId) {
+  async getShortTerm(agentId, sessionId) {
     this.stats.retrievals++;
 
-    const allRecords = db_ops.getAll('agent_short_term_memory', 10000, 0);
+    const allRecords = await db_ops.getAll('agent_short_term_memory', 10000, 0);
     const now = new Date().toISOString();
 
     return allRecords
@@ -85,8 +85,8 @@ class MemoryStore {
   /**
    * Enforce max 50 entries per session. Remove oldest (FIFO) if over limit.
    */
-  _enforceSessionLimit(agentId, sessionId) {
-    const allRecords = db_ops.getAll('agent_short_term_memory', 10000, 0);
+  async _enforceSessionLimit(agentId, sessionId) {
+    const allRecords = await db_ops.getAll('agent_short_term_memory', 10000, 0);
 
     const sessionRecords = allRecords
       .map(r => ({ id: r.memory_id, data: r.data }))
@@ -100,7 +100,7 @@ class MemoryStore {
     while (sessionRecords.length > MAX_SHORT_TERM_PER_SESSION) {
       const oldest = sessionRecords.shift();
       const idToDelete = oldest.data.memoryId || oldest.id;
-      db_ops.delete('agent_short_term_memory', 'memory_id', idToDelete);
+      await db_ops.delete('agent_short_term_memory', 'memory_id', idToDelete);
     }
   }
 
@@ -116,7 +116,7 @@ class MemoryStore {
    * @param {number} importance - Importance weight 0-1
    * @returns {string} The generated memoryId
    */
-  saveLongTerm(agentId, type, content, importance = 0.5) {
+  async saveLongTerm(agentId, type, content, importance = 0.5) {
     const timestamp = Date.now();
     const random = Math.random().toString(36).slice(2, 8);
     const memoryId = `LTM-${agentId}-${timestamp}-${random}`;
@@ -132,7 +132,7 @@ class MemoryStore {
       createdAt: new Date(timestamp).toISOString()
     };
 
-    db_ops.insert('agent_long_term_memory', 'memory_id', memoryId, record);
+    await db_ops.insert('agent_long_term_memory', 'memory_id', memoryId, record);
     this.stats.writes++;
 
     return memoryId;
@@ -147,10 +147,10 @@ class MemoryStore {
    * @param {number} limit - Max results (default 5)
    * @returns {Array<Object>} Content objects with _memoryId, _importance, _type metadata
    */
-  queryLongTerm(agentId, query, limit = 5) {
+  async queryLongTerm(agentId, query, limit = 5) {
     this.stats.retrievals++;
 
-    const allRecords = db_ops.getAll('agent_long_term_memory', 10000, 0);
+    const allRecords = await db_ops.getAll('agent_long_term_memory', 10000, 0);
     const agentRecords = allRecords
       .map(r => r.data)
       .filter(r => r.agentId === agentId);
@@ -199,7 +199,7 @@ class MemoryStore {
     for (const { record } of topResults) {
       record.accessCount = (record.accessCount || 0) + 1;
       record.lastAccessed = new Date().toISOString();
-      db_ops.update('agent_long_term_memory', 'memory_id', record.memoryId, record);
+      await db_ops.update('agent_long_term_memory', 'memory_id', record.memoryId, record);
     }
 
     // Return content with metadata
@@ -224,10 +224,10 @@ class MemoryStore {
    * @param {string} type - Memory type
    * @returns {Array<Object>} Memory records
    */
-  getLongTermByType(agentId, type) {
+  async getLongTermByType(agentId, type) {
     this.stats.retrievals++;
 
-    const allRecords = db_ops.getAll('agent_long_term_memory', 10000, 0);
+    const allRecords = await db_ops.getAll('agent_long_term_memory', 10000, 0);
 
     return allRecords
       .map(r => r.data)
@@ -330,8 +330,8 @@ class MemoryStore {
    * Delete expired short-term entries.
    * @returns {number} Number of entries deleted
    */
-  cleanup() {
-    const allRecords = db_ops.getAll('agent_short_term_memory', 10000, 0);
+  async cleanup() {
+    const allRecords = await db_ops.getAll('agent_short_term_memory', 10000, 0);
     const now = new Date().toISOString();
     let deleted = 0;
 
@@ -339,7 +339,7 @@ class MemoryStore {
       const data = record.data;
       if (data.expiresAt && data.expiresAt < now) {
         const idToDelete = data.memoryId || record.memory_id;
-        db_ops.delete('agent_short_term_memory', 'memory_id', idToDelete);
+        await db_ops.delete('agent_short_term_memory', 'memory_id', idToDelete);
         deleted++;
       }
     }
@@ -367,7 +367,7 @@ class MemoryStore {
    * @param {number} importance - Importance weight 0-1
    * @returns {string} memoryId
    */
-  saveShared(sourceAgentId, topic, content, importance = 0.5) {
+  async saveShared(sourceAgentId, topic, content, importance = 0.5) {
     const timestamp = Date.now();
     const random = Math.random().toString(36).slice(2, 8);
     const memoryId = `SHARED-${topic}-${timestamp}-${random}`;
@@ -383,7 +383,7 @@ class MemoryStore {
       createdAt: new Date(timestamp).toISOString()
     };
 
-    db_ops.insert('agent_shared_memory', 'memory_id', memoryId, record);
+    await db_ops.insert('agent_shared_memory', 'memory_id', memoryId, record);
     this.stats.writes++;
     return memoryId;
   }
@@ -395,9 +395,9 @@ class MemoryStore {
    * @param {number} [limit=5] - Max results
    * @returns {Array<Object>}
    */
-  queryShared(query, topic = null, limit = 5) {
+  async queryShared(query, topic = null, limit = 5) {
     this.stats.retrievals++;
-    const allRecords = db_ops.getAll('agent_shared_memory', 10000, 0);
+    const allRecords = await db_ops.getAll('agent_shared_memory', 10000, 0);
     let records = allRecords.map(r => r.data);
 
     if (topic) {
@@ -444,8 +444,8 @@ class MemoryStore {
    * @param {number} [maxEntries=500] - Maximum entries to keep per agent
    * @returns {{ pruned: number, kept: number }}
    */
-  pruneLongTerm(agentId, maxEntries = 500) {
-    const allRecords = db_ops.getAll('agent_long_term_memory', 10000, 0);
+  async pruneLongTerm(agentId, maxEntries = 500) {
+    const allRecords = await db_ops.getAll('agent_long_term_memory', 10000, 0);
     const agentRecords = allRecords
       .map(r => r.data)
       .filter(r => r.agentId === agentId);
@@ -475,7 +475,7 @@ class MemoryStore {
 
     for (const { record } of scored) {
       if (!toKeep.has(record.memoryId)) {
-        db_ops.delete('agent_long_term_memory', 'memory_id', record.memoryId);
+        await db_ops.delete('agent_long_term_memory', 'memory_id', record.memoryId);
         pruned++;
       }
     }
@@ -495,7 +495,7 @@ class MemoryStore {
    * @param {Object} episode - Full investigation record
    * @returns {string} episodeId
    */
-  saveEpisode(agentId, episode) {
+  async saveEpisode(agentId, episode) {
     const timestamp = Date.now();
     const episodeId = `EP-${agentId}-${timestamp.toString(36)}`;
 
@@ -522,7 +522,7 @@ class MemoryStore {
       createdAt: new Date(timestamp).toISOString(),
     };
 
-    db_ops.insert('agent_episodes', 'episode_id', episodeId, record);
+    await db_ops.insert('agent_episodes', 'episode_id', episodeId, record);
     this.stats.writes++;
     return episodeId;
   }
@@ -534,9 +534,9 @@ class MemoryStore {
    * @param {number} [limit=10] - Max results
    * @returns {Array<Object>}
    */
-  queryEpisodes(agentId = null, filters = {}, limit = 10) {
+  async queryEpisodes(agentId = null, filters = {}, limit = 10) {
     this.stats.retrievals++;
-    const allRecords = db_ops.getAll('agent_episodes', 10000, 0);
+    const allRecords = await db_ops.getAll('agent_episodes', 10000, 0);
     let episodes = allRecords.map(r => r.data);
 
     if (agentId) episodes = episodes.filter(e => e.agentId === agentId);
@@ -555,19 +555,19 @@ class MemoryStore {
    * @param {string} episodeId
    * @returns {Object|null}
    */
-  getEpisode(episodeId) {
+  async getEpisode(episodeId) {
     this.stats.retrievals++;
-    const row = db_ops.getById('agent_episodes', 'episode_id', episodeId);
+    const row = await db_ops.getById('agent_episodes', 'episode_id', episodeId);
     return row?.data || null;
   }
 
-  getStats() {
-    const stmCount = db_ops.count('agent_short_term_memory');
-    const ltmCount = db_ops.count('agent_long_term_memory');
+  async getStats() {
+    const stmCount = await db_ops.count('agent_short_term_memory');
+    const ltmCount = await db_ops.count('agent_long_term_memory');
     let sharedCount = 0;
     let episodeCount = 0;
-    try { sharedCount = db_ops.count('agent_shared_memory'); } catch (e) { /* table may not exist */ }
-    try { episodeCount = db_ops.count('agent_episodes'); } catch (e) { /* table may not exist */ }
+    try { sharedCount = await db_ops.count('agent_shared_memory'); } catch (e) { /* table may not exist */ }
+    try { episodeCount = await db_ops.count('agent_episodes'); } catch (e) { /* table may not exist */ }
 
     return {
       shortTermEntries: stmCount,

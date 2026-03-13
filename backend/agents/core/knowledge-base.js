@@ -107,7 +107,7 @@ class KnowledgeBase {
    * @param {Array<Object>} records - Array of record objects
    * @returns {Array<string>} Array of knowledgeId values for inserted records
    */
-  addKnowledge(namespace, records) {
+  async addKnowledge(namespace, records) {
     if (!VALID_NAMESPACES.has(namespace)) {
       throw new Error(`Invalid namespace: "${namespace}". Must be one of: ${[...VALID_NAMESPACES].join(', ')}`);
     }
@@ -143,7 +143,7 @@ class KnowledgeBase {
         totalChunks: record.totalChunks !== undefined ? record.totalChunks : null
       };
 
-      db_ops.insert('knowledge_entries', 'knowledge_id', knowledgeId, entry);
+      await db_ops.insert('knowledge_entries', 'knowledge_id', knowledgeId, entry);
       ids.push(knowledgeId);
     }
 
@@ -158,13 +158,14 @@ class KnowledgeBase {
    * @param {number} topK - Maximum number of results to return (default: 10)
    * @returns {Array<Object>} Matching entries sorted by relevance score
    */
-  searchKnowledge(namespace, query, filters = {}, topK = 10) {
+  async searchKnowledge(namespace, query, filters = {}, topK = 10) {
     if (!VALID_NAMESPACES.has(namespace)) {
-      throw new Error(`Invalid namespace: "${namespace}". Must be one of: ${[...VALID_NAMESPACES].join(', ')}`);
+      console.warn(`[KnowledgeBase] Invalid namespace: "${namespace}". Returning empty results.`);
+      return [];
     }
 
     // Retrieve all knowledge entries
-    const allEntries = db_ops.getAll('knowledge_entries', 10000, 0);
+    const allEntries = await db_ops.getAll('knowledge_entries', 10000, 0);
 
     // Filter by namespace
     let entries = allEntries
@@ -224,10 +225,10 @@ class KnowledgeBase {
    * @param {number} limit - Maximum number of results (default: 50)
    * @returns {Array<Object>} Knowledge entries for the seller
    */
-  getSellerKnowledge(sellerId, limit = 50) {
+  async getSellerKnowledge(sellerId, limit = 50) {
     if (!sellerId) return [];
 
-    const allEntries = db_ops.getAll('knowledge_entries', 10000, 0);
+    const allEntries = await db_ops.getAll('knowledge_entries', 10000, 0);
 
     return allEntries
       .map(e => e.data)
@@ -245,7 +246,7 @@ class KnowledgeBase {
    * @param {Object} record - Record with at least a 'text' field
    * @returns {{ documentId: string, chunkIds: string[] }}
    */
-  addDocumentWithChunks(namespace, record) {
+  async addDocumentWithChunks(namespace, record) {
     if (!VALID_NAMESPACES.has(namespace)) {
       throw new Error(`Invalid namespace: "${namespace}". Must be one of: ${[...VALID_NAMESPACES].join(', ')}`);
     }
@@ -280,7 +281,7 @@ class KnowledgeBase {
     docEntry.chunkCount = chunks.length;
 
     // Persist the full document
-    db_ops.insert('knowledge_documents', 'document_id', documentId, docEntry);
+    await db_ops.insert('knowledge_documents', 'document_id', documentId, docEntry);
 
     // Store each chunk as a knowledge entry via the existing addKnowledge method
     const chunkIds = [];
@@ -309,8 +310,8 @@ class KnowledgeBase {
    * @param {string} documentId - The DOC-{uuid} identifier
    * @returns {Object|null} The document object, or null if not found
    */
-  getParentDocument(documentId) {
-    const row = db_ops.getById('knowledge_documents', 'document_id', documentId);
+  async getParentDocument(documentId) {
+    const row = await db_ops.getById('knowledge_documents', 'document_id', documentId);
     if (!row) return null;
     return row.data || row;
   }
@@ -319,8 +320,8 @@ class KnowledgeBase {
    * Get knowledge base statistics.
    * @returns {Object} Stats including total count and per-namespace counts
    */
-  getStats() {
-    const allEntries = db_ops.getAll('knowledge_entries', 10000, 0).map(e => e.data);
+  async getStats() {
+    const allEntries = (await db_ops.getAll('knowledge_entries', 10000, 0)).map(e => e.data);
 
     const namespaceCounts = {};
     for (const ns of VALID_NAMESPACES) {

@@ -40,7 +40,7 @@ export class QueryFederationAgent extends BaseAgent {
     this._registerTools();
   }
 
-  _registerTools() {
+  async _registerTools() {
     // 1. Get Available Sources
     this.registerTool(
       'get_available_sources',
@@ -187,11 +187,11 @@ export class QueryFederationAgent extends BaseAgent {
           const tableStats = [];
 
           for (const table of tables) {
-            const count = db_ops.count(table);
+            const count = await db_ops.count(table);
             totalRows += count;
 
             // Estimate cardinality of join/group columns
-            const sample = db_ops.getAll(table, 100, 0);
+            const sample = await db_ops.getAll(table, 100, 0);
             const uniqueKeys = new Set(sample.map(r => {
               const data = r.data || r;
               return data.seller_id || data.sellerId || data.transaction_id || data.transactionId || r[Object.keys(r)[0]];
@@ -309,7 +309,7 @@ export class QueryFederationAgent extends BaseAgent {
           t0 = performance.now();
           const sourceMeta = {};
           for (const table of tables) {
-            try { sourceMeta[table] = { rowCount: db_ops.count(table) }; } catch (_) { sourceMeta[table] = { rowCount: 0 }; }
+            try { sourceMeta[table] = { rowCount: await db_ops.count(table) }; } catch (_) { sourceMeta[table] = { rowCount: 0 }; }
           }
           stages.push({ step: 2, operation: 'INTROSPECT_SOURCES', durationMs: parseFloat((performance.now() - t0).toFixed(3)), sources: sourceMeta });
 

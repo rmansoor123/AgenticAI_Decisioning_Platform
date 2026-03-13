@@ -29,13 +29,13 @@ function assertShape(obj, keys, message) {
 
 // ── Seed test data ───────────────────────────────────────────────────────────
 
-function seedTestData() {
+async function seedTestData() {
   const now = Date.now();
 
   // Seed risk events
   for (let i = 0; i < 10; i++) {
     const eventId = `RE-TEST-${i}`;
-    db_ops.insert('risk_events', 'event_id', eventId, {
+    await db_ops.insert('risk_events', 'event_id', eventId, {
       eventId,
       sellerId: i < 5 ? 'SLR-TEST-001' : 'SLR-TEST-002',
       domain: i % 2 === 0 ? 'onboarding' : 'payout',
@@ -49,7 +49,7 @@ function seedTestData() {
   // Seed agent decisions
   for (let i = 0; i < 8; i++) {
     const decisionId = `DEC-TEST-${i}`;
-    db_ops.insert('agent_decisions', 'decision_id', decisionId, {
+    await db_ops.insert('agent_decisions', 'decision_id', decisionId, {
       decisionId,
       agentId: i < 4 ? 'SELLER_ONBOARDING' : 'PAYOUT_RISK',
       sellerId: `SLR-TEST-00${(i % 3) + 1}`,

@@ -54,9 +54,9 @@ function assertIncludes(arr, value, message) {
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 // Seed some test data into in-memory db
-function seedTestData() {
+async function seedTestData() {
   // Seed transactions
-  db_ops.insert('transactions', 'transaction_id', 'TXN-001', {
+  await db_ops.insert('transactions', 'transaction_id', 'TXN-001', {
     transactionId: 'TXN-001',
     sellerId: 'S-001',
     amount: 7500,
@@ -67,7 +67,7 @@ function seedTestData() {
     accountAge: 10
   });
 
-  db_ops.insert('transactions', 'transaction_id', 'TXN-002', {
+  await db_ops.insert('transactions', 'transaction_id', 'TXN-002', {
     transactionId: 'TXN-002',
     sellerId: 'S-002',
     amount: 50,
@@ -78,7 +78,7 @@ function seedTestData() {
     accountAge: 365
   });
 
-  db_ops.insert('transactions', 'transaction_id', 'TXN-003', {
+  await db_ops.insert('transactions', 'transaction_id', 'TXN-003', {
     transactionId: 'TXN-003',
     sellerId: 'S-003',
     amount: 6000,
@@ -89,7 +89,7 @@ function seedTestData() {
     accountAge: 5
   });
 
-  db_ops.insert('transactions', 'transaction_id', 'TXN-004', {
+  await db_ops.insert('transactions', 'transaction_id', 'TXN-004', {
     transactionId: 'TXN-004',
     sellerId: 'S-004',
     amount: 100,
@@ -100,7 +100,7 @@ function seedTestData() {
     accountAge: 500
   });
 
-  db_ops.insert('transactions', 'transaction_id', 'TXN-005', {
+  await db_ops.insert('transactions', 'transaction_id', 'TXN-005', {
     transactionId: 'TXN-005',
     sellerId: 'S-005',
     amount: 300,
@@ -112,7 +112,7 @@ function seedTestData() {
   });
 
   // Seed a rule
-  db_ops.insert('rules', 'rule_id', 'RULE-TEST-001', {
+  await db_ops.insert('rules', 'rule_id', 'RULE-TEST-001', {
     ruleId: 'RULE-TEST-001',
     name: 'Test Rule High Amount',
     status: 'ACTIVE',
@@ -129,7 +129,7 @@ function seedTestData() {
     }
   });
 
-  db_ops.insert('rules', 'rule_id', 'RULE-TEST-002', {
+  await db_ops.insert('rules', 'rule_id', 'RULE-TEST-002', {
     ruleId: 'RULE-TEST-002',
     name: 'Test Rule Low FP',
     status: 'ACTIVE',

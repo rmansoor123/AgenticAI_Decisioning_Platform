@@ -60,7 +60,7 @@ export class FraudInvestigationAgent extends BaseAgent {
     // Tool: Fetch transaction details
     this.registerTool('get_transaction', 'Retrieve full transaction details', async (params) => {
       const { transactionId } = params;
-      const tx = db_ops.getById('transactions', 'transaction_id', transactionId);
+      const tx = await db_ops.getById('transactions', 'transaction_id', transactionId);
       return { success: true, data: tx?.data || this.generateMockTransaction(transactionId) };
     });
 

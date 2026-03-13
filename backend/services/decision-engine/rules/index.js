@@ -6,11 +6,11 @@ import { v4 as uuidv4 } from 'uuid';
 const router = express.Router();
 
 // Get all rules
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { limit = 10000, status, type, action } = req.query;
 
-    let rules = db_ops.getAll('rules', parseInt(limit), 0);
+    let rules = await db_ops.getAll('rules', parseInt(limit), 0);
     rules = rules.map(r => r.data);
 
     if (status) rules = rules.filter(r => r.status === status);
@@ -32,7 +32,7 @@ router.get('/', (req, res) => {
     res.json({
       success: true,
       data: rules,
-      total: db_ops.count('rules')
+      total: await db_ops.count('rules')
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -40,9 +40,9 @@ router.get('/', (req, res) => {
 });
 
 // Get rules grouped by checkpoint
-router.get('/by-checkpoint', (req, res) => {
+router.get('/by-checkpoint', async (req, res) => {
   try {
-    const allRules = db_ops.getAll('rules', 10000, 0).map(r => r.data);
+    const allRules = (await db_ops.getAll('rules', 10000, 0)).map(r => r.data);
     const checkpoints = ['onboarding', 'ato', 'payout', 'listing', 'shipping', 'transaction'];
 
     const grouped = {};
@@ -72,7 +72,7 @@ router.get('/by-checkpoint', (req, res) => {
 });
 
 // Get rule templates for each checkpoint
-router.get('/templates', (req, res) => {
+router.get('/templates', async (req, res) => {
   try {
     const templates = generateCheckpointRules();
 
@@ -88,9 +88,9 @@ router.get('/templates', (req, res) => {
 });
 
 // Get rule by ID
-router.get('/:ruleId', (req, res) => {
+router.get('/:ruleId', async (req, res) => {
   try {
-    const rule = db_ops.getById('rules', 'rule_id', req.params.ruleId);
+    const rule = await db_ops.getById('rules', 'rule_id', req.params.ruleId);
     if (!rule) {
       return res.status(404).json({ success: false, error: 'Rule not found' });
     }
@@ -101,7 +101,7 @@ router.get('/:ruleId', (req, res) => {
 });
 
 // Create rule
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const ruleData = req.body.ruleId ? req.body : {
       ruleId: `RULE-${uuidv4().substring(0, 6).toUpperCase()}`,
@@ -126,7 +126,7 @@ router.post('/', (req, res) => {
       });
     }
 
-    db_ops.insert('rules', 'rule_id', ruleData.ruleId, ruleData);
+    await db_ops.insert('rules', 'rule_id', ruleData.ruleId, ruleData);
 
     res.status(201).json({ success: true, data: ruleData });
   } catch (error) {
@@ -135,9 +135,9 @@ router.post('/', (req, res) => {
 });
 
 // Update rule
-router.put('/:ruleId', (req, res) => {
+router.put('/:ruleId', async (req, res) => {
   try {
-    const existing = db_ops.getById('rules', 'rule_id', req.params.ruleId);
+    const existing = await db_ops.getById('rules', 'rule_id', req.params.ruleId);
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Rule not found' });
     }
@@ -158,7 +158,7 @@ router.put('/:ruleId', (req, res) => {
       ]
     };
 
-    db_ops.update('rules', 'rule_id', req.params.ruleId, updated);
+    await db_ops.update('rules', 'rule_id', req.params.ruleId, updated);
 
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -167,10 +167,10 @@ router.put('/:ruleId', (req, res) => {
 });
 
 // Update rule status
-router.patch('/:ruleId/status', (req, res) => {
+router.patch('/:ruleId/status', async (req, res) => {
   try {
     const { status, reason } = req.body;
-    const existing = db_ops.getById('rules', 'rule_id', req.params.ruleId);
+    const existing = await db_ops.getById('rules', 'rule_id', req.params.ruleId);
 
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Rule not found' });
@@ -191,7 +191,7 @@ router.patch('/:ruleId/status', (req, res) => {
       updatedAt: new Date().toISOString()
     };
 
-    db_ops.update('rules', 'rule_id', req.params.ruleId, updated);
+    await db_ops.update('rules', 'rule_id', req.params.ruleId, updated);
 
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -200,10 +200,10 @@ router.patch('/:ruleId/status', (req, res) => {
 });
 
 // Test rule against sample data
-router.post('/:ruleId/test', (req, res) => {
+router.post('/:ruleId/test', async (req, res) => {
   try {
     const { testData } = req.body;
-    const rule = db_ops.getById('rules', 'rule_id', req.params.ruleId);
+    const rule = await db_ops.getById('rules', 'rule_id', req.params.ruleId);
 
     if (!rule) {
       return res.status(404).json({ success: false, error: 'Rule not found' });
@@ -226,10 +226,10 @@ router.post('/:ruleId/test', (req, res) => {
 });
 
 // Get rule performance
-router.get('/:ruleId/performance', (req, res) => {
+router.get('/:ruleId/performance', async (req, res) => {
   try {
     const { timeRange = '7d' } = req.query;
-    const rule = db_ops.getById('rules', 'rule_id', req.params.ruleId);
+    const rule = await db_ops.getById('rules', 'rule_id', req.params.ruleId);
 
     if (!rule) {
       return res.status(404).json({ success: false, error: 'Rule not found' });
@@ -297,9 +297,9 @@ router.get('/:ruleId/performance', (req, res) => {
 });
 
 // Clone rule
-router.post('/:ruleId/clone', (req, res) => {
+router.post('/:ruleId/clone', async (req, res) => {
   try {
-    const existing = db_ops.getById('rules', 'rule_id', req.params.ruleId);
+    const existing = await db_ops.getById('rules', 'rule_id', req.params.ruleId);
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Rule not found' });
     }
@@ -321,7 +321,7 @@ router.post('/:ruleId/clone', (req, res) => {
       updatedAt: new Date().toISOString()
     };
 
-    db_ops.insert('rules', 'rule_id', cloned.ruleId, cloned);
+    await db_ops.insert('rules', 'rule_id', cloned.ruleId, cloned);
 
     res.status(201).json({ success: true, data: cloned });
   } catch (error) {
@@ -330,20 +330,20 @@ router.post('/:ruleId/clone', (req, res) => {
 });
 
 // Bulk update rules status
-router.post('/bulk/status', (req, res) => {
+router.post('/bulk/status', async (req, res) => {
   try {
     const { ruleIds, status, reason } = req.body;
 
     const updated = [];
     for (const ruleId of ruleIds) {
-      const existing = db_ops.getById('rules', 'rule_id', ruleId);
+      const existing = await db_ops.getById('rules', 'rule_id', ruleId);
       if (existing) {
         const updatedRule = {
           ...existing.data,
           status,
           updatedAt: new Date().toISOString()
         };
-        db_ops.update('rules', 'rule_id', ruleId, updatedRule);
+        await db_ops.update('rules', 'rule_id', ruleId, updatedRule);
         updated.push(ruleId);
       }
     }
@@ -355,9 +355,9 @@ router.post('/bulk/status', (req, res) => {
 });
 
 // Get rule statistics
-router.get('/stats/summary', (req, res) => {
+router.get('/stats/summary', async (req, res) => {
   try {
-    const rules = db_ops.getAll('rules', 1000, 0).map(r => r.data);
+    const rules = (await db_ops.getAll('rules', 1000, 0)).map(r => r.data);
 
     const stats = {
       total: rules.length,

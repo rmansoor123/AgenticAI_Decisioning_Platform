@@ -8,7 +8,7 @@ const router = express.Router();
 const queryHistory = [];
 
 // Execute federated query
-router.post('/query', (req, res) => {
+router.post('/query', async (req, res) => {
   try {
     const { sql, sources, limit = 100 } = req.body;
 
@@ -50,7 +50,7 @@ router.post('/query', (req, res) => {
 });
 
 // Get query history
-router.get('/history', (req, res) => {
+router.get('/history', async (req, res) => {
   try {
     const { limit = 20 } = req.query;
     res.json({
@@ -63,7 +63,7 @@ router.get('/history', (req, res) => {
 });
 
 // Get available data sources
-router.get('/sources', (req, res) => {
+router.get('/sources', async (req, res) => {
   try {
     const sources = [
       {
@@ -110,7 +110,7 @@ router.get('/sources', (req, res) => {
 });
 
 // Preview query (explain plan)
-router.post('/explain', (req, res) => {
+router.post('/explain', async (req, res) => {
   try {
     const { sql } = req.body;
 
@@ -134,7 +134,8 @@ router.post('/explain', (req, res) => {
 
     // Stage 3: Estimate fetch
     t0 = performance.now();
-    const estimatedRows = detectedSources.reduce((sum, src) => sum + db_ops.count(src), 0);
+    let estimatedRows = 0;
+    for (const src of detectedSources) { estimatedRows += await db_ops.count(src); }
     stages.push({ step: 3, operation: 'ESTIMATE_ROWS', durationMs: parseFloat((performance.now() - t0).toFixed(3)), estimatedRows });
 
     // Stage 4-6: Static estimates based on detected complexity
@@ -170,7 +171,7 @@ router.post('/explain', (req, res) => {
 });
 
 // Data playground - interactive query interface
-router.post('/playground', (req, res) => {
+router.post('/playground', async (req, res) => {
   try {
     const { entity, entityId, features } = req.body;
 
@@ -178,12 +179,10 @@ router.post('/playground', (req, res) => {
     let result = {};
 
     if (entity === 'seller') {
-      const seller = db_ops.getById('sellers', 'seller_id', entityId);
-      const transactions = db_ops.getAll('transactions', 1000, 0)
-        .map(t => t.data)
+      const seller = await db_ops.getById('sellers', 'seller_id', entityId);
+      const transactions = (await db_ops.getAll('transactions', 1000, 0)).map(t => t.data)
         .filter(t => t.sellerId === entityId);
-      const payouts = db_ops.getAll('payouts', 1000, 0)
-        .map(p => p.data)
+      const payouts = (await db_ops.getAll('payouts', 1000, 0)).map(p => p.data)
         .filter(p => p.sellerId === entityId);
 
       result = {
@@ -203,9 +202,9 @@ router.post('/playground', (req, res) => {
         recentPayouts: payouts.slice(0, 5)
       };
     } else if (entity === 'transaction') {
-      const transaction = db_ops.getById('transactions', 'transaction_id', entityId);
+      const transaction = await db_ops.getById('transactions', 'transaction_id', entityId);
       if (transaction) {
-        const seller = db_ops.getById('sellers', 'seller_id', transaction.data.sellerId);
+        const seller = await db_ops.getById('sellers', 'seller_id', transaction.data.sellerId);
         result = {
           entity: 'transaction',
           entityId,
@@ -232,7 +231,7 @@ router.post('/playground', (req, res) => {
 });
 
 // Get aggregated metrics
-router.get('/metrics/:entity', (req, res) => {
+router.get('/metrics/:entity', async (req, res) => {
   try {
     const { entity } = req.params;
     const { groupBy, timeRange = '24h' } = req.query;
@@ -240,7 +239,7 @@ router.get('/metrics/:entity', (req, res) => {
     let metrics = {};
 
     if (entity === 'transactions') {
-      const transactions = db_ops.getAll('transactions', 10000, 0).map(t => t.data);
+      const transactions = (await db_ops.getAll('transactions', 10000, 0)).map(t => t.data);
 
       metrics = {
         total: transactions.length,
@@ -274,23 +273,23 @@ router.get('/metrics/:entity', (req, res) => {
 });
 
 // Helper function to execute simplified queries
-function executeQuery(sql, sources, limit) {
+async function executeQuery(sql, sources, limit) {
   // Very simplified SQL parsing - in production would use a proper parser
   const sqlLower = (sql || '').toLowerCase();
 
   let results = [];
 
   if (sqlLower.includes('from transactions') || sqlLower.includes('from transaction')) {
-    results = db_ops.getAll('transactions', limit, 0).map(t => t.data);
+    results = (await db_ops.getAll('transactions', limit, 0)).map(t => t.data);
   } else if (sqlLower.includes('from sellers') || sqlLower.includes('from seller')) {
-    results = db_ops.getAll('sellers', limit, 0).map(s => s.data);
+    results = (await db_ops.getAll('sellers', limit, 0)).map(s => s.data);
   } else if (sqlLower.includes('from payouts') || sqlLower.includes('from payout')) {
-    results = db_ops.getAll('payouts', limit, 0).map(p => p.data);
+    results = (await db_ops.getAll('payouts', limit, 0)).map(p => p.data);
   } else if (sqlLower.includes('from listings') || sqlLower.includes('from listing')) {
-    results = db_ops.getAll('listings', limit, 0).map(l => l.data);
+    results = (await db_ops.getAll('listings', limit, 0)).map(l => l.data);
   } else {
     // Default - return sample data
-    results = db_ops.getAll('transactions', Math.min(limit, 10), 0).map(t => t.data);
+    results = (await db_ops.getAll('transactions', Math.min(limit, 10), 0)).map(t => t.data);
   }
 
   // Apply simple WHERE clause filtering
@@ -312,7 +311,7 @@ function toCamelCase(str) {
 
 // ─── Agent-Enhanced Routes ───────────────────────────────────────────────────
 
-router.post('/agent/explore', (req, res) => {
+router.post('/agent/explore', async (req, res) => {
   const correlationId = `EXPLORE-${Date.now().toString(36).toUpperCase()}`;
 
   import('../../../agents/specialized/data-playground-agent.js')
@@ -330,7 +329,7 @@ router.post('/agent/explore', (req, res) => {
   });
 });
 
-router.post('/agent/federate', (req, res) => {
+router.post('/agent/federate', async (req, res) => {
   const correlationId = `FED-${Date.now().toString(36).toUpperCase()}`;
 
   import('../../../agents/specialized/query-federation-agent.js')

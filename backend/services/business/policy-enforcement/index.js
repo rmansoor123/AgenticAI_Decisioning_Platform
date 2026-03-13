@@ -13,7 +13,7 @@ router.get('/', async (req, res) => {
   try {
     const { limit = 50, offset = 0, sellerId } = req.query;
 
-    let records = db_ops.getAll('policy_checks') || [];
+    let records = await db_ops.getAll('policy_checks') || [];
 
     if (sellerId) {
       records = records.filter(r => r.sellerId === sellerId);
@@ -39,7 +39,7 @@ router.get('/', async (req, res) => {
 // ---------------------------------------------------------------------------
 router.get('/stats', async (req, res) => {
   try {
-    const records = db_ops.getAll('policy_checks') || [];
+    const records = await db_ops.getAll('policy_checks') || [];
 
     const byStatus = records.reduce((acc, r) => {
       acc[r.status] = (acc[r.status] || 0) + 1;
@@ -68,7 +68,7 @@ router.get('/stats', async (req, res) => {
 // ---------------------------------------------------------------------------
 router.get('/:id', async (req, res) => {
   try {
-    const record = db_ops.getById('policy_checks', 'check_id', req.params.id);
+    const record = await db_ops.getById('policy_checks', 'check_id', req.params.id);
     if (!record) {
       return res.status(404).json({ success: false, error: 'Policy check not found' });
     }
@@ -85,7 +85,7 @@ router.post('/', async (req, res) => {
   try {
     const { sellerId, violationType, sellerMetrics, linkedAccounts, complianceScore, priorViolations } = req.body;
 
-    const seller = db_ops.getById('sellers', 'seller_id', sellerId);
+    const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
     if (!seller) {
       return res.status(404).json({ success: false, error: 'Seller not found' });
     }
@@ -106,7 +106,7 @@ router.post('/', async (req, res) => {
       createdAt: new Date().toISOString()
     };
 
-    db_ops.insert('policy_checks', 'check_id', checkId, record);
+    await db_ops.insert('policy_checks', 'check_id', checkId, record);
 
     res.status(202).json({
       success: true,
@@ -136,14 +136,14 @@ router.post('/', async (req, res) => {
         _correlationId: correlationId
       }
     )
-      .then(agentResult => {
+      .then(async agentResult => {
         const rec = agentResult.result?.recommendation || agentResult.result?.decision;
         const decision = rec?.action || 'WARN';
         const riskScore = agentResult.result?.overallRisk?.score ?? 75;
         const reasoning = agentResult.result?.reasoning || rec?.reason || 'Agent evaluation complete';
         const agentId = agentResult.result?.agentId || 'policy-enforcement-agent';
 
-        db_ops.update('policy_checks', 'check_id', checkId, {
+        await db_ops.update('policy_checks', 'check_id', checkId, {
           ...record,
           status: decision,
           riskScore,
@@ -167,7 +167,7 @@ router.post('/', async (req, res) => {
         // Create case for non-CLEAR decisions
         if (decision !== 'CLEAR') {
           const caseId = 'CASE-' + randomUUID().substring(0, 8).toUpperCase();
-          db_ops.insert('cases', 'case_id', caseId, {
+          await db_ops.insert('cases', 'case_id', caseId, {
             caseId,
             checkpoint: 'POLICY_ENFORCEMENT',
             priority: riskScore >= 80 ? 'CRITICAL' : riskScore >= 60 ? 'HIGH' : 'MEDIUM',
@@ -199,10 +199,10 @@ router.post('/', async (req, res) => {
 
         console.log(`[PolicyEnforcement] Completed: ${checkId} → ${decision} (risk: ${riskScore})`);
       })
-      .catch(error => {
+      .catch(async error => {
         console.error(`[PolicyEnforcement] Agent error for ${checkId}:`, error.message);
 
-        db_ops.update('policy_checks', 'check_id', checkId, {
+        await db_ops.update('policy_checks', 'check_id', checkId, {
           ...record,
           status: 'WARN',
           riskScore: 75,
@@ -238,7 +238,7 @@ router.post('/', async (req, res) => {
 router.patch('/:id/status', async (req, res) => {
   try {
     const { status } = req.body;
-    const record = db_ops.getById('policy_checks', 'check_id', req.params.id);
+    const record = await db_ops.getById('policy_checks', 'check_id', req.params.id);
     if (!record) {
       return res.status(404).json({ success: false, error: 'Policy check not found' });
     }
@@ -249,7 +249,7 @@ router.patch('/:id/status', async (req, res) => {
     }
 
     const updated = { ...record, status, updatedAt: new Date().toISOString() };
-    db_ops.update('policy_checks', 'check_id', req.params.id, updated);
+    await db_ops.update('policy_checks', 'check_id', req.params.id, updated);
 
     res.json({ success: true, data: updated });
   } catch (error) {

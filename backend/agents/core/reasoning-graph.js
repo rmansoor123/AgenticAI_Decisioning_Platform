@@ -163,7 +163,7 @@ class ReasoningGraph {
  * @param {Object} agent - The BaseAgent instance
  * @returns {ReasoningGraph}
  */
-export function buildDefaultGraph(agent) {
+export async function buildDefaultGraph(agent) {
   const graph = new ReasoningGraph();
 
   // Define nodes

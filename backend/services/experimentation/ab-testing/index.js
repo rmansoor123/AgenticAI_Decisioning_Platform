@@ -9,11 +9,11 @@ const router = express.Router();
 const assignmentCache = new Map();
 
 // Get all experiments
-router.get('/experiments', (req, res) => {
+router.get('/experiments', async (req, res) => {
   try {
     const { limit = 50, status, type } = req.query;
 
-    let experiments = db_ops.getAll('experiments', parseInt(limit), 0);
+    let experiments = await db_ops.getAll('experiments', parseInt(limit), 0);
     experiments = experiments.map(e => e.data);
 
     if (status) experiments = experiments.filter(e => e.status === status);
@@ -22,7 +22,7 @@ router.get('/experiments', (req, res) => {
     res.json({
       success: true,
       data: experiments,
-      total: db_ops.count('experiments')
+      total: await db_ops.count('experiments')
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -30,9 +30,9 @@ router.get('/experiments', (req, res) => {
 });
 
 // Get experiment by ID
-router.get('/experiments/:experimentId', (req, res) => {
+router.get('/experiments/:experimentId', async (req, res) => {
   try {
-    const experiment = db_ops.getById('experiments', 'experiment_id', req.params.experimentId);
+    const experiment = await db_ops.getById('experiments', 'experiment_id', req.params.experimentId);
     if (!experiment) {
       return res.status(404).json({ success: false, error: 'Experiment not found' });
     }
@@ -43,7 +43,7 @@ router.get('/experiments/:experimentId', (req, res) => {
 });
 
 // Create experiment
-router.post('/experiments', (req, res) => {
+router.post('/experiments', async (req, res) => {
   try {
     const experimentData = {
       experimentId: `EXP-${uuidv4().substring(0, 8).toUpperCase()}`,
@@ -73,7 +73,7 @@ router.post('/experiments', (req, res) => {
       });
     }
 
-    db_ops.insert('experiments', 'experiment_id', experimentData.experimentId, experimentData);
+    await db_ops.insert('experiments', 'experiment_id', experimentData.experimentId, experimentData);
 
     res.status(201).json({ success: true, data: experimentData });
   } catch (error) {
@@ -82,9 +82,9 @@ router.post('/experiments', (req, res) => {
 });
 
 // Update experiment
-router.put('/experiments/:experimentId', (req, res) => {
+router.put('/experiments/:experimentId', async (req, res) => {
   try {
-    const existing = db_ops.getById('experiments', 'experiment_id', req.params.experimentId);
+    const existing = await db_ops.getById('experiments', 'experiment_id', req.params.experimentId);
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Experiment not found' });
     }
@@ -97,7 +97,7 @@ router.put('/experiments/:experimentId', (req, res) => {
     }
 
     const updated = { ...existing.data, ...req.body, updatedAt: new Date().toISOString() };
-    db_ops.update('experiments', 'experiment_id', req.params.experimentId, updated);
+    await db_ops.update('experiments', 'experiment_id', req.params.experimentId, updated);
 
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -106,9 +106,9 @@ router.put('/experiments/:experimentId', (req, res) => {
 });
 
 // Start experiment
-router.post('/experiments/:experimentId/start', (req, res) => {
+router.post('/experiments/:experimentId/start', async (req, res) => {
   try {
-    const existing = db_ops.getById('experiments', 'experiment_id', req.params.experimentId);
+    const existing = await db_ops.getById('experiments', 'experiment_id', req.params.experimentId);
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Experiment not found' });
     }
@@ -126,7 +126,7 @@ router.post('/experiments/:experimentId/start', (req, res) => {
       startDate: new Date().toISOString()
     };
 
-    db_ops.update('experiments', 'experiment_id', req.params.experimentId, updated);
+    await db_ops.update('experiments', 'experiment_id', req.params.experimentId, updated);
 
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -135,10 +135,10 @@ router.post('/experiments/:experimentId/start', (req, res) => {
 });
 
 // Stop experiment
-router.post('/experiments/:experimentId/stop', (req, res) => {
+router.post('/experiments/:experimentId/stop', async (req, res) => {
   try {
     const { reason, winner } = req.body;
-    const existing = db_ops.getById('experiments', 'experiment_id', req.params.experimentId);
+    const existing = await db_ops.getById('experiments', 'experiment_id', req.params.experimentId);
 
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Experiment not found' });
@@ -151,7 +151,7 @@ router.post('/experiments/:experimentId/stop', (req, res) => {
       conclusion: { reason, winner }
     };
 
-    db_ops.update('experiments', 'experiment_id', req.params.experimentId, updated);
+    await db_ops.update('experiments', 'experiment_id', req.params.experimentId, updated);
 
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -160,7 +160,7 @@ router.post('/experiments/:experimentId/stop', (req, res) => {
 });
 
 // Get variant assignment for entity
-router.get('/assign', (req, res) => {
+router.get('/assign', async (req, res) => {
   try {
     const { experimentId, entityId } = req.query;
 
@@ -171,7 +171,7 @@ router.get('/assign', (req, res) => {
       });
     }
 
-    const experiment = db_ops.getById('experiments', 'experiment_id', experimentId);
+    const experiment = await db_ops.getById('experiments', 'experiment_id', experimentId);
     if (!experiment || experiment.data.status !== 'RUNNING') {
       return res.json({
         success: true,
@@ -230,10 +230,10 @@ router.get('/assign', (req, res) => {
 });
 
 // Record experiment event
-router.post('/experiments/:experimentId/event', (req, res) => {
+router.post('/experiments/:experimentId/event', async (req, res) => {
   try {
     const { entityId, variant, eventType, value } = req.body;
-    const experiment = db_ops.getById('experiments', 'experiment_id', req.params.experimentId);
+    const experiment = await db_ops.getById('experiments', 'experiment_id', req.params.experimentId);
 
     if (!experiment) {
       return res.status(404).json({ success: false, error: 'Experiment not found' });
@@ -241,7 +241,7 @@ router.post('/experiments/:experimentId/event', (req, res) => {
 
     // Persist event to experiment_events table
     const eventId = `EVT-${uuidv4().substring(0, 8).toUpperCase()}`;
-    db_ops.run(
+    await db_ops.run(
       'INSERT INTO experiment_events (event_id, experiment_id, entity_id, variant, event_type, value, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [eventId, req.params.experimentId, entityId, variant, eventType, value || null, JSON.stringify(req.body.metadata || {}), new Date().toISOString()]
     );
@@ -264,9 +264,9 @@ router.post('/experiments/:experimentId/event', (req, res) => {
 });
 
 // Get experiment results
-router.get('/experiments/:experimentId/results', (req, res) => {
+router.get('/experiments/:experimentId/results', async (req, res) => {
   try {
-    const experiment = db_ops.getById('experiments', 'experiment_id', req.params.experimentId);
+    const experiment = await db_ops.getById('experiments', 'experiment_id', req.params.experimentId);
     if (!experiment) {
       return res.status(404).json({ success: false, error: 'Experiment not found' });
     }
@@ -395,9 +395,9 @@ router.get('/experiments/:experimentId/results', (req, res) => {
 });
 
 // Get experiment statistics
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
-    const experiments = db_ops.getAll('experiments', 1000, 0).map(e => e.data);
+    const experiments = (await db_ops.getAll('experiments', 1000, 0)).map(e => e.data);
 
     const stats = {
       total: experiments.length,

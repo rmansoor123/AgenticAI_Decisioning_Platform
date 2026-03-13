@@ -47,12 +47,12 @@ export class ComplianceAgent extends BaseAgent {
     return this._thresholdManager.getThresholds(this.agentId);
   }
 
-  registerTools() {
+  async registerTools() {
     // Tool 1: Detect structuring (smurfing) — split transactions below $10K threshold
     this.registerTool('detect_structuring', 'Detect transaction splitting below $10K BSA reporting threshold (smurfing)', async (params) => {
       const { sellerId } = params;
 
-      const allTxns = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTxns = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(r => r.data)
         .filter(r => r.sellerId === sellerId);
 
@@ -104,7 +104,7 @@ export class ComplianceAgent extends BaseAgent {
     this.registerTool('check_sanctions_match', 'Screen seller against OFAC/SDN sanctions lists using name and country data', async (params) => {
       const { sellerId } = params;
 
-      const seller = db_ops.getById('sellers', 'seller_id', sellerId);
+      const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
       const sellerData = seller?.data || {};
 
       // High-risk jurisdictions (FATF grey/black list approximation)
@@ -145,7 +145,7 @@ export class ComplianceAgent extends BaseAgent {
     this.registerTool('check_pep_screen', 'Screen for politically exposed persons and adverse media indicators', async (params) => {
       const { sellerId } = params;
 
-      const seller = db_ops.getById('sellers', 'seller_id', sellerId);
+      const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
       const sellerData = seller?.data || {};
 
       // PEP indicators from seller profile
@@ -154,7 +154,7 @@ export class ComplianceAgent extends BaseAgent {
       if (sellerData.governmentRole) pepIndicators.push('GOVERNMENT_ROLE');
 
       // Check for high-value transactions typical of PEP laundering
-      const allTxns = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTxns = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(r => r.data)
         .filter(r => r.sellerId === sellerId);
 
@@ -196,10 +196,10 @@ export class ComplianceAgent extends BaseAgent {
     this.registerTool('detect_tax_threshold_splitting', 'Detect gross merchandise value split across multiple accounts to evade tax reporting', async (params) => {
       const { sellerId } = params;
 
-      const seller = db_ops.getById('sellers', 'seller_id', sellerId);
+      const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
       const sellerData = seller?.data || {};
 
-      const allTxns = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTxns = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(r => r.data)
         .filter(r => r.sellerId === sellerId);
 
@@ -209,7 +209,7 @@ export class ComplianceAgent extends BaseAgent {
       const annualGMV = yearTxns.reduce((s, t) => s + (t.amount || 0), 0);
 
       // Check for linked accounts (same email domain, phone, or address)
-      const allSellers = (db_ops.getAll('sellers', 5000, 0) || []).map(r => r.data);
+      const allSellers = (await db_ops.getAll('sellers', 5000, 0) || []).map(r => r.data);
       const linkedAccounts = allSellers.filter(s =>
         s.seller_id !== sellerId && (
           (sellerData.email && s.email && sellerData.email.split('@')[1] === s.email.split('@')[1] && !['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com'].includes(sellerData.email.split('@')[1])) ||
@@ -221,7 +221,7 @@ export class ComplianceAgent extends BaseAgent {
       // Check linked account GMVs
       let combinedGMV = annualGMV;
       for (const linked of linkedAccounts) {
-        const linkedTxns = (db_ops.getAll('transactions', 10000, 0) || [])
+        const linkedTxns = (await db_ops.getAll('transactions', 10000, 0) || [])
           .map(r => r.data)
           .filter(r => r.sellerId === linked.seller_id && new Date(r.createdAt || r.timestamp) >= yearStart);
         combinedGMV += linkedTxns.reduce((s, t) => s + (t.amount || 0), 0);
@@ -258,7 +258,7 @@ export class ComplianceAgent extends BaseAgent {
     this.registerTool('check_crypto_layering', 'Detect crypto purchase followed by rapid withdrawal indicating layering', async (params) => {
       const { sellerId } = params;
 
-      const allTxns = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allTxns = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(r => r.data)
         .filter(r => r.sellerId === sellerId);
 
@@ -274,7 +274,7 @@ export class ComplianceAgent extends BaseAgent {
       );
 
       // Check payouts close to crypto purchases (layering: buy + immediate cashout)
-      const allPayouts = (db_ops.getAll('payouts', 10000, 0) || [])
+      const allPayouts = (await db_ops.getAll('payouts', 10000, 0) || [])
         .map(r => r.data)
         .filter(r => r.sellerId === sellerId);
 
@@ -319,13 +319,13 @@ export class ComplianceAgent extends BaseAgent {
     // Agentic tools
     this.registerTool('search_knowledge_base', 'Search knowledge base for similar compliance/AML cases', async (params) => {
       const { query, sellerId } = params;
-      const results = this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
+      const results = await this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
       return { success: true, data: { results, count: results.length } };
     });
 
     this.registerTool('retrieve_memory', 'Retrieve relevant compliance patterns from long-term memory', async (params) => {
       const { context } = params;
-      const memories = this.memoryStore.queryLongTerm(this.agentId, context, 5);
+      const memories = await this.memoryStore.queryLongTerm(this.agentId, context, 5);
       return { success: true, data: { memories, count: memories.length } };
     });
   }

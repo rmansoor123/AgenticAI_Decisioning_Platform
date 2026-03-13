@@ -47,16 +47,16 @@ export class BehavioralAnalyticsAgent extends BaseAgent {
     return this._thresholdManager.getThresholds(this.agentId);
   }
 
-  registerTools() {
+  async registerTools() {
     // Tool 1: Detect bot behavior — behavioral biometrics analysis
     this.registerTool('detect_bot_behavior', 'Analyze behavioral biometrics — click patterns, typing speed, mouse movements', async (params) => {
       const { sellerId, behaviorData } = params;
 
-      const events = (db_ops.getAll('ato_events', 10000, 0) || [])
+      const events = (await db_ops.getAll('ato_events', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId);
 
-      const sessions = (db_ops.getAll('transactions', 10000, 0) || [])
+      const sessions = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId);
 
@@ -116,11 +116,11 @@ export class BehavioralAnalyticsAgent extends BaseAgent {
     this.registerTool('check_off_hours_activity', 'Detect unusual time patterns — bulk operations at 2-5AM', async (params) => {
       const { sellerId } = params;
 
-      const allEvents = (db_ops.getAll('transactions', 10000, 0) || [])
+      const allEvents = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId);
 
-      const atoEvents = (db_ops.getAll('ato_events', 10000, 0) || [])
+      const atoEvents = (await db_ops.getAll('ato_events', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId);
 
@@ -190,7 +190,7 @@ export class BehavioralAnalyticsAgent extends BaseAgent {
     this.registerTool('check_browsing_ratio', 'Detect browsing-to-purchase ratio anomaly', async (params) => {
       const { sellerId, behaviorData } = params;
 
-      const transactions = (db_ops.getAll('transactions', 10000, 0) || [])
+      const transactions = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId);
 
@@ -239,7 +239,7 @@ export class BehavioralAnalyticsAgent extends BaseAgent {
       const { sellerId, behaviorData } = params;
 
       const sessions = behaviorData?.sessions || [];
-      const transactions = (db_ops.getAll('transactions', 10000, 0) || [])
+      const transactions = (await db_ops.getAll('transactions', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId);
 
@@ -296,7 +296,7 @@ export class BehavioralAnalyticsAgent extends BaseAgent {
     this.registerTool('check_device_reputation', 'Check device fingerprint reputation from past events', async (params) => {
       const { sellerId, deviceFingerprint } = params;
 
-      const allEvents = (db_ops.getAll('ato_events', 10000, 0) || [])
+      const allEvents = (await db_ops.getAll('ato_events', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.deviceInfo?.fingerprint === deviceFingerprint);
 
@@ -362,13 +362,13 @@ export class BehavioralAnalyticsAgent extends BaseAgent {
     // Agentic tools
     this.registerTool('search_knowledge_base', 'Search knowledge base for similar behavioral fraud cases', async (params) => {
       const { query, sellerId } = params;
-      const results = this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
+      const results = await this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
       return { success: true, data: { results, count: results.length } };
     });
 
     this.registerTool('retrieve_memory', 'Retrieve relevant behavioral anomaly patterns from long-term memory', async (params) => {
       const { context } = params;
-      const memories = this.memoryStore.queryLongTerm(this.agentId, context, 5);
+      const memories = await this.memoryStore.queryLongTerm(this.agentId, context, 5);
       return { success: true, data: { memories, count: memories.length } };
     });
   }

@@ -47,7 +47,7 @@ const pipelines = {
 };
 
 // Ingest event (real-time)
-router.post('/realtime', (req, res) => {
+router.post('/realtime', async (req, res) => {
   try {
     const event = {
       eventId: uuidv4(),
@@ -83,7 +83,7 @@ router.post('/realtime', (req, res) => {
   } catch (error) {
     // Dead letter queue on failure
     try {
-      db_ops.run(
+      await db_ops.run(
         'INSERT INTO dead_letter_queue (id, pipeline, event_data, error_message, created_at) VALUES (?, ?, ?, ?, ?)',
         [uuidv4(), 'realtime', JSON.stringify(req.body), error.message, new Date().toISOString()]
       );
@@ -93,7 +93,7 @@ router.post('/realtime', (req, res) => {
 });
 
 // Ingest batch (near real-time micro-batch)
-router.post('/near-realtime', (req, res) => {
+router.post('/near-realtime', async (req, res) => {
   try {
     const { events } = req.body;
 
@@ -124,7 +124,7 @@ router.post('/near-realtime', (req, res) => {
 });
 
 // Trigger batch pipeline
-router.post('/batch/trigger', (req, res) => {
+router.post('/batch/trigger', async (req, res) => {
   try {
     const { pipelineName, params } = req.body;
 
@@ -142,7 +142,7 @@ router.post('/batch/trigger', (req, res) => {
       ]
     };
 
-    db_ops.run(
+    await db_ops.run(
       'INSERT INTO pipeline_runs (run_id, pipeline_name, status, data, started_at) VALUES (?, ?, ?, ?, ?)',
       [runId, run.pipelineName, run.status, JSON.stringify(run), run.startedAt]
     );
@@ -151,11 +151,11 @@ router.post('/batch/trigger', (req, res) => {
     pipelines.batch.lastRun = run.startedAt;
 
     // Simulate async completion
-    setTimeout(() => {
+    setTimeout(async () => {
       run.status = 'COMPLETED';
       run.completedAt = new Date().toISOString();
       run.stages.forEach(s => s.status = 'COMPLETED');
-      db_ops.run(
+      await db_ops.run(
         'UPDATE pipeline_runs SET status = ?, data = ?, completed_at = ? WHERE run_id = ?',
         ['COMPLETED', JSON.stringify(run), run.completedAt, runId]
       );
@@ -172,7 +172,7 @@ router.post('/batch/trigger', (req, res) => {
 });
 
 // Get pipeline status
-router.get('/pipelines', (req, res) => {
+router.get('/pipelines', async (req, res) => {
   try {
     res.json({
       success: true,
@@ -184,7 +184,7 @@ router.get('/pipelines', (req, res) => {
 });
 
 // Get specific pipeline
-router.get('/pipelines/:pipelineId', (req, res) => {
+router.get('/pipelines/:pipelineId', async (req, res) => {
   try {
     const pipeline = Object.values(pipelines).find(p => p.id === req.params.pipelineId);
     if (!pipeline) {
@@ -197,7 +197,7 @@ router.get('/pipelines/:pipelineId', (req, res) => {
 });
 
 // Get pipeline runs
-router.get('/runs', (req, res) => {
+router.get('/runs', async (req, res) => {
   try {
     const { limit = 20, status } = req.query;
     let runs = db_ops.raw(
@@ -218,7 +218,7 @@ router.get('/runs', (req, res) => {
 });
 
 // Get stream buffer stats
-router.get('/streams/stats', (req, res) => {
+router.get('/streams/stats', async (req, res) => {
   try {
     res.json({
       success: true,
@@ -279,7 +279,7 @@ function extractFeatures(event) {
 
 // ─── Agent-Enhanced Route ────────────────────────────────────────────────────
 
-router.post('/agent/ingest', (req, res) => {
+router.post('/agent/ingest', async (req, res) => {
   const correlationId = `INGEST-${Date.now().toString(36).toUpperCase()}`;
 
   import('../../../agents/specialized/data-agent.js')

@@ -87,7 +87,7 @@ class TraceCollector {
     }
 
     // Persist to database
-    db_ops.insert('agent_traces', 'trace_id', traceId, trace);
+    await db_ops.insert('agent_traces', 'trace_id', traceId, trace);
     this.stats.tracesCompleted++;
 
     // Queue for OTLP export

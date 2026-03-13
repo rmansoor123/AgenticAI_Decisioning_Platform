@@ -46,7 +46,7 @@ export async function initializeGraph() {
  * Get a unified graph operations interface.
  * Returns an object with the same methods regardless of backend.
  */
-export function getGraphBackend() {
+export async function getGraphBackend() {
   if (activeBackend === 'neo4j' && neo4jQueries) {
     return {
       addNode: neo4jQueries.addNode,

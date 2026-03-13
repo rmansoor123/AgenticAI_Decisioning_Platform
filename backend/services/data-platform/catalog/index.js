@@ -5,11 +5,11 @@ import { generateDataset } from '../../../shared/synthetic-data/generators.js';
 const router = express.Router();
 
 // Get all datasets
-router.get('/datasets', (req, res) => {
+router.get('/datasets', async (req, res) => {
   try {
     const { limit = 50, offset = 0, type, tag } = req.query;
 
-    let datasets = db_ops.getAll('datasets', parseInt(limit), parseInt(offset));
+    let datasets = await db_ops.getAll('datasets', parseInt(limit), parseInt(offset));
     datasets = datasets.map(d => d.data);
 
     if (type) datasets = datasets.filter(d => d.type === type);
@@ -21,7 +21,7 @@ router.get('/datasets', (req, res) => {
       pagination: {
         limit: parseInt(limit),
         offset: parseInt(offset),
-        total: db_ops.count('datasets')
+        total: await db_ops.count('datasets')
       }
     });
   } catch (error) {
@@ -30,9 +30,9 @@ router.get('/datasets', (req, res) => {
 });
 
 // Get dataset by ID
-router.get('/datasets/:datasetId', (req, res) => {
+router.get('/datasets/:datasetId', async (req, res) => {
   try {
-    const dataset = db_ops.getById('datasets', 'dataset_id', req.params.datasetId);
+    const dataset = await db_ops.getById('datasets', 'dataset_id', req.params.datasetId);
     if (!dataset) {
       return res.status(404).json({ success: false, error: 'Dataset not found' });
     }
@@ -43,12 +43,12 @@ router.get('/datasets/:datasetId', (req, res) => {
 });
 
 // Register new dataset
-router.post('/datasets', (req, res) => {
+router.post('/datasets', async (req, res) => {
   try {
     const datasetData = req.body.datasetId ? req.body : generateDataset();
     datasetData.createdAt = new Date().toISOString();
 
-    db_ops.insert('datasets', 'dataset_id', datasetData.datasetId, datasetData);
+    await db_ops.insert('datasets', 'dataset_id', datasetData.datasetId, datasetData);
 
     res.status(201).json({ success: true, data: datasetData });
   } catch (error) {
@@ -57,15 +57,15 @@ router.post('/datasets', (req, res) => {
 });
 
 // Update dataset metadata
-router.put('/datasets/:datasetId', (req, res) => {
+router.put('/datasets/:datasetId', async (req, res) => {
   try {
-    const existing = db_ops.getById('datasets', 'dataset_id', req.params.datasetId);
+    const existing = await db_ops.getById('datasets', 'dataset_id', req.params.datasetId);
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Dataset not found' });
     }
 
     const updated = { ...existing.data, ...req.body, lastUpdated: new Date().toISOString() };
-    db_ops.update('datasets', 'dataset_id', req.params.datasetId, updated);
+    await db_ops.update('datasets', 'dataset_id', req.params.datasetId, updated);
 
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -74,9 +74,9 @@ router.put('/datasets/:datasetId', (req, res) => {
 });
 
 // Get dataset lineage
-router.get('/datasets/:datasetId/lineage', (req, res) => {
+router.get('/datasets/:datasetId/lineage', async (req, res) => {
   try {
-    const dataset = db_ops.getById('datasets', 'dataset_id', req.params.datasetId);
+    const dataset = await db_ops.getById('datasets', 'dataset_id', req.params.datasetId);
     if (!dataset) {
       return res.status(404).json({ success: false, error: 'Dataset not found' });
     }
@@ -84,7 +84,7 @@ router.get('/datasets/:datasetId/lineage', (req, res) => {
     const lineage = dataset.data.lineage || { upstream: [], downstream: [] };
 
     // Enrich with actual dataset info if available
-    const allDatasets = db_ops.getAll('datasets', 1000, 0).map(d => d.data);
+    const allDatasets = (await db_ops.getAll('datasets', 1000, 0)).map(d => d.data);
 
     const upstream = lineage.upstream.map(name => {
       const ds = allDatasets.find(d => d.name === name);
@@ -111,9 +111,9 @@ router.get('/datasets/:datasetId/lineage', (req, res) => {
 });
 
 // Get dataset schema
-router.get('/datasets/:datasetId/schema', (req, res) => {
+router.get('/datasets/:datasetId/schema', async (req, res) => {
   try {
-    const dataset = db_ops.getById('datasets', 'dataset_id', req.params.datasetId);
+    const dataset = await db_ops.getById('datasets', 'dataset_id', req.params.datasetId);
     if (!dataset) {
       return res.status(404).json({ success: false, error: 'Dataset not found' });
     }
@@ -135,9 +135,9 @@ router.get('/datasets/:datasetId/schema', (req, res) => {
 });
 
 // Get dataset quality metrics
-router.get('/datasets/:datasetId/quality', (req, res) => {
+router.get('/datasets/:datasetId/quality', async (req, res) => {
   try {
-    const dataset = db_ops.getById('datasets', 'dataset_id', req.params.datasetId);
+    const dataset = await db_ops.getById('datasets', 'dataset_id', req.params.datasetId);
     if (!dataset) {
       return res.status(404).json({ success: false, error: 'Dataset not found' });
     }
@@ -188,9 +188,9 @@ router.get('/datasets/:datasetId/quality', (req, res) => {
 });
 
 // Profile dataset - compute real quality metrics
-router.post('/datasets/:datasetId/profile', (req, res) => {
+router.post('/datasets/:datasetId/profile', async (req, res) => {
   try {
-    const dataset = db_ops.getById('datasets', 'dataset_id', req.params.datasetId);
+    const dataset = await db_ops.getById('datasets', 'dataset_id', req.params.datasetId);
     if (!dataset) {
       return res.status(404).json({ success: false, error: 'Dataset not found' });
     }
@@ -206,8 +206,8 @@ router.post('/datasets/:datasetId/profile', (req, res) => {
     const tableName = tableMap[dataset.data.name] || 'transactions';
 
     // Read sample data from backing table
-    const rows = db_ops.getAll(tableName, 500, 0);
-    const totalRows = db_ops.count(tableName);
+    const rows = await db_ops.getAll(tableName, 500, 0);
+    const totalRows = await db_ops.count(tableName);
 
     // Compute profiling metrics
     const nullCounts = {};
@@ -254,7 +254,7 @@ router.post('/datasets/:datasetId/profile', (req, res) => {
     const profileId = `PROF-${Date.now().toString(36).toUpperCase()}`;
 
     // Store profile
-    db_ops.run(
+    await db_ops.run(
       'INSERT INTO data_profiles (profile_id, dataset_id, table_name, total_rows, null_counts, value_distributions, freshness_seconds, completeness, profiled_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [profileId, req.params.datasetId, tableName, totalRows, JSON.stringify(nullCounts), JSON.stringify(valueDistributions), freshnessSeconds, completeness, new Date().toISOString()]
     );
@@ -279,7 +279,7 @@ router.post('/datasets/:datasetId/profile', (req, res) => {
 });
 
 // Search datasets
-router.get('/search', (req, res) => {
+router.get('/search', async (req, res) => {
   try {
     const { q, limit = 20 } = req.query;
 
@@ -287,7 +287,7 @@ router.get('/search', (req, res) => {
       return res.status(400).json({ success: false, error: 'Query parameter required' });
     }
 
-    const allDatasets = db_ops.getAll('datasets', 1000, 0).map(d => d.data);
+    const allDatasets = (await db_ops.getAll('datasets', 1000, 0)).map(d => d.data);
     const queryLower = q.toLowerCase();
 
     const results = allDatasets.filter(d =>
@@ -303,9 +303,9 @@ router.get('/search', (req, res) => {
 });
 
 // Get catalog statistics
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
-    const allDatasets = db_ops.getAll('datasets', 1000, 0).map(d => d.data);
+    const allDatasets = (await db_ops.getAll('datasets', 1000, 0)).map(d => d.data);
 
     const stats = {
       total: allDatasets.length,
@@ -363,7 +363,7 @@ function generateSampleSchema(datasetName) {
 
 // ─── Agent-Enhanced Routes ───────────────────────────────────────────────────
 
-router.post('/agent/curate', (req, res) => {
+router.post('/agent/curate', async (req, res) => {
   const correlationId = `CURATE-${Date.now().toString(36).toUpperCase()}`;
 
   import('../../../agents/specialized/data-agent.js')
@@ -381,7 +381,7 @@ router.post('/agent/curate', (req, res) => {
   });
 });
 
-router.post('/agent/features', (req, res) => {
+router.post('/agent/features', async (req, res) => {
   const correlationId = `FEAT-${Date.now().toString(36).toUpperCase()}`;
 
   import('../../../agents/specialized/feature-engineering-agent.js')

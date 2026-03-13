@@ -9,7 +9,7 @@ const router = express.Router();
 const simulationResults = new Map();
 
 // Run simulation
-router.post('/run', (req, res) => {
+router.post('/run', async (req, res) => {
   try {
     const {
       name,
@@ -24,7 +24,7 @@ router.post('/run', (req, res) => {
     const startTime = Date.now();
 
     // Get current rules
-    const currentRules = db_ops.getAll('rules', 1000, 0).map(r => r.data);
+    const currentRules = (await db_ops.getAll('rules', 1000, 0)).map(r => r.data);
     const activeRules = currentRules.filter(r => r.status === 'ACTIVE');
 
     // Apply rule changes for simulation
@@ -33,7 +33,7 @@ router.post('/run', (req, res) => {
     // Get or generate transactions
     let transactions;
     if (useHistoricalData) {
-      transactions = db_ops.getAll('transactions', sampleSize, 0).map(t => t.data);
+      transactions = (await db_ops.getAll('transactions', sampleSize, 0)).map(t => t.data);
     } else {
       transactions = Array.from({ length: sampleSize }, () => generateTransaction());
     }
@@ -73,7 +73,7 @@ router.post('/run', (req, res) => {
 });
 
 // Get simulation by ID
-router.get('/:simulationId', (req, res) => {
+router.get('/:simulationId', async (req, res) => {
   try {
     const simulation = simulationResults.get(req.params.simulationId);
     if (!simulation) {
@@ -86,7 +86,7 @@ router.get('/:simulationId', (req, res) => {
 });
 
 // Get all simulations
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { limit = 20 } = req.query;
     const simulations = Array.from(simulationResults.values())
@@ -100,16 +100,16 @@ router.get('/', (req, res) => {
 });
 
 // Run threshold sensitivity analysis
-router.post('/sensitivity', (req, res) => {
+router.post('/sensitivity', async (req, res) => {
   try {
     const { ruleId, thresholdField, minValue, maxValue, steps = 10 } = req.body;
 
-    const rule = db_ops.getById('rules', 'rule_id', ruleId);
+    const rule = await db_ops.getById('rules', 'rule_id', ruleId);
     if (!rule) {
       return res.status(404).json({ success: false, error: 'Rule not found' });
     }
 
-    const transactions = db_ops.getAll('transactions', 500, 0).map(t => t.data);
+    const transactions = (await db_ops.getAll('transactions', 500, 0)).map(t => t.data);
     const stepSize = (maxValue - minValue) / steps;
     const results = [];
 
@@ -164,13 +164,13 @@ router.post('/sensitivity', (req, res) => {
 });
 
 // Compare rule sets
-router.post('/compare-rules', (req, res) => {
+router.post('/compare-rules', async (req, res) => {
   try {
     const { ruleSetA, ruleSetB, sampleSize = 500 } = req.body;
 
-    const transactions = db_ops.getAll('transactions', sampleSize, 0).map(t => t.data);
+    const transactions = (await db_ops.getAll('transactions', sampleSize, 0)).map(t => t.data);
 
-    const allRules = db_ops.getAll('rules', 1000, 0).map(r => r.data);
+    const allRules = (await db_ops.getAll('rules', 1000, 0)).map(r => r.data);
 
     const rulesA = allRules.filter(r => ruleSetA.includes(r.ruleId));
     const rulesB = allRules.filter(r => ruleSetB.includes(r.ruleId));
@@ -198,16 +198,16 @@ router.post('/compare-rules', (req, res) => {
 });
 
 // Monte Carlo simulation with bootstrap sampling
-router.post('/monte-carlo', (req, res) => {
+router.post('/monte-carlo', async (req, res) => {
   try {
     const { ruleChanges, iterations = 1000, sampleSize = 500, confidenceLevel = 0.95 } = req.body;
 
-    const transactions = db_ops.getAll('transactions', sampleSize, 0).map(t => t.data);
+    const transactions = (await db_ops.getAll('transactions', sampleSize, 0)).map(t => t.data);
     if (transactions.length === 0) {
       return res.status(400).json({ success: false, error: 'No transactions available for simulation' });
     }
 
-    const rules = db_ops.getAll('rules', 1000, 0).map(r => r.data).filter(r => r.status === 'ACTIVE');
+    const rules = (await db_ops.getAll('rules', 1000, 0)).map(r => r.data).filter(r => r.status === 'ACTIVE');
     const simulatedRules = applyRuleChanges(rules, ruleChanges, null);
 
     // Bootstrap: run N iterations with resampled transactions
@@ -261,18 +261,17 @@ router.post('/monte-carlo', (req, res) => {
 });
 
 // What-if analysis
-router.post('/what-if', (req, res) => {
+router.post('/what-if', async (req, res) => {
   try {
     const { scenario, transactions: inputTransactions } = req.body;
 
     // Get transactions to analyze
     let transactions = inputTransactions;
     if (!transactions || transactions.length === 0) {
-      transactions = db_ops.getAll('transactions', 100, 0).map(t => t.data);
+      transactions = (await db_ops.getAll('transactions', 100, 0)).map(t => t.data);
     }
 
-    const rules = db_ops.getAll('rules', 1000, 0)
-      .map(r => r.data)
+    const rules = (await db_ops.getAll('rules', 1000, 0)).map(r => r.data)
       .filter(r => r.status === 'ACTIVE');
 
     // Analyze each transaction

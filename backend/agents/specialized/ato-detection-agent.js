@@ -47,12 +47,12 @@ export class ATODetectionAgent extends BaseAgent {
     return this._thresholdManager.getThresholds(this.agentId);
   }
 
-  registerTools() {
+  async registerTools() {
     // Tool 1: Check device trust score from ato_events history
     this.registerTool('check_device_trust', 'Check device fingerprint trust score from ATO event history', async (params) => {
       const { deviceFingerprint, sellerId } = params;
 
-      const events = (db_ops.getAll('ato_events', 10000, 0) || [])
+      const events = (await db_ops.getAll('ato_events', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.deviceInfo?.fingerprint === deviceFingerprint);
 
@@ -105,7 +105,7 @@ export class ATODetectionAgent extends BaseAgent {
     this.registerTool('detect_impossible_travel', 'Detect impossible travel via geo/time analysis vs last event', async (params) => {
       const { sellerId, currentLocation, currentTime } = params;
 
-      const recentEvents = (db_ops.getAll('ato_events', 1000, 0) || [])
+      const recentEvents = (await db_ops.getAll('ato_events', 1000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId)
         .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
@@ -156,7 +156,7 @@ export class ATODetectionAgent extends BaseAgent {
     this.registerTool('check_login_velocity', 'Detect brute force via login attempts in 15min/1h/24h windows', async (params) => {
       const { sellerId } = params;
 
-      const allEvents = (db_ops.getAll('ato_events', 10000, 0) || [])
+      const allEvents = (await db_ops.getAll('ato_events', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId);
 
@@ -200,7 +200,7 @@ export class ATODetectionAgent extends BaseAgent {
     this.registerTool('check_credential_patterns', 'Analyze failed login rate and user-agent diversity', async (params) => {
       const { sellerId } = params;
 
-      const recentEvents = (db_ops.getAll('ato_events', 10000, 0) || [])
+      const recentEvents = (await db_ops.getAll('ato_events', 10000, 0) || [])
         .map(e => e.data)
         .filter(e => e.sellerId === sellerId && (Date.now() - new Date(e.timestamp)) < 7 * 24 * 60 * 60 * 1000);
 
@@ -241,10 +241,10 @@ export class ATODetectionAgent extends BaseAgent {
     this.registerTool('get_session_risk_profile', 'Cross-reference sessions, MFA status, and recent changes', async (params) => {
       const { sellerId } = params;
 
-      const seller = db_ops.getById('sellers', 'seller_id', sellerId);
+      const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
       const sellerData = seller?.data || {};
 
-      const recentProfileUpdates = (db_ops.getAll('profile_updates', 1000, 0) || [])
+      const recentProfileUpdates = (await db_ops.getAll('profile_updates', 1000, 0) || [])
         .map(r => r.data)
         .filter(r => r.sellerId === sellerId && (Date.now() - new Date(r.createdAt)) < 72 * 60 * 60 * 1000);
 
@@ -283,13 +283,13 @@ export class ATODetectionAgent extends BaseAgent {
     // Agentic tools
     this.registerTool('search_knowledge_base', 'Search knowledge base for similar ATO cases', async (params) => {
       const { query, sellerId } = params;
-      const results = this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
+      const results = await this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
       return { success: true, data: { results, count: results.length } };
     });
 
     this.registerTool('retrieve_memory', 'Retrieve relevant ATO patterns from long-term memory', async (params) => {
       const { context } = params;
-      const memories = this.memoryStore.queryLongTerm(this.agentId, context, 5);
+      const memories = await this.memoryStore.queryLongTerm(this.agentId, context, 5);
       return { success: true, data: { memories, count: memories.length } };
     });
   }

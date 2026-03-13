@@ -110,7 +110,7 @@ class PlatformIntegrator {
       // Fire-and-forget: persist prediction
       const predictionId = `PRED-${uuidv4().substring(0, 10).toUpperCase()}`;
       try {
-        db_ops.run(
+        await db_ops.run(
           'INSERT INTO prediction_history (prediction_id, model_id, features, score, decision, created_at) VALUES (?, ?, ?, ?, ?, ?)',
           [predictionId, 'fraud-detector-v3', JSON.stringify(extracted.normalized || {}), mlResult.score, decisionResult.label, new Date().toISOString()]
         );
@@ -153,8 +153,7 @@ class PlatformIntegrator {
    */
   async _enrichRules(agentId, domain, input, observeResult) {
     try {
-      const allRules = db_ops.getAll('rules', 1000, 0)
-        .map(r => r.data)
+      const allRules = (await db_ops.getAll('rules', 1000, 0)).map(r => r.data)
         .filter(r => r.status === 'ACTIVE');
 
       // Build transaction-like object for rule evaluation
@@ -179,7 +178,7 @@ class PlatformIntegrator {
 
           // Fire-and-forget: record rule performance
           try {
-            db_ops.run(
+            await db_ops.run(
               'INSERT INTO rule_performance (id, rule_id, transaction_id, triggered, decision, latency_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
               [uuidv4(), rule.ruleId, input?.sellerId || input?.transactionId || null, result.triggered ? 1 : 0, result.triggered ? rule.action : null, ruleLatency, new Date().toISOString()]
             );
@@ -225,8 +224,7 @@ class PlatformIntegrator {
    */
   async _enrichExperimentation(agentId, domain, input) {
     try {
-      const experiments = db_ops.getAll('experiments', 100, 0)
-        .map(e => e.data)
+      const experiments = (await db_ops.getAll('experiments', 100, 0)).map(e => e.data)
         .filter(e => e.status === 'RUNNING');
 
       if (experiments.length === 0) return null;
@@ -240,7 +238,7 @@ class PlatformIntegrator {
 
       // Fire-and-forget: record experiment event
       try {
-        db_ops.run(
+        await db_ops.run(
           'INSERT INTO experiment_events (event_id, experiment_id, entity_id, variant, event_type, value, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
           [`EVT-${uuidv4().substring(0, 8).toUpperCase()}`, experiment.experimentId, entityId, assignment.variant, `${domain}_evaluated`, null, JSON.stringify({ agentId }), new Date().toISOString()]
         );

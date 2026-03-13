@@ -163,7 +163,7 @@ async function runTests() {
     // Insert test events into the database
     for (let i = 0; i < events.length; i++) {
       const eventId = `EVT-TEST-${Date.now()}-${i}`;
-      db_ops.insert('risk_events', 'event_id', eventId, events[i]);
+      await db_ops.insert('risk_events', 'event_id', eventId, events[i]);
     }
 
     const tool = agent.tools.get('check_sequence_pattern');
@@ -186,7 +186,7 @@ async function runTests() {
     const now = Date.now();
 
     for (let i = 0; i < 5; i++) {
-      db_ops.insert('risk_events', 'event_id', `VEL-EVT-${now}-${i}`, {
+      await db_ops.insert('risk_events', 'event_id', `VEL-EVT-${now}-${i}`, {
         sellerId: velocitySellerId,
         domain: 'transaction',
         eventType: 'VELOCITY_SPIKE',
@@ -265,14 +265,14 @@ async function runTests() {
     const now = Date.now();
 
     // Insert events out of order
-    db_ops.insert('risk_events', 'event_id', `TL-EVT-${now}-2`, {
+    await db_ops.insert('risk_events', 'event_id', `TL-EVT-${now}-2`, {
       sellerId: timelineSellerId,
       domain: 'transaction',
       eventType: 'VELOCITY_SPIKE',
       riskScore: 70,
       createdAt: new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString()
     });
-    db_ops.insert('risk_events', 'event_id', `TL-EVT-${now}-1`, {
+    await db_ops.insert('risk_events', 'event_id', `TL-EVT-${now}-1`, {
       sellerId: timelineSellerId,
       domain: 'onboarding',
       eventType: 'SELLER_APPROVED',

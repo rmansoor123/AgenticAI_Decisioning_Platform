@@ -1014,7 +1014,7 @@ export class BaseAgent {
     // Gather advisory context for the LLM
     let recentMemory = [];
     try {
-      const mem = this.memoryStore.getShortTerm(this.agentId, this.sessionId);
+      const mem = await this.memoryStore.getShortTerm(this.agentId, this.sessionId);
       recentMemory = (mem instanceof Promise ? await mem : mem).slice(0, 5);
     } catch (_) { /* memory retrieval failed */ }
     const patternMatches = this.checkPatterns(input);

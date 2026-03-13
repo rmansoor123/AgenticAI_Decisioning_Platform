@@ -21,7 +21,7 @@ class ReasoningCheckpoint {
    * @param {string} phase - Current phase: 'think', 'plan', 'act', 'observe', 'reflect'
    * @param {Object} state - The state to persist
    */
-  save(sessionId, agentId, phase, state) {
+  async save(sessionId, agentId, phase, state) {
     const checkpointId = `CKPT-${sessionId}-${phase}`;
     const checkpoint = {
       checkpointId,
@@ -32,7 +32,7 @@ class ReasoningCheckpoint {
       savedAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
     };
-    db_ops.insert(CHECKPOINT_TABLE, 'checkpoint_id', checkpointId, checkpoint);
+    await db_ops.insert(CHECKPOINT_TABLE, 'checkpoint_id', checkpointId, checkpoint);
     this.stats.saved++;
     return checkpointId;
   }
@@ -42,9 +42,8 @@ class ReasoningCheckpoint {
    * @param {string} sessionId - The reasoning session ID
    * @returns {Object|null} { phase, state, savedAt } or null
    */
-  load(sessionId) {
-    const all = db_ops.getAll(CHECKPOINT_TABLE, 100, 0)
-      .map(r => typeof r.data === 'string' ? JSON.parse(r.data) : r.data)
+  async load(sessionId) {
+    const all = (await db_ops.getAll(CHECKPOINT_TABLE, 100, 0)).map(r => typeof r.data === 'string' ? JSON.parse(r.data) : r.data)
       .filter(c => c.sessionId === sessionId && new Date(c.expiresAt) > new Date())
       .sort((a, b) => {
         const timeDiff = new Date(b.savedAt) - new Date(a.savedAt);
@@ -69,9 +68,8 @@ class ReasoningCheckpoint {
   /**
    * Load all checkpoints for a session (for debugging/replay).
    */
-  loadAll(sessionId) {
-    return db_ops.getAll(CHECKPOINT_TABLE, 100, 0)
-      .map(r => typeof r.data === 'string' ? JSON.parse(r.data) : r.data)
+  async loadAll(sessionId) {
+    return (await db_ops.getAll(CHECKPOINT_TABLE, 100, 0)).map(r => typeof r.data === 'string' ? JSON.parse(r.data) : r.data)
       .filter(c => c.sessionId === sessionId)
       .sort((a, b) => {
         const phaseOrder = ['think', 'plan', 'act', 'observe', 'reflect', 'judge', 'conclude'];
@@ -87,27 +85,25 @@ class ReasoningCheckpoint {
   /**
    * Clear checkpoints for a completed session.
    */
-  clear(sessionId) {
-    const all = db_ops.getAll(CHECKPOINT_TABLE, 100, 0)
-      .map(r => typeof r.data === 'string' ? JSON.parse(r.data) : r.data)
+  async clear(sessionId) {
+    const all = (await db_ops.getAll(CHECKPOINT_TABLE, 100, 0)).map(r => typeof r.data === 'string' ? JSON.parse(r.data) : r.data)
       .filter(c => c.sessionId === sessionId);
 
     for (const c of all) {
-      db_ops.delete(CHECKPOINT_TABLE, 'checkpoint_id', c.checkpointId);
+      await db_ops.delete(CHECKPOINT_TABLE, 'checkpoint_id', c.checkpointId);
     }
   }
 
   /**
    * Purge expired checkpoints (housekeeping).
    */
-  purgeExpired() {
+  async purgeExpired() {
     const now = new Date().toISOString();
-    const all = db_ops.getAll(CHECKPOINT_TABLE, 500, 0)
-      .map(r => typeof r.data === 'string' ? JSON.parse(r.data) : r.data)
+    const all = (await db_ops.getAll(CHECKPOINT_TABLE, 500, 0)).map(r => typeof r.data === 'string' ? JSON.parse(r.data) : r.data)
       .filter(c => c.expiresAt && c.expiresAt < now);
 
     for (const c of all) {
-      db_ops.delete(CHECKPOINT_TABLE, 'checkpoint_id', c.checkpointId);
+      await db_ops.delete(CHECKPOINT_TABLE, 'checkpoint_id', c.checkpointId);
       this.stats.expired++;
     }
 

@@ -261,7 +261,7 @@ export async function createTestSellersWithConnections() {
       }
 
       // Store seller
-      db_ops.insert('sellers', 'seller_id', sellerId, fullSellerData);
+      await db_ops.insert('sellers', 'seller_id', sellerId, fullSellerData);
       createdSellers.push(fullSellerData);
       
       // Small delay to ensure unique IDs

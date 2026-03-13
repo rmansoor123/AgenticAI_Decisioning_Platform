@@ -8,11 +8,11 @@ import { getListingIntelligenceAgent } from '../../../agents/specialized/listing
 const router = express.Router();
 
 // Get all listings
-router.get('/listings', (req, res) => {
+router.get('/listings', async (req, res) => {
   try {
     const { limit = 50, offset = 0, sellerId, status, category } = req.query;
 
-    let listings = db_ops.getAll('listings', parseInt(limit), parseInt(offset));
+    let listings = await db_ops.getAll('listings', parseInt(limit), parseInt(offset));
     listings = listings.map(l => l.data);
 
     if (sellerId) listings = listings.filter(l => l.sellerId === sellerId);
@@ -25,7 +25,7 @@ router.get('/listings', (req, res) => {
       pagination: {
         limit: parseInt(limit),
         offset: parseInt(offset),
-        total: db_ops.count('listings')
+        total: await db_ops.count('listings')
       }
     });
   } catch (error) {
@@ -34,9 +34,9 @@ router.get('/listings', (req, res) => {
 });
 
 // Get listing by ID
-router.get('/listings/:listingId', (req, res) => {
+router.get('/listings/:listingId', async (req, res) => {
   try {
-    const listing = db_ops.getById('listings', 'listing_id', req.params.listingId);
+    const listing = await db_ops.getById('listings', 'listing_id', req.params.listingId);
     if (!listing) {
       return res.status(404).json({ success: false, error: 'Listing not found' });
     }
@@ -58,7 +58,7 @@ router.post('/listings', async (req, res) => {
     listingData.status = 'EVALUATING';
     listingData.riskAssessment = null;
     listingData.createdAt = new Date().toISOString();
-    db_ops.insert('listings', 'listing_id', listingId, listingData);
+    await db_ops.insert('listings', 'listing_id', listingId, listingData);
 
     // Return HTTP 202 immediately
     res.status(202).json({
@@ -89,7 +89,7 @@ router.post('/listings', async (req, res) => {
       evaluationType: 'listing_review',
       _correlationId: correlationId
     })
-      .then(agentResult => {
+      .then(async agentResult => {
         const rec = agentResult.result?.recommendation || agentResult.result?.decision;
         const decision = rec?.action || 'FLAG';
         const riskScore = agentResult.result?.overallRisk?.score ?? 50;
@@ -103,7 +103,7 @@ router.post('/listings', async (req, res) => {
         else listingStatus = 'ACTIVE';
 
         // Update listing with final decision
-        db_ops.update('listings', 'listing_id', listingId, {
+        await db_ops.update('listings', 'listing_id', listingId, {
           ...listingData,
           status: listingStatus,
           riskAssessment: { riskScore, decision, reasoning, agentId, evaluatedAt: new Date().toISOString() }
@@ -120,7 +120,7 @@ router.post('/listings', async (req, res) => {
         // Create case on FLAG or REJECT
         if (decision === 'FLAG' || decision === 'REJECT') {
           const caseId = 'CASE-' + randomUUID().substring(0, 8).toUpperCase();
-          db_ops.insert('cases', 'case_id', caseId, {
+          await db_ops.insert('cases', 'case_id', caseId, {
             caseId, checkpoint: 'LISTING_REVIEW',
             priority: riskScore >= 80 ? 'CRITICAL' : riskScore >= 60 ? 'HIGH' : 'MEDIUM',
             status: 'OPEN', sellerId: listingData.sellerId, entityId: listingId, entityType: 'LISTING',
@@ -140,9 +140,9 @@ router.post('/listings', async (req, res) => {
 
         console.log(`[ListingService] Completed: ${listingId} → ${decision} (risk: ${riskScore})`);
       })
-      .catch(error => {
+      .catch(async error => {
         console.error(`[ListingService] Agent error for ${listingId}:`, error.message);
-        db_ops.update('listings', 'listing_id', listingId, {
+        await db_ops.update('listings', 'listing_id', listingId, {
           ...listingData,
           status: 'PENDING_REVIEW',
           riskAssessment: { riskScore: 50, decision: 'FLAG', reasoning: `Agent error: ${error.message}`, agentId: 'LISTING_INTELLIGENCE', evaluatedAt: new Date().toISOString() }
@@ -162,15 +162,15 @@ router.post('/listings', async (req, res) => {
 });
 
 // Update listing
-router.put('/listings/:listingId', (req, res) => {
+router.put('/listings/:listingId', async (req, res) => {
   try {
-    const existing = db_ops.getById('listings', 'listing_id', req.params.listingId);
+    const existing = await db_ops.getById('listings', 'listing_id', req.params.listingId);
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Listing not found' });
     }
 
     const updated = { ...existing.data, ...req.body, updatedAt: new Date().toISOString() };
-    db_ops.update('listings', 'listing_id', req.params.listingId, updated);
+    await db_ops.update('listings', 'listing_id', req.params.listingId, updated);
 
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -179,10 +179,10 @@ router.put('/listings/:listingId', (req, res) => {
 });
 
 // Update listing status
-router.patch('/listings/:listingId/status', (req, res) => {
+router.patch('/listings/:listingId/status', async (req, res) => {
   try {
     const { status, reason } = req.body;
-    const existing = db_ops.getById('listings', 'listing_id', req.params.listingId);
+    const existing = await db_ops.getById('listings', 'listing_id', req.params.listingId);
 
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Listing not found' });
@@ -198,7 +198,7 @@ router.patch('/listings/:listingId/status', (req, res) => {
       updatedAt: new Date().toISOString()
     };
 
-    db_ops.update('listings', 'listing_id', req.params.listingId, updated);
+    await db_ops.update('listings', 'listing_id', req.params.listingId, updated);
 
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -207,11 +207,10 @@ router.patch('/listings/:listingId/status', (req, res) => {
 });
 
 // Get listings for a seller
-router.get('/sellers/:sellerId/listings', (req, res) => {
+router.get('/sellers/:sellerId/listings', async (req, res) => {
   try {
     const { limit = 50, status } = req.query;
-    let listings = db_ops.getAll('listings', 1000, 0)
-      .map(l => l.data)
+    let listings = (await db_ops.getAll('listings', 1000, 0)).map(l => l.data)
       .filter(l => l.sellerId === req.params.sellerId);
 
     if (status) listings = listings.filter(l => l.status === status);
@@ -223,12 +222,12 @@ router.get('/sellers/:sellerId/listings', (req, res) => {
 });
 
 // Bulk listing analysis
-router.post('/analyze/bulk', (req, res) => {
+router.post('/analyze/bulk', async (req, res) => {
   try {
     const { listingIds } = req.body;
 
-    const results = listingIds.map(id => {
-      const listing = db_ops.getById('listings', 'listing_id', id);
+    const results = listingIds.map(async id => {
+      const listing = await db_ops.getById('listings', 'listing_id', id);
       if (!listing) return { listingId: id, error: 'Not found' };
       return {
         listingId: id,
@@ -244,12 +243,11 @@ router.post('/analyze/bulk', (req, res) => {
 });
 
 // Get flagged listings
-router.get('/flagged', (req, res) => {
+router.get('/flagged', async (req, res) => {
   try {
     const { limit = 50 } = req.query;
 
-    const flaggedListings = db_ops.getAll('listings', 1000, 0)
-      .map(l => l.data)
+    const flaggedListings = (await db_ops.getAll('listings', 1000, 0)).map(l => l.data)
       .filter(l => {
         const flags = l.riskFlags || {};
         return Object.values(flags).some(v => v === true);
@@ -263,9 +261,9 @@ router.get('/flagged', (req, res) => {
 });
 
 // Listing statistics
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
-    const allListings = db_ops.getAll('listings', 10000, 0).map(l => l.data);
+    const allListings = (await db_ops.getAll('listings', 10000, 0)).map(l => l.data);
 
     const stats = {
       total: allListings.length,

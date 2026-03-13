@@ -78,7 +78,7 @@ export class ListingIntelligenceAgent extends AutonomousAgent {
         }
 
         try {
-          const allListings = db_ops.getAll('listings', 1000, 0);
+          const allListings = await db_ops.getAll('listings', 1000, 0);
           const sellerListings = allListings
             .map(l => l.data || l)
             .filter(l => (l.sellerId || l.seller_id) === sellerId)
@@ -104,7 +104,7 @@ export class ListingIntelligenceAgent extends AutonomousAgent {
       'Compute pricing statistics (median, mean, min, max) per category across all listings',
       async (params) => {
         try {
-          const allListings = db_ops.getAll('listings', 1000, 0);
+          const allListings = await db_ops.getAll('listings', 1000, 0);
           const listings = allListings.map(l => l.data || l);
 
           // Group by category
@@ -162,7 +162,7 @@ export class ListingIntelligenceAgent extends AutonomousAgent {
         }
 
         try {
-          const allListings = db_ops.getAll('listings', 1000, 0);
+          const allListings = await db_ops.getAll('listings', 1000, 0);
           const sellerListings = allListings
             .map(l => l.data || l)
             .filter(l => (l.sellerId || l.seller_id) === sellerId);
@@ -213,7 +213,7 @@ export class ListingIntelligenceAgent extends AutonomousAgent {
         }
 
         try {
-          const allListings = db_ops.getAll('listings', 1000, 0);
+          const allListings = await db_ops.getAll('listings', 1000, 0);
           const listings = allListings.map(l => l.data || l);
 
           // Find target listing
@@ -314,7 +314,7 @@ export class ListingIntelligenceAgent extends AutonomousAgent {
         }
 
         try {
-          const allListings = db_ops.getAll('listings', 1000, 0);
+          const allListings = await db_ops.getAll('listings', 1000, 0);
           const sellerListings = allListings
             .map(l => l.data || l)
             .filter(l => (l.sellerId || l.seller_id) === sellerId);

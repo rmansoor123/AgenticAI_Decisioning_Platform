@@ -41,10 +41,10 @@ export class AccountSetupAgent extends BaseAgent {
 
   get autonomyThresholds() { return this._thresholdManager.getThresholds(this.agentId); }
 
-  registerTools() {
+  async registerTools() {
     this.registerTool('verify_bank_account', 'Validate routing number and country match', async (params) => {
       const { routingNumber, bankCountry, sellerId } = params;
-      const seller = db_ops.getById('sellers', 'seller_id', sellerId);
+      const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
       const sellerCountry = seller?.data?.country || 'US';
       const countryMatch = !bankCountry || bankCountry === sellerCountry;
       const validRouting = routingNumber && routingNumber.length >= 8 && routingNumber.length <= 12;
@@ -64,7 +64,7 @@ export class AccountSetupAgent extends BaseAgent {
       const { taxId, sellerId } = params;
       if (!taxId) return { success: true, data: { taxId: null, reusedBy: [], riskScore: 10, riskLevel: 'MEDIUM' } };
 
-      const allSellers = (db_ops.getAll('sellers', 10000, 0) || []).map(s => s.data);
+      const allSellers = (await db_ops.getAll('sellers', 10000, 0) || []).map(s => s.data);
       const reusedBy = allSellers.filter(s => s.taxId === taxId && s.sellerId !== sellerId);
 
       return {
@@ -83,7 +83,7 @@ export class AccountSetupAgent extends BaseAgent {
       const { bankAccount, sellerId } = params;
       if (!bankAccount) return { success: true, data: { sharedWith: [], riskScore: 0, riskLevel: 'LOW' } };
 
-      const allSellers = (db_ops.getAll('sellers', 10000, 0) || []).map(s => s.data);
+      const allSellers = (await db_ops.getAll('sellers', 10000, 0) || []).map(s => s.data);
       const last4 = bankAccount.last4 || bankAccount.accountNumber?.slice(-4);
       const sharedWith = last4 ? allSellers.filter(s =>
         s.sellerId !== sellerId && (s.bankAccount?.last4 === last4 || s.bankAccount?.accountNumber?.slice(-4) === last4)
@@ -121,12 +121,12 @@ export class AccountSetupAgent extends BaseAgent {
 
     this.registerTool('get_account_age_signals', 'Analyze account creation patterns and velocity', async (params) => {
       const { sellerId } = params;
-      const seller = db_ops.getById('sellers', 'seller_id', sellerId);
+      const seller = await db_ops.getById('sellers', 'seller_id', sellerId);
       const createdAt = seller?.data?.createdAt ? new Date(seller.data.createdAt) : new Date();
       const ageDays = Math.round((Date.now() - createdAt) / (1000 * 60 * 60 * 24));
 
       // Check recent account creation velocity from same IP/email domain
-      const allSellers = (db_ops.getAll('sellers', 10000, 0) || []).map(s => s.data);
+      const allSellers = (await db_ops.getAll('sellers', 10000, 0) || []).map(s => s.data);
       const recentAccounts = allSellers.filter(s => {
         const sAge = (Date.now() - new Date(s.createdAt)) / (1000 * 60 * 60 * 24);
         return sAge < 7;
@@ -146,13 +146,13 @@ export class AccountSetupAgent extends BaseAgent {
 
     this.registerTool('search_knowledge_base', 'Search KB for similar account setup cases', async (params) => {
       const { query, sellerId } = params;
-      const results = this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
+      const results = await this.knowledgeBase.searchKnowledge(null, query, sellerId ? { sellerId } : {}, 5);
       return { success: true, data: { results, count: results.length } };
     });
 
     this.registerTool('retrieve_memory', 'Retrieve account setup patterns from memory', async (params) => {
       const { context } = params;
-      const memories = this.memoryStore.queryLongTerm(this.agentId, context, 5);
+      const memories = await this.memoryStore.queryLongTerm(this.agentId, context, 5);
       return { success: true, data: { memories, count: memories.length } };
     });
   }

@@ -9,11 +9,11 @@ import { emitRiskEvent } from '../../risk-profile/emit-event.js';
 const router = express.Router();
 
 // Get all sellers with pagination and filters
-router.get('/sellers', (req, res) => {
+router.get('/sellers', async (req, res) => {
   try {
     const { limit = 50, offset = 0, status, riskTier, country } = req.query;
 
-    let sellers = db_ops.getAll('sellers', parseInt(limit), parseInt(offset));
+    let sellers = await db_ops.getAll('sellers', parseInt(limit), parseInt(offset));
     sellers = sellers.map(s => s.data);
 
     // Apply filters
@@ -33,7 +33,7 @@ router.get('/sellers', (req, res) => {
       pagination: {
         limit: parseInt(limit),
         offset: parseInt(offset),
-        total: db_ops.count('sellers')
+        total: await db_ops.count('sellers')
       }
     });
   } catch (error) {
@@ -42,9 +42,9 @@ router.get('/sellers', (req, res) => {
 });
 
 // Get seller by ID
-router.get('/sellers/:sellerId', (req, res) => {
+router.get('/sellers/:sellerId', async (req, res) => {
   try {
-    const seller = db_ops.getById('sellers', 'seller_id', req.params.sellerId);
+    const seller = await db_ops.getById('sellers', 'seller_id', req.params.sellerId);
     if (!seller) {
       return res.status(404).json({ success: false, error: 'Seller not found' });
     }
@@ -63,18 +63,24 @@ router.post('/sellers', async (req, res) => {
     const sellerId = sellerData.sellerId || `SLR-${Date.now().toString(36).toUpperCase()}`;
     sellerData.sellerId = sellerId;
 
+    // Map underscore-prefixed pre-qualification flags from frontend
+    if (sellerData._kycVerified) sellerData.kycVerified = true;
+    if (sellerData._bankVerified) sellerData.bankVerified = true;
+    if (sellerData._idVerification) sellerData.idVerification = sellerData._idVerification;
+
     // Include ID verification results if available
-    if (req.body.idVerification) {
-      sellerData.idVerification = req.body.idVerification;
+    if (req.body.idVerification || sellerData.idVerification) {
+      const idVerif = req.body.idVerification || sellerData.idVerification;
+      sellerData.idVerification = idVerif;
       // Auto-fill from extracted data if not already provided
-      if (req.body.idVerification.extractedData) {
-        const extracted = req.body.idVerification.extractedData;
+      if (idVerif.extractedData) {
+        const extracted = idVerif.extractedData;
         sellerData.documentType = sellerData.documentType || extracted.documentType;
         sellerData.documentNumber = sellerData.documentNumber || extracted.documentNumber;
         sellerData.address = sellerData.address || extracted.address;
         sellerData.country = sellerData.country || extracted.country;
         // Mark as KYC verified if ID verification passed
-        if (req.body.idVerification.isValid) {
+        if (idVerif.isValid) {
           sellerData.kycVerified = true;
         }
       }
@@ -85,21 +91,21 @@ router.post('/sellers', async (req, res) => {
 
     // Store seller immediately with EVALUATING status
     sellerData.status = 'EVALUATING';
-    db_ops.insert('sellers', 'seller_id', sellerId, sellerData);
+    await db_ops.insert('sellers', 'seller_id', sellerId, sellerData);
 
     // Update image seller_id references if images were saved with temp ID
     if (sellerData.idVerification?.savedImageIds) {
       const { selfie, idDocument } = sellerData.idVerification.savedImageIds;
       if (selfie) {
-        const selfieImg = db_ops.getById('seller_images', 'image_id', selfie);
+        const selfieImg = await db_ops.getById('seller_images', 'image_id', selfie);
         if (selfieImg && selfieImg.data.sellerId?.startsWith('TEMP-')) {
-          db_ops.update('seller_images', 'image_id', selfie, { ...selfieImg.data, sellerId });
+          await db_ops.update('seller_images', 'image_id', selfie, { ...selfieImg.data, sellerId });
         }
       }
       if (idDocument) {
-        const idImg = db_ops.getById('seller_images', 'image_id', idDocument);
+        const idImg = await db_ops.getById('seller_images', 'image_id', idDocument);
         if (idImg && idImg.data.sellerId?.startsWith('TEMP-')) {
-          db_ops.update('seller_images', 'image_id', idDocument, { ...idImg.data, sellerId });
+          await db_ops.update('seller_images', 'image_id', idDocument, { ...idImg.data, sellerId });
         }
       }
     }
@@ -116,7 +122,7 @@ router.post('/sellers', async (req, res) => {
     // Fire-and-forget: run agent pipeline asynchronously
     console.log(`[Onboarding Agent] Evaluating seller: ${sellerId} (correlation: ${correlationId})`);
     sellerOnboarding.evaluateSeller(sellerId, sellerData, { _correlationId: correlationId })
-      .then(agentResult => {
+      .then(async agentResult => {
         const decision = agentResult.result?.decision || { action: 'REVIEW', confidence: 0.5 };
         const riskAssessment = {
           riskScore: agentResult.result?.overallRisk?.score || 50,
@@ -144,7 +150,7 @@ router.post('/sellers', async (req, res) => {
         else if (decision.action === 'APPROVE') updatedData.status = 'ACTIVE';
         else updatedData.status = 'UNDER_REVIEW';
 
-        db_ops.update('sellers', 'seller_id', sellerId, updatedData);
+        await db_ops.update('sellers', 'seller_id', sellerId, updatedData);
 
         // Emit risk events
         emitRiskEvent({
@@ -206,7 +212,7 @@ router.post('/sellers', async (req, res) => {
         if (agentResult.result?._platformSignals?.experimentVariant) {
           const exp = agentResult.result._platformSignals.experimentVariant;
           try {
-            db_ops.run(
+            await db_ops.run(
               'INSERT INTO experiment_events (event_id, experiment_id, entity_id, variant, event_type, value, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
               [`EVT-${Date.now().toString(36).toUpperCase()}`, exp.experimentId, sellerId, exp.variant,
                'onboarding_decision', riskAssessment.riskScore || 0,
@@ -218,10 +224,10 @@ router.post('/sellers', async (req, res) => {
 
         console.log(`[Onboarding Agent] Completed: ${sellerId} → ${decision.action} (${(decision.confidence * 100).toFixed(0)}%)`);
       })
-      .catch(error => {
+      .catch(async error => {
         console.error(`[Onboarding Agent] Error evaluating ${sellerId}:`, error.message);
         // Update seller status to reflect failure
-        db_ops.update('sellers', 'seller_id', sellerId, { ...sellerData, status: 'EVALUATION_FAILED', error: error.message });
+        await db_ops.update('sellers', 'seller_id', sellerId, { ...sellerData, status: 'EVALUATION_FAILED', error: error.message });
         // Emit error event
         try {
           import('../../../gateway/websocket/event-bus.js').then(({ getEventBus }) => {
@@ -242,15 +248,15 @@ router.post('/sellers', async (req, res) => {
 });
 
 // Update seller
-router.put('/sellers/:sellerId', (req, res) => {
+router.put('/sellers/:sellerId', async (req, res) => {
   try {
-    const existing = db_ops.getById('sellers', 'seller_id', req.params.sellerId);
+    const existing = await db_ops.getById('sellers', 'seller_id', req.params.sellerId);
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Seller not found' });
     }
 
     const updated = { ...existing.data, ...req.body, updatedAt: new Date().toISOString() };
-    db_ops.update('sellers', 'seller_id', req.params.sellerId, updated);
+    await db_ops.update('sellers', 'seller_id', req.params.sellerId, updated);
 
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -259,10 +265,10 @@ router.put('/sellers/:sellerId', (req, res) => {
 });
 
 // Update seller status
-router.patch('/sellers/:sellerId/status', (req, res) => {
+router.patch('/sellers/:sellerId/status', async (req, res) => {
   try {
     const { status, reason } = req.body;
-    const existing = db_ops.getById('sellers', 'seller_id', req.params.sellerId);
+    const existing = await db_ops.getById('sellers', 'seller_id', req.params.sellerId);
 
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Seller not found' });
@@ -278,7 +284,7 @@ router.patch('/sellers/:sellerId/status', (req, res) => {
       updatedAt: new Date().toISOString()
     };
 
-    db_ops.update('sellers', 'seller_id', req.params.sellerId, updated);
+    await db_ops.update('sellers', 'seller_id', req.params.sellerId, updated);
 
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -287,9 +293,9 @@ router.patch('/sellers/:sellerId/status', (req, res) => {
 });
 
 // Get seller KYC status
-router.get('/sellers/:sellerId/kyc', (req, res) => {
+router.get('/sellers/:sellerId/kyc', async (req, res) => {
   try {
-    const seller = db_ops.getById('sellers', 'seller_id', req.params.sellerId);
+    const seller = await db_ops.getById('sellers', 'seller_id', req.params.sellerId);
     if (!seller) {
       return res.status(404).json({ success: false, error: 'Seller not found' });
     }
@@ -315,9 +321,9 @@ router.get('/sellers/:sellerId/kyc', (req, res) => {
 });
 
 // Get onboarding statistics
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
-    const allSellers = db_ops.getAll('sellers', 10000, 0).map(s => s.data);
+    const allSellers = (await db_ops.getAll('sellers', 10000, 0)).map(s => s.data);
 
     const stats = {
       total: allSellers.length,
@@ -395,7 +401,7 @@ function performOnboardingRiskAssessment(seller) {
 // New endpoint to get agent evaluation details
 router.get('/sellers/:sellerId/agent-evaluation', async (req, res) => {
   try {
-    const seller = db_ops.getById('sellers', 'seller_id', req.params.sellerId);
+    const seller = await db_ops.getById('sellers', 'seller_id', req.params.sellerId);
     if (!seller) {
       return res.status(404).json({ success: false, error: 'Seller not found' });
     }
@@ -419,9 +425,9 @@ router.get('/sellers/:sellerId/agent-evaluation', async (req, res) => {
 });
 
 // Get onboarding statistics
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
-    const allSellers = db_ops.getAll('sellers', 10000, 0).map(s => s.data);
+    const allSellers = (await db_ops.getAll('sellers', 10000, 0)).map(s => s.data);
     
     const stats = {
       total: allSellers.length,
@@ -494,7 +500,7 @@ router.post('/id-verification', async (req, res) => {
       
       // Save selfie image
       const selfieImageId = `IMG-${uuidv4().slice(0, 8).toUpperCase()}`;
-      db_ops.insert('seller_images', 'image_id', selfieImageId, {
+      await db_ops.insert('seller_images', 'image_id', selfieImageId, {
         sellerId,
         imageType: 'SELFIE',
         imageData: selfieImage,
@@ -507,7 +513,7 @@ router.post('/id-verification', async (req, res) => {
 
       // Save ID image
       const idImageId = `IMG-${uuidv4().slice(0, 8).toUpperCase()}`;
-      db_ops.insert('seller_images', 'image_id', idImageId, {
+      await db_ops.insert('seller_images', 'image_id', idImageId, {
         sellerId,
         imageType: 'ID_DOCUMENT',
         imageData: idImage,
@@ -542,13 +548,13 @@ router.post('/id-verification', async (req, res) => {
 });
 
 // Get seller images
-router.get('/sellers/:sellerId/images', (req, res) => {
+router.get('/sellers/:sellerId/images', async (req, res) => {
   try {
     const { sellerId } = req.params;
     const { type } = req.query;
 
     // Get all images and filter
-    const allImages = db_ops.getAll('seller_images', 10000, 0);
+    const allImages = await db_ops.getAll('seller_images', 10000, 0);
     let images = allImages
       .map(img => img.data)
       .filter(img => {
@@ -578,10 +584,10 @@ router.get('/sellers/:sellerId/images', (req, res) => {
 });
 
 // Get specific image
-router.get('/images/:imageId', (req, res) => {
+router.get('/images/:imageId', async (req, res) => {
   try {
     const { imageId } = req.params;
-    const image = db_ops.getById('seller_images', 'image_id', imageId);
+    const image = await db_ops.getById('seller_images', 'image_id', imageId);
 
     if (!image) {
       return res.status(404).json({ success: false, error: 'Image not found' });
@@ -635,7 +641,7 @@ router.post('/tools/execute', async (req, res) => {
 });
 
 // List all available agent tools (used by MCP server for discovery)
-router.get('/tools', (req, res) => {
+router.get('/tools', async (req, res) => {
   try {
     const tools = Array.from(sellerOnboarding.tools?.entries() || []).map(([name, t]) => ({
       name,
