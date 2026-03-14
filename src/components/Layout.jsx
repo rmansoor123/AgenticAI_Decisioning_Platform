@@ -78,6 +78,12 @@ export default function Layout({ children, wsConnected }) {
       ]
     },
     {
+      name: 'Education',
+      href: '/education',
+      icon: BookOpen,
+      color: 'text-emerald-400'
+    },
+    {
       name: 'Platform',
       href: '/data',
       icon: Layers,

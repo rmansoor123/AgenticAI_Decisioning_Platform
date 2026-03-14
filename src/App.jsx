@@ -50,6 +50,7 @@ import ReviewLive from './pages/ReviewLive'
 import BehavioralLive from './pages/BehavioralLive'
 import BuyerTrustLive from './pages/BuyerTrustLive'
 import PolicyLive from './pages/PolicyLive'
+import Education from './pages/Education'
 
 const API_BASE = '/api'
 // Connect directly to backend WebSocket to avoid Vite HMR proxy conflict
@@ -228,6 +229,7 @@ function App() {
           <Route path="/behavioral/live" element={<BehavioralLive />} />
           <Route path="/buyer-trust/live" element={<BuyerTrustLive />} />
           <Route path="/policy/live" element={<PolicyLive />} />
+          <Route path="/education" element={<Education />} />
         </Routes>
       </Layout>
     </BrowserRouter>
