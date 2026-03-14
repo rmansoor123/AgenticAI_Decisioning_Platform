@@ -119,6 +119,23 @@ router.post('/sellers', async (req, res) => {
       message: 'Agent evaluation started. Watch the Agent Flow panel for real-time progress.'
     });
 
+    // Ingest onboarding event into streaming pipeline (Kafka-style)
+    try {
+      const { getStreamEngine } = await import('../../../streaming/stream-engine.js');
+      const engine = getStreamEngine();
+      engine.produce('onboarding.received', sellerId, {
+        type: 'seller_onboarding',
+        sellerId,
+        correlationId,
+        businessName: sellerData.businessName,
+        country: sellerData.country,
+        businessCategory: sellerData.businessCategory,
+        email: sellerData.email,
+        timestamp: new Date().toISOString(),
+        source: 'onboarding-service'
+      });
+    } catch (_) { /* streaming ingestion is best-effort */ }
+
     // Fire-and-forget: run agent pipeline asynchronously
     console.log(`[Onboarding Agent] Evaluating seller: ${sellerId} (correlation: ${correlationId})`);
     sellerOnboarding.evaluateSeller(sellerId, sellerData, { _correlationId: correlationId })

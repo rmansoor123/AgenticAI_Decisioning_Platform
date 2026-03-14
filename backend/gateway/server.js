@@ -435,7 +435,94 @@ import { setStreamEngine } from './websocket/transaction-pipeline.js';
 const streamEngine = getStreamEngine();
 const featureStore = getFeatureStore();
 await initStreamProcessors(streamEngine, featureStore);
+
+// Initialize Onboarding ML Pipeline (Kafka-style topics + processors)
+try {
+  const { initOnboardingPipeline } = await import('../streaming/onboarding-pipeline.js');
+  const onboardingPipeline = await initOnboardingPipeline(streamEngine, featureStore);
+  console.log(`Onboarding ML pipeline initialized: ${onboardingPipeline.processors.length} processors, 6 topics`);
+} catch (err) {
+  console.warn('Onboarding pipeline initialization skipped:', err.message);
+}
+
 console.log('Streaming engine initialized with', streamEngine.getTopics().length, 'topics');
+
+// Seed ML-based onboarding decision rule (if not exists)
+try {
+  const existingRules = (await db_ops.getAll('rules', 1000, 0)).map(r => r.data);
+  const mlRuleExists = existingRules.some(r => r.ruleId === 'RULE-ML-ONBOARDING-001');
+  if (!mlRuleExists) {
+    await db_ops.insert('rules', 'rule_id', 'RULE-ML-ONBOARDING-001', {
+      ruleId: 'RULE-ML-ONBOARDING-001',
+      name: 'ML Model High Risk Onboarding',
+      description: 'Triggers REVIEW when the onboarding ML model scores a seller above the high-risk threshold. Model evaluates 25 seller features including identity, financial, compliance, and behavioral signals.',
+      type: 'ML_MODEL',
+      checkpoint: 'onboarding',
+      priority: 10,
+      status: 'ACTIVE',
+      conditions: [
+        { field: 'mlScore', operator: 'GT', value: 0.55, description: 'ML model risk score exceeds medium threshold' }
+      ],
+      action: 'REVIEW',
+      tags: ['ml-model', 'onboarding', 'automated'],
+      createdAt: new Date().toISOString(),
+      performance: { triggered: 0, truePositives: 0, falsePositives: 0 }
+    });
+    await db_ops.insert('rules', 'rule_id', 'RULE-ML-ONBOARDING-002', {
+      ruleId: 'RULE-ML-ONBOARDING-002',
+      name: 'ML Model Critical Risk Onboarding',
+      description: 'Triggers BLOCK when the onboarding ML model scores a seller above the critical-risk threshold, indicating very high probability of fraudulent application.',
+      type: 'ML_MODEL',
+      checkpoint: 'onboarding',
+      priority: 5,
+      status: 'ACTIVE',
+      conditions: [
+        { field: 'mlScore', operator: 'GT', value: 0.80, description: 'ML model risk score exceeds critical threshold' }
+      ],
+      action: 'BLOCK',
+      tags: ['ml-model', 'onboarding', 'automated', 'critical'],
+      createdAt: new Date().toISOString(),
+      performance: { triggered: 0, truePositives: 0, falsePositives: 0 }
+    });
+    console.log('Seeded 2 ML-based onboarding decision rules');
+  }
+
+  // Seed onboarding ML dataset in data catalog
+  const existingDatasets = (await db_ops.getAll('datasets', 100, 0)).map(d => d.data);
+  const onbDatasetExists = existingDatasets.some(d => d.datasetId === 'DS-ONBOARDING-FEATURES');
+  if (!onbDatasetExists) {
+    await db_ops.insert('datasets', 'dataset_id', 'DS-ONBOARDING-FEATURES', {
+      datasetId: 'DS-ONBOARDING-FEATURES',
+      name: 'Onboarding Risk Features',
+      description: '25 engineered features extracted from seller onboarding applications for ML model training and inference. Includes identity verification, financial, compliance, behavioral, and network risk signals.',
+      type: 'feature_store',
+      format: 'json',
+      schema: [
+        { name: 'businessAgeDays', type: 'float', description: 'Days since business incorporation' },
+        { name: 'countryRiskScore', type: 'float', description: 'Country-based risk score (0-100)' },
+        { name: 'categoryRiskScore', type: 'float', description: 'Business category risk score (0-100)' },
+        { name: 'identityVerificationScore', type: 'float', description: 'KYC identity verification score' },
+        { name: 'emailRiskScore', type: 'float', description: 'Email reputation and risk score' },
+        { name: 'bankVerificationScore', type: 'float', description: 'Bank account verification score' },
+        { name: 'watchlistMatchScore', type: 'float', description: 'OFAC/PEP sanctions match score' },
+        { name: 'velocityScore', type: 'float', description: 'Registration velocity anomaly score' },
+        { name: 'deviceTrustScore', type: 'float', description: 'Device fingerprint trust score' },
+        { name: 'networkRiskScore', type: 'float', description: 'Graph-based network risk score' }
+      ],
+      tags: ['ml-features', 'onboarding', 'real-time', 'feature-store'],
+      backingTable: 'feature_store',
+      featureGroup: 'seller_onboarding',
+      featureCount: 25,
+      modelRef: 'onboarding-risk-v1',
+      upstream: ['sellers', 'risk_events'],
+      downstream: ['prediction_history', 'onboarding-risk-v1'],
+      createdAt: new Date().toISOString()
+    });
+    console.log('Seeded onboarding ML features dataset in data catalog');
+  }
+} catch (err) {
+  console.warn('ML rule seeding skipped:', err.message);
+}
 
 // Initialize Graph Engine + Build from seed data
 import { getGraphEngine } from '../graph/graph-engine.js';

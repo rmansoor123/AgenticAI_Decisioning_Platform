@@ -4,6 +4,7 @@
  */
 
 import { FraudDetectionModel, getFraudModel } from './fraud-model.js';
+import { OnboardingRiskModel, getOnboardingRiskModel } from './onboarding-risk-model.js';
 
 // Model registry
 const modelRegistry = new Map();
@@ -63,9 +64,13 @@ class ModelLoader {
   async _loadModelInternal(modelId) {
     console.log(`Loading model: ${modelId}`);
 
-    // For now, all models use the fraud detection architecture
-    // In production, different model types would have different architectures
-    const model = getFraudModel();
+    // Route to the correct model architecture based on model ID
+    let model;
+    if (modelId.includes('onboarding')) {
+      model = getOnboardingRiskModel();
+    } else {
+      model = getFraudModel();
+    }
     await model.load();
 
     // Register model metadata
@@ -134,7 +139,7 @@ class ModelLoader {
 
     const modelsToLoad = [
       'fraud-detector-v3',
-      // Add more models here as needed
+      'onboarding-risk-v1',
     ];
 
     const loadPromises = modelsToLoad.map(id =>

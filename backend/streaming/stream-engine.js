@@ -28,7 +28,14 @@ const TOPIC_EVENT_MAP = {
   'risk.events': 'risk:event',
   'alerts.created': 'alert:created',
   'agent.actions': 'agent:action',
-  'features.materialized': 'features:materialized'
+  'features.materialized': 'features:materialized',
+  // Onboarding ML pipeline events
+  'onboarding.received': 'onboarding:received',
+  'onboarding.enriched': 'onboarding:enriched',
+  'onboarding.features': 'onboarding:features',
+  'onboarding.scored': 'onboarding:ml:scored',
+  'onboarding.decided': 'onboarding:ml:decided',
+  'onboarding.emitted': 'onboarding:emitted'
 };
 
 // ---------------------------------------------------------------------------
@@ -378,7 +385,14 @@ const DEFAULT_TOPICS = [
   'risk.events',
   'alerts.created',
   'agent.actions',
-  'features.materialized'
+  'features.materialized',
+  // Onboarding ML pipeline topics
+  'onboarding.received',
+  'onboarding.enriched',
+  'onboarding.features',
+  'onboarding.scored',
+  'onboarding.decided',
+  'onboarding.emitted'
 ];
 
 /**

@@ -34,6 +34,11 @@ const FEATURE_GROUPS = {
     ttl: 300000, // 5 minutes
     description: 'Graph-based risk signals from entity networks',
   },
+  seller_onboarding: {
+    name: 'seller_onboarding',
+    ttl: 600000, // 10 minutes — onboarding features persist longer for evaluation
+    description: '25 ML-engineered features for onboarding risk model (identity, financial, compliance, behavioral)',
+  },
 };
 
 // ---------------------------------------------------------------------------

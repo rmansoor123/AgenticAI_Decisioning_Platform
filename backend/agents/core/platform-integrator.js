@@ -17,6 +17,22 @@ import { v4 as uuidv4 } from 'uuid';
 import { db_ops } from '../../shared/common/database.js';
 import { extractFeatures as extractMLFeatures } from '../../services/ml-platform/models/feature-extractor.js';
 import { generateDecision } from '../../services/ml-platform/inference/decision-generator.js';
+
+// Domain-specific feature extractors
+const DOMAIN_EXTRACTORS = {
+  'onboarding': async () => {
+    const { extractOnboardingFeatures } = await import('../../services/ml-platform/models/onboarding-feature-extractor.js');
+    return extractOnboardingFeatures;
+  }
+};
+
+// Domain-specific ML models
+const DOMAIN_MODELS = {
+  'onboarding': { modelId: 'onboarding-risk-v1', loader: async () => {
+    const { getOnboardingRiskModel } = await import('../../services/ml-platform/models/onboarding-risk-model.js');
+    return getOnboardingRiskModel();
+  }}
+};
 import { evaluateRule, calculateRiskScore } from '../../services/decision-engine/execution/rule-evaluator.js';
 import { assignVariant } from '../../services/experimentation/ab-testing/variant-assigner.js';
 
@@ -80,40 +96,73 @@ class PlatformIntegrator {
    */
   async _enrichML(agentId, domain, input, observeResult) {
     try {
-      // Build feature object from input
-      const featureData = {
-        amount: input?.amount || input?.sellerData?.amount || input?.transactionData?.amount || 0,
-        velocity: input?.velocity || {},
-        deviceFingerprint: input?.deviceFingerprint || input?.device?.fingerprint || 'unknown',
-        geoData: input?.geoData || { country: input?.country || input?.sellerData?.country || 'US' },
-        accountAge: input?.accountAge || 30,
-        sellerId: input?.sellerId || input?.sellerData?.sellerId || 'unknown',
-        email: input?.email || input?.sellerData?.email || '',
-        businessCategory: input?.businessCategory || input?.sellerData?.businessCategory || 'general'
-      };
+      let extracted, mlResult, decisionResult, modelId;
 
-      // Extract features
-      const extracted = extractMLFeatures(featureData);
+      // Check for domain-specific model
+      const domainKey = domain === 'seller-onboarding' ? 'onboarding' : domain;
+      if (DOMAIN_MODELS[domainKey]) {
+        // Use domain-specific feature extractor and model
+        const extractorFactory = DOMAIN_EXTRACTORS[domainKey];
+        if (extractorFactory) {
+          const extractFn = await extractorFactory();
+          extracted = extractFn(input?.sellerData || input || {});
+        } else {
+          extracted = extractMLFeatures(input || {});
+        }
 
-      // Lazy-load model
-      if (!this.modelLoader) {
-        const { getModelLoader } = await import('../../services/ml-platform/models/model-loader.js');
-        this.modelLoader = getModelLoader();
+        const domainModel = DOMAIN_MODELS[domainKey];
+        modelId = domainModel.modelId;
+        const model = await domainModel.loader();
+        await model.load();
+        mlResult = await model.predict(extracted.vector);
+
+        // Domain-specific decision thresholds for onboarding
+        if (domainKey === 'onboarding') {
+          const score = mlResult.score;
+          decisionResult = {
+            score,
+            label: score > 0.75 ? 'REJECT' : score > 0.45 ? 'REVIEW' : 'APPROVE',
+            decision: score > 0.75 ? 'REJECT' : score > 0.45 ? 'REVIEW' : 'APPROVE',
+            confidence: 0.5 + Math.abs(score - 0.5) * 0.8
+          };
+        } else {
+          decisionResult = generateDecision(mlResult.score, 'FRAUD_DETECTION');
+        }
+      } else {
+        // Default: general fraud detection model
+        const featureData = {
+          amount: input?.amount || input?.sellerData?.amount || input?.transactionData?.amount || 0,
+          velocity: input?.velocity || {},
+          deviceFingerprint: input?.deviceFingerprint || input?.device?.fingerprint || 'unknown',
+          geoData: input?.geoData || { country: input?.country || input?.sellerData?.country || 'US' },
+          accountAge: input?.accountAge || 30,
+          sellerId: input?.sellerId || input?.sellerData?.sellerId || 'unknown',
+          email: input?.email || input?.sellerData?.email || '',
+          businessCategory: input?.businessCategory || input?.sellerData?.businessCategory || 'general'
+        };
+
+        extracted = extractMLFeatures(featureData);
+        modelId = 'fraud-detector-v3';
+
+        if (!this.modelLoader) {
+          const { getModelLoader } = await import('../../services/ml-platform/models/model-loader.js');
+          this.modelLoader = getModelLoader();
+        }
+
+        const model = await this.modelLoader.ensureLoaded(modelId);
+        mlResult = await model.predict(extracted.vector);
+        decisionResult = generateDecision(mlResult.score, 'FRAUD_DETECTION');
       }
-
-      const model = await this.modelLoader.ensureLoaded('fraud-detector-v3');
-      const mlResult = await model.predict(extracted.vector);
-
-      // Generate decision
-      const decisionResult = generateDecision(mlResult.score, 'FRAUD_DETECTION');
 
       // Fire-and-forget: persist prediction
       const predictionId = `PRED-${uuidv4().substring(0, 10).toUpperCase()}`;
       try {
-        await db_ops.run(
-          'INSERT INTO prediction_history (prediction_id, model_id, features, score, decision, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-          [predictionId, 'fraud-detector-v3', JSON.stringify(extracted.normalized || {}), mlResult.score, decisionResult.label, new Date().toISOString()]
-        );
+        await db_ops.insert('prediction_history', 'prediction_id', predictionId, {
+          predictionId, modelId: modelId || 'fraud-detector-v3',
+          features: extracted.normalized || {},
+          score: mlResult.score, decision: decisionResult.label,
+          createdAt: new Date().toISOString()
+        });
       } catch (_) { /* best-effort */ }
 
       // Build enriched risk factors from ML score

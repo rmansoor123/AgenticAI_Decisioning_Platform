@@ -586,6 +586,177 @@ export class SellerOnboardingAgent extends BaseAgent {
     });
 
     // ============================================================================
+    // ML MODEL INFERENCE TOOL
+    // ============================================================================
+
+    this.registerTool('run_ml_inference', 'Run the onboarding risk ML model on seller features for real-time scoring', async (params) => {
+      try {
+        // 1. Extract onboarding features from seller data
+        const { extractOnboardingFeatures } = await import('../../services/ml-platform/models/onboarding-feature-extractor.js');
+        const extracted = extractOnboardingFeatures(params);
+
+        // 2. Run ML inference via onboarding risk model
+        const { getOnboardingRiskModel } = await import('../../services/ml-platform/models/onboarding-risk-model.js');
+        const model = getOnboardingRiskModel();
+        await model.load();
+        const prediction = await model.predict(extracted.vector);
+
+        // 3. Calculate feature contributions (SHAP-like explainability)
+        const { calculateOnboardingContributions } = await import('../../services/ml-platform/models/onboarding-feature-extractor.js');
+        const contributions = calculateOnboardingContributions(extracted, prediction.score);
+        const topContributors = contributions.slice(0, 5);
+
+        // 4. Store features in feature store via streaming pipeline
+        try {
+          const { getFeatureStore } = await import('../../streaming/feature-store.js');
+          const featureStore = getFeatureStore();
+          featureStore.putFeatures(params.sellerId || 'unknown', 'seller_onboarding', {
+            ...extracted.normalized,
+            ml_score: prediction.score,
+            scored_at: Date.now()
+          });
+        } catch (_) { /* feature store write is best-effort */ }
+
+        // 5. Publish to streaming pipeline
+        try {
+          const { getStreamEngine } = await import('../../streaming/stream-engine.js');
+          const engine = getStreamEngine();
+          engine.produce('onboarding.scored', params.sellerId || 'unknown', {
+            sellerId: params.sellerId,
+            mlScore: prediction.score,
+            features: extracted.normalized,
+            modelVersion: prediction.modelVersion,
+            latencyMs: prediction.latencyMs,
+            timestamp: new Date().toISOString()
+          });
+        } catch (_) { /* streaming publish is best-effort */ }
+
+        // 6. Persist prediction to prediction_history (fire-and-forget)
+        try {
+          const predictionId = `PRED-ONB-${Date.now().toString(36).toUpperCase()}`;
+          await db_ops.insert('prediction_history', 'prediction_id', predictionId, {
+            predictionId,
+            modelId: 'onboarding-risk-v1',
+            sellerId: params.sellerId,
+            features: extracted.normalized,
+            score: prediction.score,
+            decision: prediction.score > 0.75 ? 'REJECT' : prediction.score > 0.45 ? 'REVIEW' : 'APPROVE',
+            featureCount: extracted.featureCount,
+            latencyMs: prediction.latencyMs,
+            modelVersion: prediction.modelVersion,
+            createdAt: new Date().toISOString()
+          });
+        } catch (_) { /* persistence is best-effort */ }
+
+        // 7. Determine ML decision
+        let mlDecision, mlConfidence;
+        if (prediction.score > 0.75) {
+          mlDecision = 'REJECT';
+          mlConfidence = Math.min(0.95, 0.5 + (prediction.score - 0.75) * 2);
+        } else if (prediction.score > 0.45) {
+          mlDecision = 'REVIEW';
+          mlConfidence = 0.5 + Math.abs(prediction.score - 0.6) * 1.5;
+        } else {
+          mlDecision = 'APPROVE';
+          mlConfidence = Math.min(0.95, 0.5 + (0.45 - prediction.score) * 2);
+        }
+
+        return {
+          success: true,
+          data: {
+            mlScore: prediction.score,
+            mlDecision,
+            mlConfidence,
+            modelVersion: prediction.modelVersion,
+            latencyMs: prediction.latencyMs,
+            featureCount: extracted.featureCount,
+            topRiskContributors: topContributors.map(c => ({
+              feature: c.feature,
+              value: c.value,
+              contribution: c.contribution,
+              direction: c.direction,
+              description: c.description
+            })),
+            riskBreakdown: {
+              identityRisk: extracted.normalized.identityVerificationScore || 0,
+              financialRisk: extracted.normalized.bankVerificationScore || 0,
+              complianceRisk: extracted.normalized.watchlistMatchScore || 0,
+              behavioralRisk: extracted.normalized.velocityScore || 0,
+              networkRisk: extracted.normalized.networkRiskScore || 0
+            },
+            source: 'onboarding-risk-model-v1'
+          }
+        };
+      } catch (error) {
+        console.error('[OnboardingAgent] ML inference error:', error.message);
+        return {
+          success: false,
+          data: {
+            mlScore: null,
+            mlDecision: 'REVIEW',
+            mlConfidence: 0.3,
+            error: error.message,
+            source: 'ml-fallback'
+          }
+        };
+      }
+    });
+
+    // ============================================================================
+    // DATA LAYER & FEATURE STORE TOOLS
+    // ============================================================================
+
+    this.registerTool('get_seller_features', 'Retrieve pre-computed seller features from the feature store', async (params) => {
+      try {
+        const { getFeatureStore } = await import('../../streaming/feature-store.js');
+        const featureStore = getFeatureStore();
+        const sellerProfile = featureStore.getFeatures(params.sellerId, 'seller_profile');
+        const onboardingFeatures = featureStore.getFeatures(params.sellerId, 'seller_onboarding');
+        const networkRisk = featureStore.getFeatures(params.sellerId, 'network_risk');
+
+        return {
+          success: true,
+          data: {
+            sellerProfile: sellerProfile || { exists: false },
+            onboardingFeatures: onboardingFeatures || { exists: false },
+            networkRisk: networkRisk || { exists: false },
+            source: 'feature-store'
+          }
+        };
+      } catch (error) {
+        return { success: false, data: { error: error.message } };
+      }
+    });
+
+    this.registerTool('ingest_to_data_pipeline', 'Ingest seller onboarding event into the real-time data pipeline', async (params) => {
+      try {
+        const { getStreamEngine } = await import('../../streaming/stream-engine.js');
+        const engine = getStreamEngine();
+        const result = engine.produce('onboarding.received', params.sellerId || 'unknown', {
+          type: 'seller_onboarding',
+          sellerId: params.sellerId,
+          businessName: params.businessName,
+          country: params.country,
+          businessCategory: params.businessCategory,
+          timestamp: new Date().toISOString(),
+          ...params
+        });
+
+        return {
+          success: true,
+          data: {
+            topic: 'onboarding.received',
+            partition: result?.partition,
+            offset: result?.offset,
+            message: 'Onboarding event ingested into streaming pipeline'
+          }
+        };
+      } catch (error) {
+        return { success: false, data: { error: error.message } };
+      }
+    });
+
+    // ============================================================================
     // GRAPH NETWORK TOOLS
     // ============================================================================
 
@@ -659,6 +830,20 @@ export class SellerOnboardingAgent extends BaseAgent {
         actions.push({ type: 'check_ip_reputation', params: { ipAddress: context.input.sellerData.ipAddress } });
       }
     }
+
+    // Always run ML inference as part of the evaluation
+    actions.push({
+      type: 'ingest_to_data_pipeline',
+      params: { ...context.input?.sellerData, sellerId: context.input?.sellerId }
+    });
+    actions.push({
+      type: 'run_ml_inference',
+      params: { ...context.input?.sellerData, sellerId: context.input?.sellerId }
+    });
+    actions.push({
+      type: 'get_seller_features',
+      params: { sellerId: context.input?.sellerId }
+    });
 
     actions.push({
       type: 'search_knowledge_base',
@@ -958,6 +1143,43 @@ export class SellerOnboardingAgent extends BaseAgent {
       // IP reputation
       if (e.source === 'check_ip_reputation' && e.data.riskScore > 60) {
         factors.push({ factor: 'HIGH_RISK_IP', severity: 'MEDIUM', score: 20 });
+      }
+
+      // ML Model inference results — integrate real model scoring
+      if (e.source === 'run_ml_inference' && e.data.mlScore !== null && e.data.mlScore !== undefined) {
+        const mlScore = e.data.mlScore;
+        if (mlScore > 0.75) {
+          factors.push({ factor: `ML_MODEL_HIGH_RISK (score: ${mlScore.toFixed(3)})`, severity: 'CRITICAL', score: 35 });
+        } else if (mlScore > 0.55) {
+          factors.push({ factor: `ML_MODEL_ELEVATED_RISK (score: ${mlScore.toFixed(3)})`, severity: 'HIGH', score: 20 });
+        } else if (mlScore > 0.35) {
+          factors.push({ factor: `ML_MODEL_MODERATE_RISK (score: ${mlScore.toFixed(3)})`, severity: 'MEDIUM', score: 10 });
+        } else {
+          factors.push({ factor: `ML_MODEL_LOW_RISK (score: ${mlScore.toFixed(3)})`, severity: 'POSITIVE', score: -15 });
+        }
+
+        // Add top risk contributors from ML model
+        if (e.data.topRiskContributors) {
+          for (const contrib of e.data.topRiskContributors) {
+            if (contrib.direction === 'positive' && Math.abs(contrib.contribution) > 0.02) {
+              factors.push({
+                factor: `ML_FEATURE_${contrib.feature.toUpperCase()} (${contrib.description})`,
+                severity: Math.abs(contrib.contribution) > 0.05 ? 'HIGH' : 'MEDIUM',
+                score: Math.round(Math.abs(contrib.contribution) * 100)
+              });
+            }
+          }
+        }
+      }
+
+      // Feature store data — add context from pre-computed features
+      if (e.source === 'get_seller_features' && e.data.networkRisk?.exists !== false) {
+        const nr = e.data.networkRisk;
+        if (nr.total_signals > 5) {
+          factors.push({ factor: 'NETWORK_RISK_SIGNALS_HIGH', severity: 'HIGH', score: 25 });
+        } else if (nr.total_signals > 2) {
+          factors.push({ factor: 'NETWORK_RISK_SIGNALS_MODERATE', severity: 'MEDIUM', score: 10 });
+        }
       }
     });
 

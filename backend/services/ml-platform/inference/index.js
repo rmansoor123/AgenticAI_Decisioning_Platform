@@ -8,6 +8,7 @@ import { db_ops } from '../../../shared/common/database.js';
 import { v4 as uuidv4 } from 'uuid';
 import { getModelLoader } from '../models/model-loader.js';
 import { extractFeatures, calculateFeatureContributions, getFeatureImportance } from '../models/feature-extractor.js';
+import { extractOnboardingFeatures, calculateOnboardingContributions, getOnboardingFeatureImportance } from '../models/onboarding-feature-extractor.js';
 
 const router = express.Router();
 
@@ -44,10 +45,14 @@ router.post('/predict', async (req, res) => {
     };
 
     // Load the TensorFlow model
-    const model = await modelLoader.ensureLoaded(modelMeta.modelId || 'fraud-detector-v3');
+    const effectiveModelId = modelMeta.modelId || 'fraud-detector-v3';
+    const model = await modelLoader.ensureLoaded(effectiveModelId);
 
-    // Extract features from input
-    const extractedFeatures = extractFeatures(features || {});
+    // Extract features — use onboarding extractor for onboarding models
+    const isOnboardingModel = effectiveModelId.includes('onboarding');
+    const extractedFeatures = isOnboardingModel
+      ? extractOnboardingFeatures(features || {})
+      : extractFeatures(features || {});
 
     // Make prediction with real ML model
     const mlResult = await model.predict(extractedFeatures.vector);
