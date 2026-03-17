@@ -370,7 +370,7 @@ export class BaseAgent {
 
         // Emit action complete with result summary
         const resultData = actionResult?.data || actionResult || {};
-        this.emitEvent('agent:action:complete', {
+        const actionCompletePayload = {
           agentId: this.agentId,
           action: action.type,
           success: actionResult?.success !== false,
@@ -378,7 +378,51 @@ export class BaseAgent {
           riskScore: resultData.riskScore ?? resultData.risk_score ?? null,
           verified: resultData.verified ?? resultData.valid ?? null,
           summary: this._summarizeToolResult(action.type, resultData)
-        });
+        };
+        // Attach platform integration details for ML/pipeline/feature tools
+        if (action.type === 'run_ml_inference' && resultData.mlScore != null) {
+          actionCompletePayload.platform = {
+            type: 'ml_inference',
+            model: 'onboarding-risk-v1',
+            architecture: '25→128→64→32→1 (sigmoid)',
+            framework: 'TensorFlow.js',
+            score: resultData.mlScore,
+            decision: resultData.mlDecision,
+            confidence: resultData.mlConfidence,
+            version: resultData.modelVersion,
+            latencyMs: resultData.latencyMs,
+            featureCount: resultData.featureCount,
+            topContributors: resultData.topRiskContributors?.slice(0, 5),
+            riskBreakdown: resultData.riskBreakdown,
+            featureStore: { group: 'seller_onboarding', ttl: '10min', written: true },
+            streamingTopic: 'onboarding.scored',
+            persistence: 'prediction_history'
+          };
+        }
+        if (action.type === 'ingest_to_data_pipeline') {
+          actionCompletePayload.platform = {
+            type: 'streaming_pipeline',
+            topic: resultData.topic || 'onboarding.received',
+            partition: resultData.partition,
+            offset: resultData.offset,
+            engine: 'Kafka-style (in-process)',
+            stages: ['Ingest', 'Enrich', 'Feature Extract', 'Score', 'Decide', 'Emit'],
+            partitions: 4,
+            consumerGroups: 6
+          };
+        }
+        if (action.type === 'get_seller_features') {
+          actionCompletePayload.platform = {
+            type: 'feature_store',
+            store: 'Hybrid (in-memory + SQLite)',
+            groups: ['seller_profile', 'seller_onboarding', 'network_risk'],
+            sellerProfile: resultData.sellerProfile?.exists !== false,
+            onboardingFeatures: resultData.onboardingFeatures?.exists !== false,
+            networkRisk: resultData.networkRisk?.exists !== false,
+            onboardingData: resultData.onboardingFeatures?.exists !== false ? resultData.onboardingFeatures : null
+          };
+        }
+        this.emitEvent('agent:action:complete', actionCompletePayload);
         this.traceCollector.endSpan(traceId, `action:${action.type}`, { success: actionResult?.success !== false });
 
         // Record as evidence in chain of thought
@@ -2031,6 +2075,12 @@ Select follow-up tools to investigate the concerns.`;
           return `Category risk: ${data.riskLevel || 'unknown'}${data.riskScore != null ? ` (${data.riskScore})` : ''}`;
         case 'check_duplicates':
           return `${data.duplicatesFound || data.matches?.length ? `${data.matches?.length || 0} duplicate(s) found` : 'No duplicates'}`;
+        case 'run_ml_inference':
+          return `ML score: ${data.mlScore?.toFixed(3) || '?'} → ${data.mlDecision || '?'} (${data.modelVersion || 'v?'}, ${data.latencyMs?.toFixed(1) || '?'}ms, ${data.featureCount || '?'} features)`;
+        case 'ingest_to_data_pipeline':
+          return `Published to ${data.topic || 'pipeline'} [partition=${data.partition ?? '?'}, offset=${data.offset ?? '?'}]`;
+        case 'get_seller_features':
+          return `Profile: ${data.sellerProfile?.exists !== false ? 'found' : 'none'}, ML features: ${data.onboardingFeatures?.exists !== false ? 'found' : 'none'}, Network: ${data.networkRisk?.exists !== false ? 'found' : 'none'}`;
         default:
           return data.summary || JSON.stringify(data).slice(0, 100);
       }

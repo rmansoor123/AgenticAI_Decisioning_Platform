@@ -2,7 +2,8 @@ import { useEffect, useRef, Component } from 'react'
 import {
   Brain, CheckCircle, XCircle, AlertTriangle, Shield, Scale, Lock, Eye,
   Loader2, Wifi, WifiOff, Wrench, Zap, Search, Target, Lightbulb,
-  ClipboardList, Play, Pause, Gavel, ChevronDown, ChevronRight
+  ClipboardList, Play, Pause, Gavel, ChevronDown, ChevronRight,
+  Cpu, Database, GitBranch, BarChart3, Layers, Activity
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -339,6 +340,258 @@ function ToolCard({ startEvt, completeEvt }) {
   )
 }
 
+// ── Platform Integration Card ──
+function PlatformIntegrationCard({ toolPairs }) {
+  const [expanded, setExpanded] = useState(true)
+
+  // Extract platform data from tool events
+  const platformEvents = toolPairs
+    .filter(p => p.complete?.data?.platform)
+    .map(p => p.complete.data)
+
+  const mlData = platformEvents.find(e => e.platform?.type === 'ml_inference')?.platform
+  const pipelineData = platformEvents.find(e => e.platform?.type === 'streaming_pipeline')?.platform
+  const featureData = platformEvents.find(e => e.platform?.type === 'feature_store')?.platform
+
+  if (!mlData && !pipelineData && !featureData) return null
+
+  const ScoreBar = ({ value, max = 1, color = 'indigo' }) => (
+    <div className="w-full bg-gray-800 rounded-full h-1.5 mt-0.5">
+      <div className={`h-1.5 rounded-full bg-${color}-500`} style={{ width: `${Math.min(100, (value / max) * 100)}%` }} />
+    </div>
+  )
+
+  return (
+    <div className="ml-0 rounded-xl border bg-gradient-to-br from-[#0f0f1a] to-[#12121f] border-indigo-500/20 overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-white/[0.02] transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <div className="p-1 bg-indigo-500/10 rounded">
+            <Layers className="w-3.5 h-3.5 text-indigo-400" />
+          </div>
+          <span className="text-xs font-semibold text-indigo-300">Platform Integration</span>
+          <span className="text-[10px] text-gray-500">
+            {[mlData && 'ML', pipelineData && 'Pipeline', featureData && 'Features'].filter(Boolean).join(' · ')}
+          </span>
+        </div>
+        {expanded ? <ChevronDown className="w-3 h-3 text-gray-500" /> : <ChevronRight className="w-3 h-3 text-gray-500" />}
+      </button>
+
+      {expanded && (
+        <div className="px-3 pb-3 space-y-2">
+          {/* ML Model Card */}
+          {mlData && (
+            <div className="rounded-lg bg-indigo-500/5 border border-indigo-500/15 p-2.5">
+              <div className="flex items-center gap-1.5 mb-2">
+                <Cpu className="w-3 h-3 text-indigo-400" />
+                <span className="text-[11px] font-semibold text-indigo-300">ML Model Inference</span>
+              </div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px]">
+                <div>
+                  <span className="text-gray-500">Model</span>
+                  <div className="text-gray-300 font-mono">{mlData.model}</div>
+                </div>
+                <div>
+                  <span className="text-gray-500">Framework</span>
+                  <div className="text-gray-300">{mlData.framework}</div>
+                </div>
+                <div className="col-span-2">
+                  <span className="text-gray-500">Architecture</span>
+                  <div className="text-gray-300 font-mono text-[9px]">{mlData.architecture}</div>
+                </div>
+                <div>
+                  <span className="text-gray-500">Risk Score</span>
+                  <div className={`font-bold ${
+                    mlData.score > 0.75 ? 'text-red-400' : mlData.score > 0.45 ? 'text-amber-400' : 'text-emerald-400'
+                  }`}>{mlData.score?.toFixed(4)}</div>
+                  <ScoreBar value={mlData.score} color={mlData.score > 0.75 ? 'red' : mlData.score > 0.45 ? 'amber' : 'emerald'} />
+                </div>
+                <div>
+                  <span className="text-gray-500">Decision</span>
+                  <div className={`font-semibold ${
+                    mlData.decision === 'REJECT' ? 'text-red-400' : mlData.decision === 'REVIEW' ? 'text-amber-400' : 'text-emerald-400'
+                  }`}>{mlData.decision}</div>
+                </div>
+                <div>
+                  <span className="text-gray-500">Latency</span>
+                  <div className="text-gray-300">{mlData.latencyMs?.toFixed(1)}ms</div>
+                </div>
+                <div>
+                  <span className="text-gray-500">Features</span>
+                  <div className="text-gray-300">{mlData.featureCount} engineered</div>
+                </div>
+                <div>
+                  <span className="text-gray-500">Version</span>
+                  <div className="text-gray-300">{mlData.version}</div>
+                </div>
+                <div>
+                  <span className="text-gray-500">Persisted To</span>
+                  <div className="text-gray-300 font-mono text-[9px]">{mlData.persistence}</div>
+                </div>
+              </div>
+
+              {/* Risk Breakdown */}
+              {mlData.riskBreakdown && (
+                <div className="mt-2 pt-2 border-t border-indigo-500/10">
+                  <span className="text-[10px] text-gray-500 font-semibold">Risk Breakdown</span>
+                  <div className="grid grid-cols-5 gap-1 mt-1">
+                    {Object.entries(mlData.riskBreakdown).map(([key, val]) => (
+                      <div key={key} className="text-center">
+                        <div className="text-[9px] text-gray-500 truncate">{key.replace('Risk', '')}</div>
+                        <div className={`text-[10px] font-mono ${val > 0.7 ? 'text-red-400' : val > 0.4 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                          {(typeof val === 'number' ? val : 0).toFixed(2)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Top Contributors */}
+              {mlData.topContributors?.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-indigo-500/10">
+                  <span className="text-[10px] text-gray-500 font-semibold">Top Feature Contributors (SHAP)</span>
+                  <div className="mt-1 space-y-0.5">
+                    {mlData.topContributors.map((c, i) => (
+                      <div key={i} className="flex items-center gap-1.5 text-[9px]">
+                        <span className={`w-1.5 h-1.5 rounded-full ${c.direction === 'positive' ? 'bg-red-400' : 'bg-emerald-400'}`} />
+                        <span className="text-gray-400 flex-1 truncate">{c.description || c.feature}</span>
+                        <span className={`font-mono ${c.direction === 'positive' ? 'text-red-400' : 'text-emerald-400'}`}>
+                          {c.contribution > 0 ? '+' : ''}{c.contribution?.toFixed(3)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Streaming Pipeline Card */}
+          {pipelineData && (
+            <div className="rounded-lg bg-cyan-500/5 border border-cyan-500/15 p-2.5">
+              <div className="flex items-center gap-1.5 mb-2">
+                <GitBranch className="w-3 h-3 text-cyan-400" />
+                <span className="text-[11px] font-semibold text-cyan-300">Streaming Pipeline</span>
+                <span className="text-[9px] text-gray-500 ml-auto">{pipelineData.engine}</span>
+              </div>
+              <div className="flex items-center gap-0.5 mb-2">
+                {pipelineData.stages?.map((stage, i) => (
+                  <div key={stage} className="flex items-center">
+                    <div className={`px-1.5 py-0.5 rounded text-[8px] font-medium ${
+                      i === 0 ? 'bg-cyan-500/20 text-cyan-300 ring-1 ring-cyan-500/30' : 'bg-gray-800 text-gray-400'
+                    }`}>
+                      {stage}
+                    </div>
+                    {i < pipelineData.stages.length - 1 && (
+                      <span className="text-gray-600 text-[8px] mx-0.5">→</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-[10px]">
+                <div>
+                  <span className="text-gray-500">Topic</span>
+                  <div className="text-gray-300 font-mono text-[9px]">{pipelineData.topic}</div>
+                </div>
+                <div>
+                  <span className="text-gray-500">Partition</span>
+                  <div className="text-gray-300">{pipelineData.partition}</div>
+                </div>
+                <div>
+                  <span className="text-gray-500">Offset</span>
+                  <div className="text-gray-300">{pipelineData.offset}</div>
+                </div>
+              </div>
+              <div className="mt-1.5 text-[9px] text-gray-500">
+                {pipelineData.partitions} partitions · {pipelineData.consumerGroups} consumer groups
+              </div>
+            </div>
+          )}
+
+          {/* Feature Store Card */}
+          {featureData && (
+            <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/15 p-2.5">
+              <div className="flex items-center gap-1.5 mb-2">
+                <Database className="w-3 h-3 text-emerald-400" />
+                <span className="text-[11px] font-semibold text-emerald-300">Feature Store</span>
+                <span className="text-[9px] text-gray-500 ml-auto">{featureData.store}</span>
+              </div>
+              <div className="space-y-1">
+                {featureData.groups?.map(group => {
+                  const hasData = group === 'seller_profile' ? featureData.sellerProfile :
+                    group === 'seller_onboarding' ? featureData.onboardingFeatures :
+                    group === 'network_risk' ? featureData.networkRisk : false
+                  return (
+                    <div key={group} className="flex items-center gap-2 text-[10px]">
+                      {hasData ? (
+                        <CheckCircle className="w-3 h-3 text-emerald-400" />
+                      ) : (
+                        <XCircle className="w-3 h-3 text-gray-600" />
+                      )}
+                      <span className={`font-mono ${hasData ? 'text-emerald-300' : 'text-gray-500'}`}>{group}</span>
+                      <span className="text-gray-500">{hasData ? 'loaded' : 'empty'}</span>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Show sample onboarding features if available */}
+              {featureData.onboardingData && typeof featureData.onboardingData === 'object' && (
+                <div className="mt-2 pt-2 border-t border-emerald-500/10">
+                  <span className="text-[10px] text-gray-500 font-semibold">Materialized Features (sample)</span>
+                  <div className="grid grid-cols-3 gap-x-2 gap-y-0.5 mt-1">
+                    {Object.entries(featureData.onboardingData)
+                      .filter(([k]) => k !== 'exists' && k !== 'ml_score' && k !== 'scored_at')
+                      .slice(0, 9)
+                      .map(([key, val]) => (
+                        <div key={key} className="text-[9px]">
+                          <span className="text-gray-500 truncate block">{key.replace(/([A-Z])/g, ' $1').trim()}</span>
+                          <span className="text-gray-300 font-mono">{typeof val === 'number' ? val.toFixed(3) : String(val)}</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Data Flow Summary */}
+          {mlData && (
+            <div className="rounded-lg bg-gray-800/50 border border-gray-700/50 p-2">
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <Activity className="w-3 h-3 text-gray-400" />
+                <span className="text-[10px] font-semibold text-gray-400">Data Flow</span>
+              </div>
+              <div className="flex items-center gap-1 text-[8px] flex-wrap">
+                {[
+                  { label: 'Seller Data', color: 'gray' },
+                  { label: 'Feature Extraction (25)', color: 'emerald' },
+                  { label: 'Feature Store', color: 'emerald' },
+                  { label: 'TF.js Neural Net', color: 'indigo' },
+                  { label: 'Streaming Pipeline', color: 'cyan' },
+                  { label: 'prediction_history', color: 'amber' },
+                  { label: 'Decision Rules', color: 'orange' },
+                  { label: 'Agent Decision', color: mlData.decision === 'APPROVE' ? 'emerald' : mlData.decision === 'REJECT' ? 'red' : 'amber' }
+                ].map((item, i) => (
+                  <div key={item.label} className="flex items-center">
+                    <span className={`px-1.5 py-0.5 rounded bg-${item.color}-500/10 text-${item.color}-400 border border-${item.color}-500/20`}>
+                      {item.label}
+                    </span>
+                    {i < 7 && <span className="text-gray-600 mx-0.5">→</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Other Event Card (injection, citation, reflection revision, etc.) ──
 function MiscEventCard({ event }) {
   const type = event.type
@@ -507,6 +760,9 @@ function AgentFlowViewerInner({ events = [], isConnected, isRunning, correlation
                 ))}
               </div>
             )}
+
+            {/* Platform Integration — shows ML model, pipeline, feature store details */}
+            {toolPairs.length > 0 && <PlatformIntegrationCard toolPairs={toolPairs} />}
 
             {/* OBSERVE step */}
             {activeSteps.includes('OBSERVE') && <StepCard step="OBSERVE" events={events} />}
