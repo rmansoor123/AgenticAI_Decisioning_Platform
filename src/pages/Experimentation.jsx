@@ -3,7 +3,8 @@ import { Link, useLocation } from 'react-router-dom'
 import {
   FlaskConical, Play, Pause, Plus, TrendingUp, TrendingDown,
   CheckCircle, Clock, Users, BarChart3, Target, Percent,
-  ChevronRight, AlertTriangle, Sliders
+  ChevronRight, AlertTriangle, Sliders, Brain, Shield, Scale,
+  ArrowRight
 } from 'lucide-react'
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { safeJson } from '../utils/api'
@@ -151,13 +152,161 @@ function ABTesting({ experiments }) {
 
   const displayExperiments = normalizedExperiments.length > 0 ? normalizedExperiments : defaultExperiments
 
+  // Find onboarding model experiment
+  const onboardingExperiment = displayExperiments.find(e =>
+    e.checkpoint === 'onboarding' ||
+    e.modelId?.includes('onboarding') ||
+    e.experimentId === 'EXP-ONBOARDING-THRESHOLDS'
+  )
+
   return (
     <div className="space-y-6">
+
+      {/* ============================================================ */}
+      {/* Onboarding Model Experiment — Highlighted Section             */}
+      {/* ============================================================ */}
+      {onboardingExperiment && (
+        <div className="bg-gradient-to-r from-emerald-500/10 to-teal-500/10 rounded-xl border border-emerald-500/30 p-6 space-y-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-emerald-500/20 rounded-lg">
+                <Brain className="w-5 h-5 text-emerald-400" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-white">{onboardingExperiment.name || 'Onboarding Model Experiment'}</h2>
+                <p className="text-sm text-gray-400">{onboardingExperiment.description || 'Champion vs Challenger threshold optimization'}</p>
+              </div>
+            </div>
+            <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+              onboardingExperiment.status === 'RUNNING'
+                ? 'bg-emerald-500/20 text-emerald-400'
+                : 'bg-blue-500/20 text-blue-400'
+            }`}>
+              {onboardingExperiment.status}
+            </span>
+          </div>
+
+          {/* Champion vs Challenger */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-[#12121a] rounded-xl border border-blue-500/30 p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Shield className="w-4 h-4 text-blue-400" />
+                <h3 className="font-semibold text-white">Champion</h3>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400">
+                  {onboardingExperiment.champion?.label || 'Current'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <span className="text-gray-500 text-xs">Review Threshold</span>
+                  <div className="text-white font-mono text-lg">{onboardingExperiment.champion?.reviewThreshold ?? 0.55}</div>
+                </div>
+                <div>
+                  <span className="text-gray-500 text-xs">Block Threshold</span>
+                  <div className="text-white font-mono text-lg">{onboardingExperiment.champion?.blockThreshold ?? 0.80}</div>
+                </div>
+              </div>
+            </div>
+            <div className="bg-[#12121a] rounded-xl border border-emerald-500/30 p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <FlaskConical className="w-4 h-4 text-emerald-400" />
+                <h3 className="font-semibold text-white">Challenger</h3>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">
+                  {onboardingExperiment.challenger?.label || 'Tighter'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <span className="text-gray-500 text-xs">Review Threshold</span>
+                  <div className="text-emerald-400 font-mono text-lg">{onboardingExperiment.challenger?.reviewThreshold ?? 0.50}</div>
+                </div>
+                <div>
+                  <span className="text-gray-500 text-xs">Block Threshold</span>
+                  <div className="text-emerald-400 font-mono text-lg">{onboardingExperiment.challenger?.blockThreshold ?? 0.75}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Traffic Split Visualization */}
+          <div className="bg-[#12121a] rounded-xl border border-gray-800 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-gray-400 font-medium">Traffic Allocation</span>
+              <span className="text-xs text-gray-500">
+                Champion {onboardingExperiment.trafficAllocation?.champion ?? 80}% / Challenger {onboardingExperiment.trafficAllocation?.challenger ?? 20}%
+              </span>
+            </div>
+            <div className="w-full h-4 rounded-full overflow-hidden flex">
+              <div
+                className="bg-blue-500 h-full flex items-center justify-center"
+                style={{ width: `${onboardingExperiment.trafficAllocation?.champion ?? 80}%` }}
+              >
+                <span className="text-[10px] text-white font-bold">{onboardingExperiment.trafficAllocation?.champion ?? 80}%</span>
+              </div>
+              <div
+                className="bg-emerald-500 h-full flex items-center justify-center"
+                style={{ width: `${onboardingExperiment.trafficAllocation?.challenger ?? 20}%` }}
+              >
+                <span className="text-[10px] text-white font-bold">{onboardingExperiment.trafficAllocation?.challenger ?? 20}%</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Metrics Comparison Table */}
+          {onboardingExperiment.metrics && (
+            <div className="bg-[#12121a] rounded-xl border border-gray-800 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-800">
+                <h3 className="font-semibold text-white text-sm">Experiment Metrics</h3>
+              </div>
+              <table className="w-full">
+                <thead className="bg-[#0d0d14]">
+                  <tr className="text-xs text-gray-500">
+                    <th className="px-4 py-2 text-left">Metric</th>
+                    <th className="px-4 py-2 text-center">Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(onboardingExperiment.metrics).filter(([k]) => !['catchRate', 'fpRate', 'pValue', 'significant'].includes(k)).map(([key, value]) => (
+                    <tr key={key} className="border-t border-gray-800/50">
+                      <td className="px-4 py-2 text-sm text-gray-400 capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}</td>
+                      <td className="px-4 py-2 text-sm text-white text-center">
+                        {typeof value === 'number' ? (value < 1 ? `${(value * 100).toFixed(1)}%` : value.toFixed(2)) : String(value)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Links to related pages */}
+          <div className="flex gap-3">
+            <Link
+              to="/ml"
+              className="flex-1 flex items-center justify-center gap-2 py-2 bg-purple-500/10 border border-purple-500/30 rounded-lg text-purple-400 text-sm hover:bg-purple-500/20 transition-colors"
+            >
+              <Brain className="w-4 h-4" />
+              View ML Model
+            </Link>
+            <Link
+              to="/decisions"
+              className="flex-1 flex items-center justify-center gap-2 py-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-400 text-sm hover:bg-amber-500/20 transition-colors"
+            >
+              <Shield className="w-4 h-4" />
+              View Decision Rules
+            </Link>
+          </div>
+        </div>
+      )}
+      {/* ============================================================ */}
+      {/* End Onboarding Model Experiment Section                       */}
+      {/* ============================================================ */}
+
       {/* Stats */}
       <div className="grid grid-cols-4 gap-4">
         {[
           { label: 'Active Experiments', value: displayExperiments.filter(e => e.status === 'RUNNING').length, icon: FlaskConical, color: 'emerald' },
-          { label: 'Traffic Allocated', value: `${displayExperiments.filter(e => e.status === 'RUNNING').reduce((sum, e) => sum + (e.trafficAllocation || 0), 0)}%`, icon: Users, color: 'blue' },
+          { label: 'Traffic Allocated', value: `${displayExperiments.filter(e => e.status === 'RUNNING').reduce((sum, e) => sum + (typeof e.trafficAllocation === 'number' ? e.trafficAllocation : (e.trafficAllocation?.champion || 0)), 0)}%`, icon: Users, color: 'blue' },
           { label: 'Avg Lift', value: (() => {
             const withResults = displayExperiments.filter(e => e.metrics?.catchRate?.control != null && e.metrics?.catchRate?.treatment != null)
             if (withResults.length === 0) return 'N/A'
@@ -208,8 +357,8 @@ function ABTesting({ experiments }) {
                 </div>
                 <div className="flex items-center gap-6 text-sm">
                   <span className="text-gray-400">Type: <span className="text-gray-300">{exp.type?.replace(/_/g, ' ')}</span></span>
-                  <span className="text-gray-400">Traffic: <span className="text-emerald-400">{exp.trafficAllocation}%</span></span>
-                  <span className="text-gray-400">Started: <span className="text-gray-300">{exp.startDate}</span></span>
+                  <span className="text-gray-400">Traffic: <span className="text-emerald-400">{typeof exp.trafficAllocation === 'number' ? exp.trafficAllocation : exp.trafficAllocation?.champion ?? '-'}%</span></span>
+                  <span className="text-gray-400">Started: <span className="text-gray-300">{exp.startDate?.split('T')[0] || exp.startDate}</span></span>
                 </div>
                 {exp.metrics?.catchRate?.control != null && exp.metrics?.catchRate?.treatment != null && (
                   <div className="flex items-center gap-4 mt-3">
@@ -226,7 +375,7 @@ function ABTesting({ experiments }) {
                     </div>
                   </div>
                 )}
-                {exp.metrics?.catchRate?.control == null && (
+                {exp.metrics?.catchRate?.control == null && !exp.metrics?.approvalRate && (
                   <div className="flex items-center gap-4 mt-3">
                     <span className="text-xs text-gray-500">Results pending...</span>
                   </div>
@@ -249,7 +398,7 @@ function ABTesting({ experiments }) {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-400">Traffic</span>
-                    <span className="text-emerald-400">{selectedExperiment.trafficAllocation}%</span>
+                    <span className="text-emerald-400">{typeof selectedExperiment.trafficAllocation === 'number' ? selectedExperiment.trafficAllocation : selectedExperiment.trafficAllocation?.champion ?? '-'}%</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-400">Status</span>

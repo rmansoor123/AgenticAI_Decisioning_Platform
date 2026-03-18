@@ -490,6 +490,30 @@ try {
     console.log('Seeded 2 ML-based onboarding decision rules');
   }
 
+    // Seed onboarding threshold experiment
+    try {
+      const existingExps = (await db_ops.getAll('experiments', 100, 0)).map(e => e.data);
+      const hasOnboardingExp = existingExps.some(e => e?.experimentId === 'EXP-ONBOARDING-THRESHOLDS');
+      if (!hasOnboardingExp) {
+        await db_ops.insert('experiments', 'experiment_id', 'EXP-ONBOARDING-THRESHOLDS', {
+          experimentId: 'EXP-ONBOARDING-THRESHOLDS',
+          name: 'Onboarding ML Threshold Optimization',
+          type: 'CHAMPION_CHALLENGER',
+          status: 'RUNNING',
+          description: 'Compare current onboarding ML thresholds (0.55/0.80) against tighter thresholds (0.50/0.75)',
+          champion: { label: 'Current', reviewThreshold: 0.55, blockThreshold: 0.80 },
+          challenger: { label: 'Tighter', reviewThreshold: 0.50, blockThreshold: 0.75 },
+          trafficAllocation: { champion: 80, challenger: 20 },
+          metrics: { approvalRate: 0.72, reviewRate: 0.21, blockRate: 0.07, fraudCatchRate: 0.94 },
+          modelId: 'onboarding-risk-v1',
+          checkpoint: 'onboarding',
+          startDate: new Date().toISOString(),
+          createdAt: new Date().toISOString()
+        });
+        console.log('Seeded onboarding threshold experiment');
+      }
+    } catch (e) { /* best-effort */ }
+
   // Seed onboarding ML dataset in data catalog
   const existingDatasets = (await db_ops.getAll('datasets', 100, 0)).map(d => d.data);
   const onbDatasetExists = existingDatasets.some(d => d.datasetId === 'DS-ONBOARDING-FEATURES');
