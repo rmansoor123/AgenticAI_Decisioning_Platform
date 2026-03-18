@@ -1291,8 +1291,17 @@ server.listen(PORT, () => {
 ╚═══════════════════════════════════════════════════════════════╝
   `);
 
-  // Auto-start autonomous agents after server is ready
+  // Autonomous agents — disabled on startup to avoid LLM rate limit exhaustion.
+  // Start them manually via their /api/agents/*/status endpoints or enable below.
+  // When using OpenAI (paid API), these 6 agents firing simultaneously will
+  // consume rate limit quota and block interactive requests.
+  const AUTOSTART_AUTONOMOUS_AGENTS = process.env.AUTOSTART_AGENTS === 'true';
   setTimeout(() => {
+    if (!AUTOSTART_AUTONOMOUS_AGENTS) {
+      console.log('Autonomous agents registered but NOT auto-started (set AUTOSTART_AGENTS=true to enable)');
+    }
+
+    if (AUTOSTART_AUTONOMOUS_AGENTS) {
     // CrossDomainCorrelationAgent — 6h fraud ring detection scans
     try {
       crossDomainAgent.start();
@@ -1355,6 +1364,7 @@ server.listen(PORT, () => {
     };
     setInterval(runRuleOptimization, RULE_OPT_INTERVAL_MS);
     console.log('RuleOptimizationAgent scheduled (24h interval, first run in 24h)');
+    } // end AUTOSTART_AUTONOMOUS_AGENTS
   }, 5000); // 5s delay ensures event bus + DB are ready
 });
 
