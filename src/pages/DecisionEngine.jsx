@@ -3,7 +3,8 @@ import { Link, useLocation } from 'react-router-dom'
 import {
   Cog, Play, Pause, Plus, Edit, Trash2, Copy, CheckCircle,
   XCircle, AlertTriangle, Clock, Zap, Filter, Search,
-  ChevronRight, ChevronDown, Code, Database, Brain
+  ChevronRight, ChevronDown, Code, Database, Brain, Shield,
+  ArrowRight, Scale
 } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { safeJson } from '../utils/api'
@@ -52,6 +53,33 @@ export default function DecisionEngine() {
     { name: 'ATO Risk', triggered: 320, blocked: 280 }
   ]
 
+  // Find ML onboarding rules from API data
+  const mlOnboardingRules = rules.filter(r =>
+    r.ruleId === 'RULE-ML-ONBOARDING-001' || r.ruleId === 'RULE-ML-ONBOARDING-002'
+  )
+
+  // Fallback if no rules from API
+  const displayMLRules = mlOnboardingRules.length > 0 ? mlOnboardingRules : [
+    {
+      ruleId: 'RULE-ML-ONBOARDING-001',
+      name: 'ML Model High Risk Onboarding',
+      description: 'Triggers REVIEW when the onboarding ML model scores a seller above the high-risk threshold',
+      status: 'ACTIVE',
+      action: 'REVIEW',
+      priority: 10,
+      conditions: [{ field: 'mlScore', operator: 'GT', value: 0.55 }]
+    },
+    {
+      ruleId: 'RULE-ML-ONBOARDING-002',
+      name: 'ML Model Critical Risk Onboarding',
+      description: 'Triggers BLOCK when the onboarding ML model scores a seller above the critical-risk threshold',
+      status: 'ACTIVE',
+      action: 'BLOCK',
+      priority: 5,
+      conditions: [{ field: 'mlScore', operator: 'GT', value: 0.80 }]
+    }
+  ]
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -86,6 +114,138 @@ export default function DecisionEngine() {
 
       {activeTab === 'rules' && (
         <div className="space-y-6">
+
+          {/* ============================================================ */}
+          {/* ML-Linked Onboarding Rules Section                           */}
+          {/* ============================================================ */}
+          <div className="bg-gradient-to-r from-amber-500/10 to-orange-500/10 rounded-xl border border-amber-500/30 p-6 space-y-6">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-amber-500/20 rounded-lg">
+                <Brain className="w-5 h-5 text-amber-400" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-white">ML-Linked Onboarding Rules</h2>
+                <p className="text-sm text-gray-400">Rules triggered by the onboarding ML risk model score</p>
+              </div>
+            </div>
+
+            {/* Two ML Rules */}
+            <div className="grid grid-cols-2 gap-4">
+              {displayMLRules.map(rule => (
+                <div key={rule.ruleId} className={`bg-[#12121a] rounded-xl border ${
+                  rule.action === 'BLOCK' ? 'border-red-500/30' : 'border-amber-500/30'
+                } p-4`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Shield className={`w-4 h-4 ${rule.action === 'BLOCK' ? 'text-red-400' : 'text-amber-400'}`} />
+                      <span className="font-mono text-xs text-gray-400">{rule.ruleId}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${
+                        rule.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-gray-500/20 text-gray-400'
+                      }`}>{rule.status}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${
+                        rule.action === 'BLOCK' ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'
+                      }`}>{rule.action}</span>
+                    </div>
+                  </div>
+                  <h4 className="text-white font-medium mb-1">{rule.name}</h4>
+                  <p className="text-xs text-gray-400 mb-3">{rule.description}</p>
+                  <div className="flex items-center gap-4 text-xs">
+                    <span className="text-gray-500">Priority: <span className="text-white">{rule.priority}</span></span>
+                    <span className="text-gray-500">Condition: <span className="text-amber-400 font-mono">
+                      mlScore {'>'} {rule.conditions?.[0]?.value || (rule.action === 'BLOCK' ? '0.80' : '0.55')}
+                    </span></span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Score -> Rule -> Action Flow */}
+            <div className="bg-[#12121a] rounded-xl border border-gray-800 p-4">
+              <h3 className="font-semibold text-white flex items-center gap-2 mb-4">
+                <Scale className="w-4 h-4 text-amber-400" />
+                Score to Action Flow
+              </h3>
+
+              {/* Score Bar with Threshold Markers */}
+              <div className="relative h-20 mb-4">
+                {/* Color zones */}
+                <div className="absolute top-6 left-0 right-0 h-8 rounded-full overflow-hidden flex">
+                  <div className="bg-emerald-500/30" style={{ width: '45%' }}></div>
+                  <div className="bg-amber-500/30" style={{ width: '10%' }}></div>
+                  <div className="bg-orange-500/30" style={{ width: '20%' }}></div>
+                  <div className="bg-red-500/30" style={{ width: '25%' }}></div>
+                </div>
+
+                {/* Zone labels inside */}
+                <div className="absolute top-8 left-0 right-0 flex text-[9px] font-medium">
+                  <div className="text-emerald-400 text-center" style={{ width: '45%' }}>APPROVE</div>
+                  <div className="text-amber-400 text-center" style={{ width: '10%' }}></div>
+                  <div className="text-orange-400 text-center" style={{ width: '20%' }}>REVIEW</div>
+                  <div className="text-red-400 text-center" style={{ width: '25%' }}>BLOCK</div>
+                </div>
+
+                {/* Threshold markers */}
+                {[
+                  { pos: 45, label: '0.45', desc: 'Pipeline APPROVE/REVIEW', color: 'emerald' },
+                  { pos: 55, label: '0.55', desc: 'Rule REVIEW trigger', color: 'amber' },
+                  { pos: 75, label: '0.75', desc: 'Pipeline REJECT', color: 'orange' },
+                  { pos: 80, label: '0.80', desc: 'Rule BLOCK trigger', color: 'red' }
+                ].map(t => (
+                  <div key={t.label} className="absolute" style={{ left: `${t.pos}%`, top: '4px', bottom: 0 }}>
+                    <div className={`w-px h-10 bg-${t.color}-400 mx-auto`} style={{ marginTop: '8px' }}></div>
+                    <div className={`text-[8px] text-${t.color}-400 whitespace-nowrap -translate-x-1/2 text-center`} style={{ position: 'absolute', top: '-2px', left: '50%' }}>
+                      {t.label}
+                    </div>
+                    <div className={`text-[7px] text-${t.color}-400 whitespace-nowrap -translate-x-1/2 text-center`} style={{ position: 'absolute', bottom: '-4px', left: '50%' }}>
+                      {t.desc}
+                    </div>
+                  </div>
+                ))}
+
+                {/* Scale */}
+                <div className="absolute bottom-0 left-0 text-[10px] text-gray-500">0.0</div>
+                <div className="absolute bottom-0 right-0 text-[10px] text-gray-500">1.0</div>
+              </div>
+            </div>
+
+            {/* Platform Integrator Diagram */}
+            <div className="bg-[#12121a] rounded-xl border border-gray-800 p-4">
+              <h3 className="font-semibold text-white flex items-center gap-2 mb-4">
+                <Zap className="w-4 h-4 text-amber-400" />
+                Platform Integration Flow
+              </h3>
+              <div className="flex items-center justify-center gap-3">
+                {[
+                  { label: 'ML Score', icon: Brain, color: 'purple', link: '/ml' },
+                  { label: 'Rules Engine', icon: Shield, color: 'amber', link: '/decisions' },
+                  { label: 'Experimentation', icon: Scale, color: 'emerald', link: '/experiments' },
+                  { label: 'Final Decision', icon: CheckCircle, color: 'blue', link: null }
+                ].map((step, i, arr) => (
+                  <div key={i} className="flex items-center">
+                    <Link
+                      to={step.link || '#'}
+                      className={`flex flex-col items-center px-6 py-3 rounded-lg border border-${step.color}-500/30 bg-${step.color}-500/10 ${step.link ? 'hover:bg-opacity-20 cursor-pointer' : ''} transition-colors`}
+                    >
+                      <step.icon className={`w-6 h-6 text-${step.color}-400 mb-1`} />
+                      <span className="text-xs text-white font-medium">{step.label}</span>
+                    </Link>
+                    {i < arr.length - 1 && (
+                      <div className="mx-2 flex items-center">
+                        <div className="w-4 h-px bg-gray-600"></div>
+                        <ArrowRight className="w-4 h-4 text-gray-500" />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          {/* ============================================================ */}
+          {/* End ML-Linked Onboarding Rules Section                       */}
+          {/* ============================================================ */}
+
           {/* Stats */}
           <div className="grid grid-cols-4 gap-4">
             {[
