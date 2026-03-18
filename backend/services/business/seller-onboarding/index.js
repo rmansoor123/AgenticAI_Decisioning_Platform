@@ -121,8 +121,8 @@ router.post('/sellers', async (req, res) => {
 
     // Ingest onboarding event into streaming pipeline (Kafka-style)
     try {
-      const { getStreamEngine } = await import('../../../streaming/stream-engine.js');
-      const engine = getStreamEngine();
+      const { getStreamingBackend } = await import('../../../streaming/streaming-factory.js');
+      const engine = await getStreamingBackend();
       engine.produce('onboarding.received', sellerId, {
         type: 'seller_onboarding',
         sellerId,

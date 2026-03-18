@@ -595,6 +595,16 @@ export class SellerOnboardingAgent extends BaseAgent {
         const { extractOnboardingFeatures } = await import('../../services/ml-platform/models/onboarding-feature-extractor.js');
         const extracted = extractOnboardingFeatures(params);
 
+        // Check prediction cache
+        let cachedResult = null;
+        try {
+          const { getCachedPrediction } = await import('../../services/ml-platform/inference/prediction-cache-redis.js');
+          cachedResult = await getCachedPrediction(extracted.vector);
+        } catch (_) { /* cache not available */ }
+        if (cachedResult) {
+          return { success: true, data: { ...cachedResult, source: 'prediction-cache', cached: true } };
+        }
+
         // 2. Run ML inference via onboarding risk model
         const { getOnboardingRiskModel } = await import('../../services/ml-platform/models/onboarding-risk-model.js');
         const model = getOnboardingRiskModel();
@@ -619,8 +629,8 @@ export class SellerOnboardingAgent extends BaseAgent {
 
         // 5. Publish to streaming pipeline
         try {
-          const { getStreamEngine } = await import('../../streaming/stream-engine.js');
-          const engine = getStreamEngine();
+          const { getStreamingBackend } = await import('../../streaming/streaming-factory.js');
+          const engine = await getStreamingBackend();
           engine.produce('onboarding.scored', params.sellerId || 'unknown', {
             sellerId: params.sellerId,
             mlScore: prediction.score,
@@ -660,6 +670,25 @@ export class SellerOnboardingAgent extends BaseAgent {
           mlDecision = 'APPROVE';
           mlConfidence = Math.min(0.95, 0.5 + (0.45 - prediction.score) * 2);
         }
+
+        // Cache the prediction
+        try {
+          const { setCachedPrediction } = await import('../../services/ml-platform/inference/prediction-cache-redis.js');
+          await setCachedPrediction(extracted.vector, {
+            mlScore: prediction.score, mlDecision, mlConfidence,
+            modelVersion: prediction.modelVersion, featureCount: extracted.featureCount,
+            topRiskContributors: topContributors.map(c => ({
+              feature: c.feature, value: c.value, contribution: c.contribution, direction: c.direction, description: c.description
+            })),
+            riskBreakdown: {
+              identityRisk: extracted.normalized.identityVerificationScore || 0,
+              financialRisk: extracted.normalized.bankVerificationScore || 0,
+              complianceRisk: extracted.normalized.watchlistMatchScore || 0,
+              behavioralRisk: extracted.normalized.velocityScore || 0,
+              networkRisk: extracted.normalized.networkRiskScore || 0
+            }
+          });
+        } catch (_) { /* cache write best-effort */ }
 
         return {
           success: true,
@@ -730,8 +759,8 @@ export class SellerOnboardingAgent extends BaseAgent {
 
     this.registerTool('ingest_to_data_pipeline', 'Ingest seller onboarding event into the real-time data pipeline', async (params) => {
       try {
-        const { getStreamEngine } = await import('../../streaming/stream-engine.js');
-        const engine = getStreamEngine();
+        const { getStreamingBackend } = await import('../../streaming/streaming-factory.js');
+        const engine = await getStreamingBackend();
         const result = engine.produce('onboarding.received', params.sellerId || 'unknown', {
           type: 'seller_onboarding',
           sellerId: params.sellerId,

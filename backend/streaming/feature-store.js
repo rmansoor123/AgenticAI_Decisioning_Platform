@@ -8,7 +8,7 @@
  * Structure: entityId -> featureGroup -> { features, updatedAt, ttl }
  */
 
-import { db_ops } from '../shared/common/database.js';
+import { getDbOps } from '../shared/common/database-factory.js';
 
 // ---------------------------------------------------------------------------
 // Feature group definitions with TTLs (milliseconds)
@@ -190,6 +190,7 @@ class FeatureStore {
    * entityId:group:timestamp for point-in-time lookups.
    */
   async _writeToOfflineStore(entityId, group, features, timestamp) {
+    const db_ops = getDbOps();
     const data = {
       entityId,
       group,
@@ -229,6 +230,7 @@ class FeatureStore {
    * @returns {object|null}     - The features payload or null.
    */
   async getFeaturesAsOf(entityId, group, timestamp) {
+    const db_ops = getDbOps();
     this.stats.reads++;
 
     // Attempt an exact point-in-time hit first

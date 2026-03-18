@@ -427,13 +427,13 @@ initOFACScreening().catch(async err => {
 });
 
 // Initialize Streaming Engine + Feature Store + Processors
-import { getStreamEngine } from '../streaming/stream-engine.js';
-import { getFeatureStore } from '../streaming/feature-store.js';
+import { getStreamingBackend, getStreamingBackendType } from '../streaming/streaming-factory.js';
+import { getFeatureStoreBackend, getFeatureStoreBackendType } from '../streaming/feature-store-factory.js';
 import { initStreamProcessors } from '../streaming/stream-processors.js';
 import { setStreamEngine } from './websocket/transaction-pipeline.js';
 
-const streamEngine = getStreamEngine();
-const featureStore = getFeatureStore();
+const streamEngine = await getStreamingBackend();
+const featureStore = await getFeatureStoreBackend();
 await initStreamProcessors(streamEngine, featureStore);
 
 // Initialize Onboarding ML Pipeline (Kafka-style topics + processors)
