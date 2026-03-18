@@ -98,25 +98,30 @@ function App() {
       }
 
       ws.onmessage = (event) => {
-        const data = JSON.parse(event.data)
+        try {
+          const data = JSON.parse(event.data)
 
-        if (data.type === 'transaction') {
-          setTransactions(prev => {
-            const tx = {
-              id: data.data.transactionId,
-              amount: data.data.amount,
-              merchant: data.data.merchant || 'Unknown',
-              riskScore: data.data.riskScore,
-              status: data.data.decision?.toLowerCase() || 'approved',
-              country: data.data.geoLocation?.country || 'US',
-              timestamp: data.timestamp
-            }
-            return [tx, ...prev.slice(0, 19)]
-          })
-        }
+          if (data.type === 'transaction') {
+            setTransactions(prev => {
+              const d = data.data || {}
+              const tx = {
+                id: String(d.transactionId || `TXN-${Date.now()}`),
+                amount: typeof d.amount === 'number' ? d.amount : Number(d.amount) || 0,
+                merchant: String(d.merchant || 'Unknown'),
+                riskScore: typeof d.riskScore === 'number' ? d.riskScore : Number(d.riskScore) || 0,
+                status: String(typeof d.decision === 'string' ? d.decision : (d.decision?.action || 'approved')).toLowerCase(),
+                country: String(typeof d.geoLocation === 'string' ? d.geoLocation : (d.geoLocation?.country || d.country || 'US')),
+                timestamp: data.timestamp
+              }
+              return [tx, ...prev.slice(0, 19)]
+            })
+          }
 
-        if (data.type === 'metrics') {
-          setMetrics(data.data)
+          if (data.type === 'metrics') {
+            setMetrics(data.data)
+          }
+        } catch (e) {
+          // Ignore malformed WebSocket messages
         }
       }
 
