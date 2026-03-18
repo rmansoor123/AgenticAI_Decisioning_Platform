@@ -211,25 +211,96 @@ export class KafkaStreamEngine {
    * @param {string} topicName
    * @returns {Promise<import('kafkajs').Consumer>}
    */
-  async createConsumerGroup(groupId, topicName) {
+  createConsumerGroup(groupId, topicName) {
     const compositeKey = `${groupId}::${topicName}`;
 
     if (this._consumerGroups.has(compositeKey)) {
       return this._consumerGroups.get(compositeKey);
     }
 
-    const consumer = this.kafka.consumer({ groupId });
-    await consumer.connect();
-    await consumer.subscribe({ topic: topicName, fromBeginning: false });
+    // Build a wrapper that matches the in-process ConsumerGroup interface
+    // (addConsumer, poll, commitOffset, getLag, rebalance) so that
+    // stream-processors.js and onboarding-pipeline.js work unchanged.
+    const messageBuffer = [];
+    const wrapper = {
+      groupId,
+      topic: { name: topicName, numPartitions: 4 },
+      consumers: [],
+      assignments: new Map(),
+      createdAt: new Date().toISOString(),
 
-    this._consumerGroups.set(compositeKey, consumer);
+      addConsumer(consumerId) {
+        if (!this.consumers.includes(consumerId)) {
+          this.consumers.push(consumerId);
+          this.assignments.set(consumerId, [0, 1, 2, 3]);
+        }
+      },
+      removeConsumer(consumerId) {
+        this.consumers = this.consumers.filter(c => c !== consumerId);
+        this.assignments.delete(consumerId);
+      },
+      rebalance() { /* Kafka handles rebalancing */ },
+
+      poll(consumerId, maxMessages = 10) {
+        // Return buffered messages (filled by the Kafka consumer.run() below)
+        const msgs = messageBuffer.splice(0, maxMessages);
+        return msgs;
+      },
+
+      commitOffset() { /* Kafka auto-commits */ },
+
+      getLag() {
+        return [{ partition: 0, highWaterMark: 0, committedOffset: 0, lag: 0 }];
+      },
+
+      _kafkaConsumer: null
+    };
+
+    // Start the KafkaJS consumer in the background — messages go into the buffer
+    const self = this;
+    (async () => {
+      try {
+        const consumer = self.kafka.consumer({ groupId: `${groupId}-${topicName.replace(/\./g, '-')}` });
+        await consumer.connect();
+        await consumer.subscribe({ topic: topicName, fromBeginning: false });
+        wrapper._kafkaConsumer = consumer;
+
+        await consumer.run({
+          eachMessage: async ({ topic, partition, message }) => {
+            try {
+              const value = JSON.parse(message.value.toString());
+              messageBuffer.push({
+                partition,
+                offset: parseInt(message.offset),
+                key: message.key?.toString() || '',
+                value,
+                timestamp: new Date(parseInt(message.timestamp)).toISOString()
+              });
+
+              // Also bridge to event bus for WebSocket
+              if (eventBus) {
+                const eventType = TOPIC_EVENT_MAP[topic] || topic.replace(/\./g, ':');
+                eventBus.publish(eventType, value, {
+                  source: 'kafka-consumer',
+                  topic, partition, offset: message.offset
+                });
+              }
+            } catch (e) { /* skip unparseable messages */ }
+          }
+        });
+      } catch (err) {
+        console.warn(`[kafka-stream-engine] Consumer ${compositeKey} failed: ${err.message}`);
+      }
+    })();
+
+    this._consumerGroups.set(compositeKey, wrapper);
     this._consumerGroupMeta.set(compositeKey, {
       groupId,
       topicName,
       createdAt: new Date().toISOString()
     });
 
-    return consumer;
+    return wrapper;
   }
 
   // -------------------------------------------------------------------------

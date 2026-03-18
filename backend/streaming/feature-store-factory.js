@@ -12,8 +12,13 @@ export async function getFeatureStoreBackend() {
   const backend = (process.env.FEATURE_STORE_BACKEND || 'memory').toLowerCase();
   if (backend === 'redis') {
     try {
-      const { isRedisAvailable } = await import('../shared/common/redis-client.js');
-      await new Promise(r => setTimeout(r, 500));
+      const { getRedisClient, isRedisAvailable } = await import('../shared/common/redis-client.js');
+      // Ensure Redis client is initialized and give it time to connect
+      getRedisClient();
+      for (let i = 0; i < 10; i++) {
+        if (isRedisAvailable()) break;
+        await new Promise(r => setTimeout(r, 500));
+      }
       if (isRedisAvailable()) {
         const { getFeatureStoreRedis } = await import('./feature-store-redis.js');
         resolvedStore = getFeatureStoreRedis();
