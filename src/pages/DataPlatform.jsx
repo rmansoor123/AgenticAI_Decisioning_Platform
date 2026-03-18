@@ -3,9 +3,10 @@ import { Link, useLocation } from 'react-router-dom'
 import {
   Database, Upload, Clock, Zap, GitBranch, Search,
   FileText, Table, ArrowRight, CheckCircle, AlertCircle,
-  Play, Pause, RefreshCw, Filter, ChevronRight
+  Play, Pause, RefreshCw, Filter, ChevronRight, Activity, Layers
 } from 'lucide-react'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { safeJson } from '../utils/api'
 
 const API_BASE = '/api'
 
@@ -15,6 +16,11 @@ export default function DataPlatform() {
   const [pipelines, setPipelines] = useState([])
   const [datasets, setDatasets] = useState([])
   const [loading, setLoading] = useState(true)
+
+  // New streaming/feature state
+  const [streamingBackend, setStreamingBackend] = useState(null)
+  const [pipelineStats, setPipelineStats] = useState(null)
+  const [featureStats, setFeatureStats] = useState(null)
 
   useEffect(() => {
     if (location.pathname.includes('/ingestion')) setActiveTab('ingestion')
@@ -42,6 +48,28 @@ export default function DataPlatform() {
     fetchData()
   }, [])
 
+  // Fetch streaming + feature store data
+  useEffect(() => {
+    const fetchStreamingData = async () => {
+      try {
+        const [backendRes, statsRes, featureRes] = await Promise.all([
+          fetch(`${API_BASE}/streaming/backend`),
+          fetch(`${API_BASE}/streaming/onboarding/stats`),
+          fetch(`${API_BASE}/features/stats`)
+        ])
+        const backendData = await safeJson(backendRes)
+        const statsData = await safeJson(statsRes)
+        const featureData = await safeJson(featureRes)
+        if (backendData.success !== false) setStreamingBackend(backendData.data || backendData)
+        if (statsData.success !== false) setPipelineStats(statsData.data || statsData)
+        if (featureData.success !== false) setFeatureStats(featureData.data || featureData)
+      } catch (error) {
+        console.error('Error fetching streaming data:', error)
+      }
+    }
+    fetchStreamingData()
+  }, [])
+
   const tabs = [
     { id: 'ingestion', name: 'Data Ingestion', icon: Upload, href: '/data/ingestion' },
     { id: 'catalog', name: 'Data Catalog', icon: FileText, href: '/data/catalog' },
@@ -60,6 +88,26 @@ export default function DataPlatform() {
     realtime: Math.floor(Math.random() * 15000) + 10000,
     batch: Math.floor(Math.random() * 5000) + 2000
   }))
+
+  const pipelineStages = pipelineStats?.stages || [
+    { name: 'Ingest', messageCount: 0 },
+    { name: 'Enrich', messageCount: 0 },
+    { name: 'Feature Extract', messageCount: 0 },
+    { name: 'Score', messageCount: 0 },
+    { name: 'Decide', messageCount: 0 },
+    { name: 'Emit', messageCount: 0 }
+  ]
+
+  const stageColors = ['bg-blue-500', 'bg-cyan-500', 'bg-purple-500', 'bg-pink-500', 'bg-amber-500', 'bg-emerald-500']
+
+  const featureGroups = featureStats?.groups || [
+    { name: 'seller_profile', status: 'empty' },
+    { name: 'seller_onboarding', status: 'empty' },
+    { name: 'network_risk', status: 'empty' }
+  ]
+
+  const backendType = streamingBackend?.type || streamingBackend?.backend || 'unknown'
+  const isKafka = backendType?.toLowerCase().includes('kafka')
 
   return (
     <div className="space-y-6">
@@ -95,6 +143,119 @@ export default function DataPlatform() {
 
       {activeTab === 'ingestion' && (
         <div className="space-y-6">
+
+          {/* ============================================================ */}
+          {/* Streaming Pipeline & Feature Store Section                    */}
+          {/* ============================================================ */}
+
+          {/* Streaming Backend Indicator */}
+          <div className="bg-[#12121a] rounded-xl border border-gray-800 p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-500/20 rounded-lg">
+                  <Activity className="w-5 h-5 text-blue-400" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-white">Streaming Backend</h3>
+                  <p className="text-sm text-gray-400">
+                    {isKafka ? 'Apache Kafka' : 'In-Process Engine'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${isKafka ? 'bg-emerald-400' : 'bg-amber-400'}`}></div>
+                <span className={`text-xs ${isKafka ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {isKafka ? 'Connected' : 'In-Memory'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* 6-Stage Pipeline Visualization */}
+          <div className="bg-[#12121a] rounded-xl border border-gray-800 p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Layers className="w-5 h-5 text-blue-400" />
+              <h3 className="font-semibold text-white">Onboarding Streaming Pipeline</h3>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400">6 stages</span>
+            </div>
+            <div className="flex items-center justify-between">
+              {pipelineStages.map((stage, i) => (
+                <div key={i} className="flex items-center">
+                  <div className={`${stageColors[i]} bg-opacity-20 border border-opacity-40 rounded-lg px-4 py-3 min-w-[110px] text-center`}
+                    style={{ borderColor: stageColors[i].replace('bg-', '').replace('-500', '') }}>
+                    <div className="text-sm font-medium text-white">{stage.name}</div>
+                    <div className="text-xs text-gray-400 mt-1">
+                      {(stage.messageCount || 0).toLocaleString()} msgs
+                    </div>
+                  </div>
+                  {i < pipelineStages.length - 1 && (
+                    <div className="mx-2 flex items-center">
+                      <div className="w-6 h-px bg-gray-600"></div>
+                      <ArrowRight className="w-4 h-4 text-gray-500" />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Feature Store Panel */}
+          <div className="bg-[#12121a] rounded-xl border border-gray-800 p-4">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Database className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-semibold text-white">Feature Store</h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${featureStats?.backend?.toLowerCase().includes('redis') ? 'bg-emerald-400' : 'bg-amber-400'}`}></div>
+                <span className="text-xs text-gray-400">
+                  {featureStats?.backend || 'In-Memory'}
+                </span>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-4 mb-4">
+              {featureGroups.map((group, i) => (
+                <div key={i} className="bg-gray-800/50 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm text-white font-mono">{group.name}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                      group.status === 'loaded' || group.count > 0
+                        ? 'bg-emerald-500/20 text-emerald-400'
+                        : 'bg-gray-500/20 text-gray-400'
+                    }`}>
+                      {group.status === 'loaded' || group.count > 0 ? 'loaded' : 'empty'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {featureStats && (
+              <div className="grid grid-cols-2 gap-4 pt-3 border-t border-gray-800">
+                <div>
+                  <span className="text-xs text-gray-500">Hit Rate</span>
+                  <div className="flex items-center gap-2 mt-1">
+                    <div className="flex-1 h-2 bg-gray-800 rounded-full overflow-hidden">
+                      <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${(featureStats.hitRate || 0) * 100}%` }} />
+                    </div>
+                    <span className="text-sm text-white">{((featureStats.hitRate || 0) * 100).toFixed(1)}%</span>
+                  </div>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500">Miss Rate</span>
+                  <div className="flex items-center gap-2 mt-1">
+                    <div className="flex-1 h-2 bg-gray-800 rounded-full overflow-hidden">
+                      <div className="h-full bg-red-500 rounded-full" style={{ width: `${(featureStats.missRate || (1 - (featureStats.hitRate || 0))) * 100}%` }} />
+                    </div>
+                    <span className="text-sm text-white">{((featureStats.missRate || (1 - (featureStats.hitRate || 0))) * 100).toFixed(1)}%</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          {/* ============================================================ */}
+          {/* End Streaming Pipeline & Feature Store Section                */}
+          {/* ============================================================ */}
+
           {/* Stats */}
           <div className="grid grid-cols-4 gap-4">
             {ingestionStats.map(stat => (
