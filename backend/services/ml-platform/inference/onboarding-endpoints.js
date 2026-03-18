@@ -14,8 +14,7 @@ import { getOnboardingRiskModel } from '../models/onboarding-risk-model.js';
 import {
   extractOnboardingFeatures,
   getOnboardingFeatureImportance,
-  calculateOnboardingContributions,
-  ONBOARDING_FEATURE_DEFINITIONS
+  calculateOnboardingContributions
 } from '../models/onboarding-feature-extractor.js';
 import { getPredictionCacheStats } from './prediction-cache-redis.js';
 
@@ -93,14 +92,13 @@ router.get('/feature-importance/onboarding', (req, res) => {
     const importance = getOnboardingFeatureImportance();
 
     const features = importance.map(feat => {
-      const def = ONBOARDING_FEATURE_DEFINITIONS[feat.name] || {};
       return {
         name:        feat.name,
         importance:  feat.importance,
         description: feat.description,
-        min:         def.min  ?? null,
-        max:         def.max  ?? null,
-        default:     def.default ?? null,
+        min:         feat.min ?? 0,
+        max:         feat.max ?? 100,
+        default:     feat.default ?? 0.5,
         group:       categorizeFeature(feat.name)
       };
     });
