@@ -85,7 +85,8 @@ export default function Layout({ children, wsConnected }) {
       children: [
         { name: 'Technology Reference', href: '/education' },
         { name: 'Architecture Guide', href: '/education/architecture' },
-        { name: 'Platform Roadmap', href: '/education/roadmap' }
+        { name: 'Platform Roadmap', href: '/education/roadmap' },
+        { name: 'Industry Tech Stacks', href: '/education/tech-stacks' }
       ]
     },
     {

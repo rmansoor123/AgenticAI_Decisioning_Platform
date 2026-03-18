@@ -53,6 +53,7 @@ import PolicyLive from './pages/PolicyLive'
 import Education from './pages/Education'
 import ArchitectureGuide from './pages/ArchitectureGuide'
 import PlatformRoadmap from './pages/PlatformRoadmap'
+import IndustryTechStacks from './pages/IndustryTechStacks'
 
 const API_BASE = '/api'
 // Connect directly to backend WebSocket to avoid Vite HMR proxy conflict
@@ -239,6 +240,7 @@ function App() {
           <Route path="/education" element={<Education />} />
           <Route path="/education/architecture" element={<ArchitectureGuide />} />
           <Route path="/education/roadmap" element={<PlatformRoadmap />} />
+          <Route path="/education/tech-stacks" element={<IndustryTechStacks />} />
         </Routes>
       </Layout>
     </BrowserRouter>
