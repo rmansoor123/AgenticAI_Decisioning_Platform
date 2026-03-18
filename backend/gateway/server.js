@@ -379,6 +379,9 @@ import payoutRiskRouter, { setPayoutRiskAgent } from '../services/autonomous/pay
 import listingIntelligenceRouter, { setListingIntelligenceAgent } from '../services/autonomous/listing-intelligence-router.js';
 import profileMutationRouter, { setProfileMutationAgent } from '../services/autonomous/profile-mutation-router.js';
 import returnsAbuseRouter, { setReturnsAbuseAgent } from '../services/autonomous/returns-abuse-router.js';
+import onboardingModelRouter from '../services/ml-platform/inference/onboarding-endpoints.js';
+import streamingStatsRouter from '../streaming/onboarding-stats-endpoint.js';
+import featureStatsRouter from '../streaming/feature-stats-endpoint.js';
 
 const app = express();
 const server = createServer(app);
@@ -854,8 +857,13 @@ app.use('/api/data/agent', dataAgentRouter);
 
 // ML Platform
 app.use('/api/ml/inference', mlInferenceRouter);
+app.use('/api/ml/inference', onboardingModelRouter);
 app.use('/api/ml/governance', mlGovernanceRouter);
 app.use('/api/ml/monitoring', mlMonitoringRouter);
+
+// Streaming + Feature Store Stats
+app.use('/api/streaming', streamingStatsRouter);
+app.use('/api/features', featureStatsRouter);
 
 // Decision Engine
 app.use('/api/rules', rulesRouter);
