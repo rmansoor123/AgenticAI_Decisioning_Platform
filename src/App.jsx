@@ -51,6 +51,8 @@ import BehavioralLive from './pages/BehavioralLive'
 import BuyerTrustLive from './pages/BuyerTrustLive'
 import PolicyLive from './pages/PolicyLive'
 import Education from './pages/Education'
+import ArchitectureGuide from './pages/ArchitectureGuide'
+import PlatformRoadmap from './pages/PlatformRoadmap'
 
 const API_BASE = '/api'
 // Connect directly to backend WebSocket to avoid Vite HMR proxy conflict
@@ -235,6 +237,8 @@ function App() {
           <Route path="/buyer-trust/live" element={<BuyerTrustLive />} />
           <Route path="/policy/live" element={<PolicyLive />} />
           <Route path="/education" element={<Education />} />
+          <Route path="/education/architecture" element={<ArchitectureGuide />} />
+          <Route path="/education/roadmap" element={<PlatformRoadmap />} />
         </Routes>
       </Layout>
     </BrowserRouter>

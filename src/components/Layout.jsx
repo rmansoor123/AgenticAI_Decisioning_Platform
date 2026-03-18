@@ -81,7 +81,12 @@ export default function Layout({ children, wsConnected }) {
       name: 'Education',
       href: '/education',
       icon: BookOpen,
-      color: 'text-emerald-400'
+      color: 'text-emerald-400',
+      children: [
+        { name: 'Technology Reference', href: '/education' },
+        { name: 'Architecture Guide', href: '/education/architecture' },
+        { name: 'Platform Roadmap', href: '/education/roadmap' }
+      ]
     },
     {
       name: 'Platform',
