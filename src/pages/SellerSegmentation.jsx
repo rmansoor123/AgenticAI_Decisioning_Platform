@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   Search, ChevronDown, ChevronUp, ChevronRight,
   TrendingUp, Globe, Grid3X3, Crown, Truck, Code,
   AlertTriangle, ArrowDownCircle, Calendar, Award,
-  Users, BarChart3, ArrowUpDown
+  Users, BarChart3, ArrowUpDown, RefreshCw, Star,
+  Shield, Clock, CheckCircle, Zap
 } from 'lucide-react'
 import { safeJson } from '../utils/api'
 
@@ -19,19 +20,32 @@ const TIERS = [
 const TIER_MAP = Object.fromEntries(TIERS.map(t => [t.key, t]))
 
 const TAG_CONFIG = {
-  'High-Growth':      { icon: TrendingUp, color: 'green', bg: 'bg-green-500/20', text: 'text-green-400', border: 'border-green-500/30', desc: 'Revenue growth rate exceeds 50% month-over-month' },
-  'International':    { icon: Globe, color: 'blue', bg: 'bg-blue-500/20', text: 'text-blue-400', border: 'border-blue-500/30', desc: 'Sells across multiple international markets' },
-  'Multi-Category':   { icon: Grid3X3, color: 'purple', bg: 'bg-purple-500/20', text: 'text-purple-400', border: 'border-purple-500/30', desc: 'Active listings across 3+ product categories' },
-  'Premium Seller':   { icon: Crown, color: 'yellow', bg: 'bg-yellow-500/20', text: 'text-yellow-400', border: 'border-yellow-500/30', desc: 'Top-rated seller with consistently high satisfaction' },
-  'Fast Shipper':     { icon: Truck, color: 'emerald', bg: 'bg-emerald-500/20', text: 'text-emerald-400', border: 'border-emerald-500/30', desc: 'Average ship time under 24 hours' },
-  'API Power User':   { icon: Code, color: 'cyan', bg: 'bg-cyan-500/20', text: 'text-cyan-400', border: 'border-cyan-500/30', desc: 'Heavy API integration usage for automation' },
-  'High-Return Risk': { icon: AlertTriangle, color: 'red', bg: 'bg-red-500/20', text: 'text-red-400', border: 'border-red-500/30', desc: 'Return rate significantly above category average' },
-  'Price Competitor': { icon: ArrowDownCircle, color: 'orange', bg: 'bg-orange-500/20', text: 'text-orange-400', border: 'border-orange-500/30', desc: 'Consistently undercuts market pricing by 15%+' },
-  'Seasonal':         { icon: Calendar, color: 'amber', bg: 'bg-amber-500/20', text: 'text-amber-400', border: 'border-amber-500/30', desc: 'Sales volume heavily tied to seasonal patterns' },
-  'Brand Registered': { icon: Award, color: 'indigo', bg: 'bg-indigo-500/20', text: 'text-indigo-400', border: 'border-indigo-500/30', desc: 'Verified brand owner with trademark registration' }
+  'High-Growth':          { icon: TrendingUp, color: 'green', bg: 'bg-green-500/20', text: 'text-green-400', border: 'border-green-500/30', desc: 'Revenue growth rate exceeds 50% month-over-month' },
+  'International':        { icon: Globe, color: 'blue', bg: 'bg-blue-500/20', text: 'text-blue-400', border: 'border-blue-500/30', desc: 'Sells across multiple international markets' },
+  'Multi-Category':       { icon: Grid3X3, color: 'purple', bg: 'bg-purple-500/20', text: 'text-purple-400', border: 'border-purple-500/30', desc: 'Active listings across 3+ product categories' },
+  'Premium Seller':       { icon: Crown, color: 'yellow', bg: 'bg-yellow-500/20', text: 'text-yellow-400', border: 'border-yellow-500/30', desc: 'Top-rated seller with consistently high satisfaction' },
+  'Consistent Performer': { icon: CheckCircle, color: 'emerald', bg: 'bg-emerald-500/20', text: 'text-emerald-400', border: 'border-emerald-500/30', desc: 'Active for 60+ days with no suspensions' },
+  'Established Veteran':  { icon: Star, color: 'cyan', bg: 'bg-cyan-500/20', text: 'text-cyan-400', border: 'border-cyan-500/30', desc: 'Account age 180+ days with 50+ transactions' },
+  'High-Return Risk':     { icon: AlertTriangle, color: 'red', bg: 'bg-red-500/20', text: 'text-red-400', border: 'border-red-500/30', desc: 'Return rate significantly above category average' },
+  'Price Competitor':     { icon: ArrowDownCircle, color: 'orange', bg: 'bg-orange-500/20', text: 'text-orange-400', border: 'border-orange-500/30', desc: 'Consistently undercuts market pricing by 15%+' },
+  'Seasonal':             { icon: Calendar, color: 'amber', bg: 'bg-amber-500/20', text: 'text-amber-400', border: 'border-amber-500/30', desc: '50%+ of transactions concentrated in 2 months' },
+  'Brand Registered':     { icon: Award, color: 'indigo', bg: 'bg-indigo-500/20', text: 'text-indigo-400', border: 'border-indigo-500/30', desc: 'Verified brand owner with trademark registration' }
+}
+
+const CLUSTER_COLORS = {
+  'Rising Stars': { bg: 'bg-emerald-500/20', text: 'text-emerald-400', border: 'border-emerald-500/30' },
+  'Steady Performers': { bg: 'bg-blue-500/20', text: 'text-blue-400', border: 'border-blue-500/30' },
+  'Power Sellers': { bg: 'bg-yellow-500/20', text: 'text-yellow-400', border: 'border-yellow-500/30' },
+  'Premium Niche': { bg: 'bg-purple-500/20', text: 'text-purple-400', border: 'border-purple-500/30' },
+  'At Risk': { bg: 'bg-red-500/20', text: 'text-red-400', border: 'border-red-500/30' },
+  'Dormant': { bg: 'bg-gray-500/20', text: 'text-gray-400', border: 'border-gray-500/30' },
+  'Growth Potential': { bg: 'bg-cyan-500/20', text: 'text-cyan-400', border: 'border-cyan-500/30' },
+  'Market Leaders': { bg: 'bg-amber-500/20', text: 'text-amber-400', border: 'border-amber-500/30' },
+  'Standard': { bg: 'bg-slate-500/20', text: 'text-slate-400', border: 'border-slate-500/30' }
 }
 
 const DIMENSIONS = ['GMV', 'Volume', 'Age', 'Risk', 'Compliance', 'Satisfaction']
+const DIM_KEYS = ['gmv', 'orderVolume', 'accountAge', 'riskScore', 'compliance', 'satisfaction']
 
 function formatCurrency(val) {
   if (val == null) return '$0'
@@ -62,6 +76,16 @@ function TierBadge({ tier }) {
   )
 }
 
+function ClusterBadge({ cluster }) {
+  const name = cluster?.name || 'Standard'
+  const colors = CLUSTER_COLORS[name] || CLUSTER_COLORS['Standard']
+  return (
+    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${colors.bg} ${colors.text} border ${colors.border}`}>
+      {name}
+    </span>
+  )
+}
+
 function TagBadge({ tag, small = false, onClick }) {
   const cfg = TAG_CONFIG[tag]
   if (!cfg) return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-500/20 text-gray-400">{tag}</span>
@@ -87,16 +111,23 @@ export default function SellerSegmentation() {
   const [sortCol, setSortCol] = useState('score')
   const [sortDir, setSortDir] = useState('desc')
   const [expandedRow, setExpandedRow] = useState(null)
+  const [tierBenefits, setTierBenefits] = useState(null)
+  const [selectedBenefitTier, setSelectedBenefitTier] = useState(null)
+  const [clusterData, setClusterData] = useState([])
+  const [recalculating, setRecalculating] = useState(false)
+  const [sellerHistory, setSellerHistory] = useState({})
 
   useEffect(() => {
     fetchSellers()
+    fetchClusters()
+    fetchBenefits()
   }, [])
 
   async function fetchSellers() {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/seller-tools/segmentation/sellers')
+      const res = await fetch('/api/seller-tools/segmentation')
       const data = await safeJson(res)
       const list = data.sellers || data.data || data || []
       setSellers(Array.isArray(list) ? list : [])
@@ -106,6 +137,57 @@ export default function SellerSegmentation() {
       setLoading(false)
     }
   }
+
+  async function fetchClusters() {
+    try {
+      const res = await fetch('/api/seller-tools/segmentation/clusters')
+      const data = await safeJson(res)
+      setClusterData(data.clusters || [])
+    } catch (_) { /* non-critical */ }
+  }
+
+  async function fetchBenefits() {
+    try {
+      const res = await fetch('/api/seller-tools/segmentation/benefits')
+      const data = await safeJson(res)
+      setTierBenefits(data.benefits || null)
+    } catch (_) { /* non-critical */ }
+  }
+
+  async function fetchSellerHistory(sellerId) {
+    try {
+      const res = await fetch(`/api/seller-tools/segmentation/sellers/${sellerId}/history`)
+      const data = await safeJson(res)
+      setSellerHistory(prev => ({ ...prev, [sellerId]: data.data || [] }))
+    } catch (_) {
+      setSellerHistory(prev => ({ ...prev, [sellerId]: [] }))
+    }
+  }
+
+  async function handleRecalculate() {
+    setRecalculating(true)
+    try {
+      const res = await fetch('/api/seller-tools/segmentation/recalculate', { method: 'POST' })
+      const data = await safeJson(res)
+      const list = data.data || []
+      setSellers(Array.isArray(list) ? list : [])
+      fetchClusters()
+    } catch (err) {
+      console.error('Recalculate failed:', err.message)
+    } finally {
+      setRecalculating(false)
+    }
+  }
+
+  const handleExpandRow = useCallback((sid) => {
+    setExpandedRow(prev => {
+      const next = prev === sid ? null : sid
+      if (next && !sellerHistory[next]) {
+        fetchSellerHistory(next)
+      }
+      return next
+    })
+  }, [sellerHistory])
 
   // Tier distribution
   const tierDistribution = useMemo(() => {
@@ -178,9 +260,9 @@ export default function SellerSegmentation() {
         case 'sellerId': av = a.sellerId || a.seller_id || ''; bv = b.sellerId || b.seller_id || ''; break
         case 'businessName': av = a.businessName || a.business_name || a.name || ''; bv = b.businessName || b.business_name || b.name || ''; break
         case 'tier': av = TIERS.findIndex(t => t.key === (a.tier || 'New')); bv = TIERS.findIndex(t => t.key === (b.tier || 'New')); break
-        case 'score': av = a.score ?? a.sellerScore ?? 0; bv = b.score ?? b.sellerScore ?? 0; break
+        case 'score': av = a.compositeScore ?? a.score ?? a.sellerScore ?? 0; bv = b.compositeScore ?? b.score ?? b.sellerScore ?? 0; break
         case 'gmv': av = a.gmv ?? a.totalGmv ?? 0; bv = b.gmv ?? b.totalGmv ?? 0; break
-        case 'orders': av = a.orders ?? a.orderCount ?? 0; bv = b.orders ?? b.orderCount ?? 0; break
+        case 'orders': av = a.transactionCount ?? a.orders ?? a.orderCount ?? 0; bv = b.transactionCount ?? b.orders ?? b.orderCount ?? 0; break
         case 'risk': av = a.riskScore ?? a.risk_score ?? 0; bv = b.riskScore ?? b.risk_score ?? 0; break
         case 'age': av = a.ageDays ?? a.age ?? 0; bv = b.ageDays ?? b.age ?? 0; break
         default: av = 0; bv = 0
@@ -235,13 +317,18 @@ export default function SellerSegmentation() {
   function getSellerDimensions(seller) {
     if (seller.dimensions) return seller.dimensions
     return {
-      GMV: Math.min(100, Math.round((seller.gmv ?? seller.totalGmv ?? 0) / 10000 * 100)),
-      Volume: Math.min(100, Math.round((seller.orders ?? seller.orderCount ?? 0) / 500 * 100)),
-      Age: Math.min(100, Math.round((seller.ageDays ?? seller.age ?? 0) / 365 * 100)),
-      Risk: Math.max(0, 100 - (seller.riskScore ?? seller.risk_score ?? 50)),
-      Compliance: seller.complianceScore ?? 75,
-      Satisfaction: seller.satisfactionScore ?? seller.satisfaction ?? 80
+      gmv: Math.min(100, Math.round((seller.gmv ?? seller.totalGmv ?? 0) / 10000 * 100)),
+      orderVolume: Math.min(100, Math.round((seller.orders ?? seller.orderCount ?? 0) / 500 * 100)),
+      accountAge: Math.min(100, Math.round((seller.ageDays ?? seller.age ?? 0) / 365 * 100)),
+      riskScore: Math.max(0, 100 - (seller.riskScore ?? seller.risk_score ?? 50)),
+      compliance: seller.complianceScore ?? 75,
+      satisfaction: seller.satisfactionScore ?? seller.satisfaction ?? 80
     }
+  }
+
+  function handleTierCardClick(tierKey) {
+    toggleTier(tierKey)
+    setSelectedBenefitTier(prev => prev === tierKey ? null : tierKey)
   }
 
   if (loading) {
@@ -266,17 +353,29 @@ export default function SellerSegmentation() {
     )
   }
 
+  const benefitTier = selectedBenefitTier && tierBenefits ? tierBenefits[selectedBenefitTier] : null
+
   return (
     <div className="min-h-screen bg-[#0a0a12] text-gray-200 p-6 space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-          <Users size={24} className="text-cyan-400" />
-          Seller Segmentation
-        </h1>
-        <p className="text-sm text-gray-400 mt-1">
-          Multi-dimensional seller analysis with tier placement and behavioral tagging
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+            <Users size={24} className="text-cyan-400" />
+            Seller Segmentation
+          </h1>
+          <p className="text-sm text-gray-400 mt-1">
+            Multi-dimensional seller analysis with tier placement, behavioral tagging, and clustering
+          </p>
+        </div>
+        <button
+          onClick={handleRecalculate}
+          disabled={recalculating}
+          className="flex items-center gap-2 px-4 py-2 bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 rounded-lg hover:bg-cyan-500/30 transition-colors disabled:opacity-50"
+        >
+          <RefreshCw size={14} className={recalculating ? 'animate-spin' : ''} />
+          {recalculating ? 'Recalculating...' : 'Recalculate'}
+        </button>
       </div>
 
       {/* Tier Distribution Cards */}
@@ -284,8 +383,8 @@ export default function SellerSegmentation() {
         {tierDistribution.map(t => (
           <div
             key={t.key}
-            className={`bg-[#12121a] border border-gray-800 rounded-lg p-3 cursor-pointer transition-all ${selectedTiers.has(t.key) ? `ring-1 ring-offset-0 ${t.border} ${t.bgLight}` : 'hover:border-gray-700'}`}
-            onClick={() => toggleTier(t.key)}
+            className={`bg-[#12121a] border border-gray-800 rounded-lg p-3 cursor-pointer transition-all ${selectedBenefitTier === t.key ? `ring-2 ring-offset-0 ${t.border} ${t.bgLight}` : selectedTiers.has(t.key) ? `ring-1 ring-offset-0 ${t.border} ${t.bgLight}` : 'hover:border-gray-700'}`}
+            onClick={() => handleTierCardClick(t.key)}
           >
             <div className={`text-xs font-medium ${t.text} uppercase tracking-wider`}>{t.key}</div>
             <div className="text-xl font-bold text-white mt-1">{t.count}</div>
@@ -293,6 +392,44 @@ export default function SellerSegmentation() {
           </div>
         ))}
       </div>
+
+      {/* Tier Benefits Panel */}
+      {benefitTier && (
+        <div className="bg-[#12121a] border border-gray-800 rounded-lg p-4">
+          <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+            <Shield size={14} className="text-cyan-400" />
+            {selectedBenefitTier} Tier Benefits
+          </h3>
+          <div className="grid grid-cols-4 gap-4 mb-3">
+            <div>
+              <div className="text-[11px] text-gray-500 uppercase tracking-wider">Payout Frequency</div>
+              <div className="text-sm text-gray-200 mt-0.5">{benefitTier.payoutFrequency}</div>
+            </div>
+            <div>
+              <div className="text-[11px] text-gray-500 uppercase tracking-wider">Listing Limit</div>
+              <div className="text-sm text-gray-200 mt-0.5">{typeof benefitTier.listingLimit === 'number' ? benefitTier.listingLimit.toLocaleString() : benefitTier.listingLimit}</div>
+            </div>
+            <div>
+              <div className="text-[11px] text-gray-500 uppercase tracking-wider">Support Tier</div>
+              <div className="text-sm text-gray-200 mt-0.5">{benefitTier.supportTier}</div>
+            </div>
+            <div>
+              <div className="text-[11px] text-gray-500 uppercase tracking-wider">Fee Discount</div>
+              <div className="text-sm text-gray-200 mt-0.5">{benefitTier.feeDiscount}</div>
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-1.5">Features</div>
+            <div className="flex flex-wrap gap-1.5">
+              {benefitTier.features.map(f => (
+                <span key={f} className="px-2 py-0.5 rounded-full text-xs bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                  {f}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Distribution Bar */}
       <div className="h-2 rounded-full overflow-hidden flex bg-gray-800">
@@ -393,17 +530,17 @@ export default function SellerSegmentation() {
                 { key: 'gmv', label: 'GMV', w: 'w-24' },
                 { key: 'orders', label: 'Orders', w: 'w-20' },
                 { key: 'risk', label: 'Risk', w: 'w-20' },
-                { key: 'age', label: 'Age', w: 'w-20' },
+                { key: 'cluster', label: 'Cluster', w: 'w-32' },
                 { key: 'tags', label: 'Tags', w: 'w-48' }
               ].map(col => (
                 <th
                   key={col.key}
                   className={`px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-300 select-none ${col.w}`}
-                  onClick={col.key !== 'tags' ? () => handleSort(col.key) : undefined}
+                  onClick={col.key !== 'tags' && col.key !== 'cluster' ? () => handleSort(col.key) : undefined}
                 >
                   <div className="flex items-center gap-1">
                     {col.label}
-                    {col.key !== 'tags' && getSortIcon(col.key)}
+                    {col.key !== 'tags' && col.key !== 'cluster' && getSortIcon(col.key)}
                   </div>
                 </th>
               ))}
@@ -415,14 +552,14 @@ export default function SellerSegmentation() {
               const sid = seller.sellerId || seller.seller_id || ''
               const bname = seller.businessName || seller.business_name || seller.name || ''
               const tier = seller.tier || 'New'
-              const score = seller.score ?? seller.sellerScore ?? 0
+              const score = seller.compositeScore ?? seller.score ?? seller.sellerScore ?? 0
               const gmv = seller.gmv ?? seller.totalGmv ?? 0
-              const orders = seller.orders ?? seller.orderCount ?? 0
+              const orders = seller.transactionCount ?? seller.orders ?? seller.orderCount ?? 0
               const rs = seller.riskScore ?? seller.risk_score ?? 0
-              const age = seller.ageDays ?? seller.age ?? 0
               const tags = getSellerTags(seller)
               const risk = riskLabel(rs)
               const expanded = expandedRow === sid
+              const cluster = seller.cluster
 
               return (
                 <SellerRow
@@ -434,18 +571,19 @@ export default function SellerSegmentation() {
                   gmv={gmv}
                   orders={orders}
                   risk={risk}
-                  age={age}
                   tags={tags}
+                  cluster={cluster}
                   expanded={expanded}
                   dimensions={getSellerDimensions(seller)}
                   seller={seller}
-                  onToggle={() => setExpandedRow(expanded ? null : sid)}
+                  history={sellerHistory[sid] || null}
+                  onToggle={() => handleExpandRow(sid)}
                 />
               )
             })}
             {filteredSellers.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-3 py-8 text-center text-gray-500">
+                <td colSpan={11} className="px-3 py-8 text-center text-gray-500">
                   No sellers match the current filters
                 </td>
               </tr>
@@ -484,11 +622,52 @@ export default function SellerSegmentation() {
           })}
         </div>
       </div>
+
+      {/* Cluster Distribution */}
+      <div>
+        <h2 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+          <Zap size={18} className="text-cyan-400" />
+          Cluster Distribution
+        </h2>
+        <div className="grid grid-cols-4 gap-3">
+          {(clusterData.length > 0 ? clusterData : CLUSTERS_FALLBACK).map(cluster => {
+            const name = cluster.name || 'Standard'
+            const colors = CLUSTER_COLORS[name] || CLUSTER_COLORS['Standard']
+            return (
+              <div key={name} className={`bg-[#12121a] border ${colors.border} rounded-lg p-3`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${colors.bg} ${colors.text}`}>
+                    {name}
+                  </span>
+                </div>
+                <div className="text-lg font-bold text-white">{cluster.count || 0}</div>
+                <div className="text-[11px] text-gray-500 mt-0.5 leading-tight">
+                  {cluster.description || ''}
+                  {cluster.percentage != null && (
+                    <span className="ml-1 text-gray-600">({cluster.percentage}%)</span>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }
 
-function SellerRow({ sid, bname, tier, score, gmv, orders, risk, age, tags, expanded, dimensions, seller, onToggle }) {
+const CLUSTERS_FALLBACK = [
+  { name: 'Rising Stars', count: 0, description: 'New sellers with strong early performance' },
+  { name: 'Steady Performers', count: 0, description: 'Established sellers with consistent activity' },
+  { name: 'Power Sellers', count: 0, description: 'High-volume, high-GMV sellers' },
+  { name: 'Premium Niche', count: 0, description: 'Low-volume but high-value sellers' },
+  { name: 'At Risk', count: 0, description: 'Sellers showing declining engagement' },
+  { name: 'Dormant', count: 0, description: 'Inactive accounts' },
+  { name: 'Growth Potential', count: 0, description: 'Active sellers not yet reaching potential' },
+  { name: 'Market Leaders', count: 0, description: 'Top-tier sellers' }
+]
+
+function SellerRow({ sid, bname, tier, score, gmv, orders, risk, tags, cluster, expanded, dimensions, seller, history, onToggle }) {
   return (
     <>
       <tr
@@ -513,7 +692,9 @@ function SellerRow({ sid, bname, tier, score, gmv, orders, risk, age, tags, expa
             {risk.label}
           </span>
         </td>
-        <td className="px-3 py-2.5 text-gray-400 text-xs">{age}d</td>
+        <td className="px-3 py-2.5">
+          <ClusterBadge cluster={cluster} />
+        </td>
         <td className="px-3 py-2.5">
           <div className="flex items-center gap-1 flex-wrap">
             {tags.slice(0, 3).map(t => <TagBadge key={t} tag={t} small />)}
@@ -526,14 +707,15 @@ function SellerRow({ sid, bname, tier, score, gmv, orders, risk, age, tags, expa
       </tr>
       {expanded && (
         <tr className="bg-[#0a0a12]">
-          <td colSpan={10} className="px-4 py-4">
-            <div className="grid grid-cols-2 gap-6">
+          <td colSpan={11} className="px-4 py-4">
+            <div className="grid grid-cols-3 gap-6">
               {/* Dimension Breakdown */}
               <div>
                 <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Dimension Breakdown</h4>
                 <div className="space-y-2">
-                  {DIMENSIONS.map(dim => {
-                    const val = dimensions[dim] ?? 0
+                  {DIMENSIONS.map((dim, idx) => {
+                    const key = DIM_KEYS[idx]
+                    const val = dimensions[key] ?? dimensions[dim] ?? 0
                     return (
                       <div key={dim} className="flex items-center gap-3">
                         <span className="text-xs text-gray-400 w-24">{dim}</span>
@@ -576,6 +758,40 @@ function SellerRow({ sid, bname, tier, score, gmv, orders, risk, age, tags, expa
                   </div>
                 ) : (
                   <p className="text-xs text-gray-600">No tags applied</p>
+                )}
+              </div>
+
+              {/* Segment History */}
+              <div>
+                <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                  <Clock size={12} />
+                  Segment History
+                </h4>
+                {history === null ? (
+                  <p className="text-xs text-gray-600">Loading...</p>
+                ) : history.length === 0 ? (
+                  <p className="text-xs text-gray-600">No history available</p>
+                ) : (
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-gray-500">
+                        <th className="text-left pb-1.5 font-medium">Date</th>
+                        <th className="text-left pb-1.5 font-medium">Tier</th>
+                        <th className="text-right pb-1.5 font-medium">Score</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {history.slice(0, 5).map((snap, i) => (
+                        <tr key={i} className="border-t border-gray-800/30">
+                          <td className="py-1 text-gray-400">
+                            {snap.computedAt ? new Date(snap.computedAt).toLocaleDateString() : '--'}
+                          </td>
+                          <td className="py-1"><TierBadge tier={snap.tier} /></td>
+                          <td className="py-1 text-right text-gray-300 font-mono">{snap.compositeScore}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 )}
               </div>
             </div>
