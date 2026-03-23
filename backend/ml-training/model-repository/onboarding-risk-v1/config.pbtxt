@@ -1,0 +1,31 @@
+name: "onboarding-risk-v1"
+platform: "onnxruntime_onnx"
+max_batch_size: 64
+
+input [
+  {
+    name: "features"
+    data_type: TYPE_FP32
+    dims: [ 25 ]
+  }
+]
+
+output [
+  {
+    name: "risk_score"
+    data_type: TYPE_FP32
+    dims: [ 1 ]
+  }
+]
+
+dynamic_batching {
+  max_queue_delay_microseconds: 100
+  preferred_batch_size: [ 8, 16, 32 ]
+}
+
+instance_group [
+  {
+    count: 2
+    kind: KIND_CPU
+  }
+]
