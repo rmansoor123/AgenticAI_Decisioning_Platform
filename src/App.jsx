@@ -56,6 +56,9 @@ import SellerSegmentation from './pages/SellerSegmentation'
 import PlatformRoadmap from './pages/PlatformRoadmap'
 import IndustryTechStacks from './pages/IndustryTechStacks'
 import MLTraining from './pages/MLTraining'
+import PaymentProcessing from './pages/PaymentProcessing'
+import BillingFees from './pages/BillingFees'
+import Invoicing from './pages/Invoicing'
 
 const API_BASE = '/api'
 // Connect directly to backend WebSocket to avoid Vite HMR proxy conflict
@@ -245,6 +248,9 @@ function App() {
           <Route path="/education/roadmap" element={<PlatformRoadmap />} />
           <Route path="/education/tech-stacks" element={<IndustryTechStacks />} />
           <Route path="/ml/training" element={<MLTraining />} />
+          <Route path="/financial/payments" element={<PaymentProcessing />} />
+          <Route path="/financial/billing" element={<BillingFees />} />
+          <Route path="/financial/invoicing" element={<Invoicing />} />
         </Routes>
       </Layout>
     </BrowserRouter>

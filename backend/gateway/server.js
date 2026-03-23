@@ -377,6 +377,9 @@ import behavioralAnalyticsRouter from '../services/business/behavioral-analytics
 import buyerTrustRouter from '../services/business/buyer-trust/index.js';
 import policyEnforcementRouter from '../services/business/policy-enforcement/index.js';
 import sellerSegmentationRouter from '../services/business/seller-segmentation/index.js';
+import billingRouter from '../services/business/billing/index.js';
+import paymentWorkflowRouter from '../services/business/payment-processing-workflow/index.js';
+import invoicingRouter from '../services/business/invoicing/index.js';
 import payoutRiskRouter, { setPayoutRiskAgent } from '../services/autonomous/payout-risk-router.js';
 import listingIntelligenceRouter, { setListingIntelligenceAgent } from '../services/autonomous/listing-intelligence-router.js';
 import profileMutationRouter, { setProfileMutationAgent } from '../services/autonomous/profile-mutation-router.js';
@@ -872,6 +875,9 @@ app.use('/api/behavioral', behavioralAnalyticsRouter);
 app.use('/api/buyer-trust', buyerTrustRouter);
 app.use('/api/policy', policyEnforcementRouter);
 app.use('/api/seller-tools/segmentation', sellerSegmentationRouter);
+app.use('/api/financial/billing', billingRouter);
+app.use('/api/financial/payments', paymentWorkflowRouter);
+app.use('/api/financial/invoices', invoicingRouter);
 
 // Data Platform
 app.use('/api/data/ingestion', dataIngestionRouter);

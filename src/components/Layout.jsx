@@ -87,6 +87,17 @@ export default function Layout({ children, wsConnected }) {
       ]
     },
     {
+      name: 'Financial Operations',
+      href: '/financial/payments',
+      icon: DollarSign,
+      color: 'text-amber-400',
+      children: [
+        { name: 'Payment Processing', href: '/financial/payments' },
+        { name: 'Billing & Fees', href: '/financial/billing' },
+        { name: 'Invoicing', href: '/financial/invoicing' }
+      ]
+    },
+    {
       name: 'Education',
       href: '/education',
       icon: BookOpen,
