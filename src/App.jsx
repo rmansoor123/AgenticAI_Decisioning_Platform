@@ -55,6 +55,7 @@ import ArchitectureGuide from './pages/ArchitectureGuide'
 import SellerSegmentation from './pages/SellerSegmentation'
 import PlatformRoadmap from './pages/PlatformRoadmap'
 import IndustryTechStacks from './pages/IndustryTechStacks'
+import MLTraining from './pages/MLTraining'
 
 const API_BASE = '/api'
 // Connect directly to backend WebSocket to avoid Vite HMR proxy conflict
@@ -243,6 +244,7 @@ function App() {
           <Route path="/education/architecture" element={<ArchitectureGuide />} />
           <Route path="/education/roadmap" element={<PlatformRoadmap />} />
           <Route path="/education/tech-stacks" element={<IndustryTechStacks />} />
+          <Route path="/ml/training" element={<MLTraining />} />
         </Routes>
       </Layout>
     </BrowserRouter>

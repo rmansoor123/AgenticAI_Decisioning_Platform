@@ -345,6 +345,7 @@ import queryFederationRouter from '../services/data-platform/query-federation/in
 import mlInferenceRouter from '../services/ml-platform/inference/index.js';
 import mlGovernanceRouter from '../services/ml-platform/governance/index.js';
 import mlMonitoringRouter from '../services/ml-platform/monitoring/index.js';
+import mlTrainingRouter from '../services/ml-platform/training/index.js';
 import rulesRouter from '../services/decision-engine/rules/index.js';
 import executionRouter from '../services/decision-engine/execution/index.js';
 import abTestingRouter from '../services/experimentation/ab-testing/index.js';
@@ -886,6 +887,7 @@ app.use('/api/ml/inference', mlInferenceRouter);
 app.use('/api/ml/inference', onboardingModelRouter);
 app.use('/api/ml/governance', mlGovernanceRouter);
 app.use('/api/ml/monitoring', mlMonitoringRouter);
+app.use('/api/ml/training', mlTrainingRouter);
 
 // Streaming + Feature Store Stats
 app.use('/api/streaming', streamingStatsRouter);
