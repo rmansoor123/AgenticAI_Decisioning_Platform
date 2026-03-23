@@ -52,6 +52,7 @@ import BuyerTrustLive from './pages/BuyerTrustLive'
 import PolicyLive from './pages/PolicyLive'
 import Education from './pages/Education'
 import ArchitectureGuide from './pages/ArchitectureGuide'
+import SellerSegmentation from './pages/SellerSegmentation'
 import PlatformRoadmap from './pages/PlatformRoadmap'
 import IndustryTechStacks from './pages/IndustryTechStacks'
 
@@ -237,6 +238,7 @@ function App() {
           <Route path="/behavioral/live" element={<BehavioralLive />} />
           <Route path="/buyer-trust/live" element={<BuyerTrustLive />} />
           <Route path="/policy/live" element={<PolicyLive />} />
+          <Route path="/seller-tools/segmentation" element={<SellerSegmentation />} />
           <Route path="/education" element={<Education />} />
           <Route path="/education/architecture" element={<ArchitectureGuide />} />
           <Route path="/education/roadmap" element={<PlatformRoadmap />} />

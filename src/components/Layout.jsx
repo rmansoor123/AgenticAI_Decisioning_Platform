@@ -78,6 +78,15 @@ export default function Layout({ children, wsConnected }) {
       ]
     },
     {
+      name: 'Seller Tools',
+      href: '/seller-tools/segmentation',
+      icon: UserCog,
+      color: 'text-teal-400',
+      children: [
+        { name: 'Seller Segmentation', href: '/seller-tools/segmentation' }
+      ]
+    },
+    {
       name: 'Education',
       href: '/education',
       icon: BookOpen,

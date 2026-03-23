@@ -375,6 +375,7 @@ import reviewIntegrityRouter from '../services/business/review-integrity/index.j
 import behavioralAnalyticsRouter from '../services/business/behavioral-analytics/index.js';
 import buyerTrustRouter from '../services/business/buyer-trust/index.js';
 import policyEnforcementRouter from '../services/business/policy-enforcement/index.js';
+import sellerSegmentationRouter from '../services/business/seller-segmentation/index.js';
 import payoutRiskRouter, { setPayoutRiskAgent } from '../services/autonomous/payout-risk-router.js';
 import listingIntelligenceRouter, { setListingIntelligenceAgent } from '../services/autonomous/listing-intelligence-router.js';
 import profileMutationRouter, { setProfileMutationAgent } from '../services/autonomous/profile-mutation-router.js';
@@ -869,6 +870,7 @@ app.use('/api/review', reviewIntegrityRouter);
 app.use('/api/behavioral', behavioralAnalyticsRouter);
 app.use('/api/buyer-trust', buyerTrustRouter);
 app.use('/api/policy', policyEnforcementRouter);
+app.use('/api/seller-tools/segmentation', sellerSegmentationRouter);
 
 // Data Platform
 app.use('/api/data/ingestion', dataIngestionRouter);
