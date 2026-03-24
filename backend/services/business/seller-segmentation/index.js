@@ -3,9 +3,9 @@ import { getDbOps } from '../../../shared/common/database-factory.js';
 
 const router = express.Router();
 
-// --- Configuration ---
+// --- Default Configuration ---
 
-const SEGMENT_CONFIG = {
+const DEFAULT_CONFIG = {
   weights: {
     gmv: 0.25,
     orderVolume: 0.20,
@@ -24,6 +24,23 @@ const SEGMENT_CONFIG = {
   },
   newSellerAgeDays: 30
 };
+
+let activeConfig = { ...DEFAULT_CONFIG };
+
+async function loadConfig() {
+  try {
+    const db_ops = getDbOps();
+    const stored = await db_ops.getById('segment_config', 'config_id', 'active');
+    if (stored?.data) {
+      activeConfig = { ...DEFAULT_CONFIG, ...stored.data };
+    }
+  } catch (_) { /* use defaults */ }
+}
+
+// Load config on startup (fire-and-forget)
+loadConfig();
+
+// --- Tier Benefits ---
 
 const TIER_BENEFITS = {
   New: {
@@ -70,6 +87,46 @@ const TIER_BENEFITS = {
   }
 };
 
+// --- In-Memory Cache with 60s TTL ---
+
+const sellerSegmentCache = new Map();
+const CACHE_TTL = 60000;
+
+function getCachedSegment(sellerId) {
+  const entry = sellerSegmentCache.get(sellerId);
+  if (entry && (Date.now() - entry.ts) < CACHE_TTL) return entry.data;
+  if (entry) sellerSegmentCache.delete(sellerId);
+  return null;
+}
+
+function setCachedSegment(sellerId, data) {
+  sellerSegmentCache.set(sellerId, { data, ts: Date.now() });
+}
+
+// --- Redis Cache Helpers ---
+
+async function getRedisSegment(sellerId) {
+  try {
+    const { getRedisClient, isRedisAvailable } = await import('../../../shared/common/redis-client.js');
+    const redis = getRedisClient();
+    if (redis && isRedisAvailable()) {
+      const raw = await redis.get(`segment:${sellerId}`);
+      if (raw) return JSON.parse(raw);
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function setRedisSegment(sellerId, data) {
+  try {
+    const { getRedisClient, isRedisAvailable } = await import('../../../shared/common/redis-client.js');
+    const redis = getRedisClient();
+    if (redis && isRedisAvailable()) {
+      await redis.set(`segment:${sellerId}`, JSON.stringify(data), 'EX', 60);
+    }
+  } catch (_) {}
+}
+
 // --- Clustering ---
 
 const CLUSTERS = [
@@ -102,7 +159,203 @@ function clusterSellers(segmentedSellers) {
   });
 }
 
-// --- Helpers ---
+// --- Fix #1: Conflict Resolution ---
+
+function resolveConflicts(tier, tags, cluster) {
+  // Base risk from tier
+  let effectiveRiskLevel = 'STANDARD';
+  if (['Silver', 'Gold'].includes(tier)) effectiveRiskLevel = 'TRUSTED';
+  if (['Platinum', 'Enterprise'].includes(tier)) effectiveRiskLevel = 'PREMIUM';
+
+  const riskOverrides = [];
+  const actions = [];
+
+  // Escalation: risk tags override tier trust
+  if (tags.includes('High-Return Risk')) {
+    if (effectiveRiskLevel !== 'STANDARD') {
+      riskOverrides.push({ signal: 'High-Return Risk', from: effectiveRiskLevel, to: 'ELEVATED' });
+    }
+    effectiveRiskLevel = 'ELEVATED';
+    actions.push({ action: 'RESTRICT_PAYOUTS', reason: 'High return rate despite tier status', priority: 'HIGH' });
+    actions.push({ action: 'INCREASE_REVIEW_FREQUENCY', reason: 'Monitor for abuse pattern', priority: 'MEDIUM' });
+  }
+
+  // Cluster-based escalation
+  if (cluster?.name === 'At Risk') {
+    if (effectiveRiskLevel === 'TRUSTED' || effectiveRiskLevel === 'PREMIUM') {
+      riskOverrides.push({ signal: 'At Risk cluster', from: effectiveRiskLevel, to: 'WATCH' });
+    }
+    if (effectiveRiskLevel !== 'ELEVATED') effectiveRiskLevel = 'WATCH';
+    actions.push({ action: 'ASSIGN_ACCOUNT_MANAGER', reason: 'Declining performance needs intervention', priority: 'HIGH' });
+  }
+
+  if (cluster?.name === 'Dormant') {
+    actions.push({ action: 'SEND_REENGAGEMENT', reason: 'Inactive seller - send re-engagement campaign', priority: 'LOW' });
+    actions.push({ action: 'REDUCE_LISTING_LIMIT', reason: 'Inactive account consuming resources', priority: 'LOW' });
+  }
+
+  // Positive actions from good signals
+  if (tags.includes('High-Growth') && effectiveRiskLevel !== 'ELEVATED') {
+    actions.push({ action: 'OFFER_TIER_UPGRADE', reason: 'Fast-growing seller ready for next tier', priority: 'MEDIUM' });
+  }
+  if (cluster?.name === 'Power Sellers') {
+    actions.push({ action: 'INVITE_TO_PREMIUM_PROGRAM', reason: 'Top performer qualifies for premium perks', priority: 'MEDIUM' });
+  }
+  if (cluster?.name === 'Rising Stars') {
+    actions.push({ action: 'FAST_TRACK_VERIFICATION', reason: 'New seller showing strong signals', priority: 'MEDIUM' });
+  }
+  if (cluster?.name === 'Market Leaders') {
+    actions.push({ action: 'FEATURE_IN_MARKETPLACE', reason: 'Top-tier seller worthy of marketplace feature', priority: 'MEDIUM' });
+    actions.push({ action: 'INVITE_ADVISORY_BOARD', reason: 'Market leader qualifies for advisory board', priority: 'LOW' });
+  }
+
+  return { effectiveRiskLevel, riskOverrides, actions };
+}
+
+// --- Fix #3: ML Integration ---
+
+async function getMLRiskScore(seller) {
+  try {
+    // Check feature store for ML-scored features
+    const { getFeatureStoreBackend } = await import('../../../streaming/feature-store-factory.js');
+    const featureStore = await getFeatureStoreBackend();
+    const mlFeatures = featureStore.getFeatures(seller.sellerId, 'seller_onboarding');
+
+    if (mlFeatures && mlFeatures.ml_score != null) {
+      return { score: mlFeatures.ml_score, source: 'feature-store' };
+    }
+
+    // Fallback: run inference if model is loaded
+    try {
+      const { getModelLoader } = await import('../../ml-platform/models/model-loader.js');
+      const loader = getModelLoader();
+      const model = await loader.ensureLoaded('onboarding-risk-v1');
+      const { extractOnboardingFeatures } = await import('../../ml-platform/inference/onboarding-endpoints.js');
+      const features = extractOnboardingFeatures(seller);
+      if (features?.vector) {
+        const result = await model.predict(features.vector);
+        return { score: result.score, source: 'live-inference' };
+      }
+    } catch (_) {}
+
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// --- Fix #4: Trend Analysis ---
+
+async function analyzeTrends(sellerId, currentSegment) {
+  const db_ops = getDbOps();
+  try {
+    const history = (await db_ops.getAll('segment_history', 1000, 0))
+      .map(h => h.data)
+      .filter(h => h.sellerId === sellerId)
+      .sort((a, b) => new Date(b.computedAt) - new Date(a.computedAt))
+      .slice(0, 10);
+
+    if (history.length < 2) return { trend: 'INSUFFICIENT_DATA', alerts: [] };
+
+    const alerts = [];
+    const prev = history[0]; // most recent historical
+
+    // Tier drop detection
+    const tierRank = { New: 0, Bronze: 1, Silver: 2, Gold: 3, Platinum: 4, Enterprise: 5 };
+    if (tierRank[currentSegment.tier] < tierRank[prev.tier]) {
+      alerts.push({ type: 'TIER_DROP', message: `Dropped from ${prev.tier} to ${currentSegment.tier}`, severity: 'HIGH' });
+    }
+
+    // Score decay detection
+    const scoreDelta = currentSegment.compositeScore - prev.compositeScore;
+    if (scoreDelta < -10) {
+      alerts.push({ type: 'SCORE_DECAY', message: `Score dropped ${Math.abs(scoreDelta)} points (${prev.compositeScore} → ${currentSegment.compositeScore})`, severity: scoreDelta < -20 ? 'CRITICAL' : 'HIGH' });
+    }
+
+    // Score improvement
+    if (scoreDelta > 10) {
+      alerts.push({ type: 'SCORE_IMPROVEMENT', message: `Score improved ${scoreDelta} points`, severity: 'INFO' });
+    }
+
+    // Determine trend direction
+    let trend = 'STABLE';
+    if (scoreDelta > 5) trend = 'IMPROVING';
+    if (scoreDelta < -5) trend = 'DECLINING';
+
+    // Calculate velocity (score change per day)
+    const daysBetween = (Date.now() - new Date(prev.computedAt).getTime()) / (1000 * 60 * 60 * 24);
+    const velocity = daysBetween > 0 ? scoreDelta / daysBetween : 0;
+
+    return {
+      trend,
+      alerts,
+      velocity: Math.round(velocity * 100) / 100,
+      previousScore: prev.compositeScore,
+      previousTier: prev.tier,
+      snapshotCount: history.length,
+      oldestSnapshot: history[history.length - 1]?.computedAt
+    };
+  } catch (_) {
+    return { trend: 'UNAVAILABLE', alerts: [] };
+  }
+}
+
+// --- Fix #2: Real-Time Updates via Kafka Streaming ---
+
+async function initRealtimeSegmentation() {
+  try {
+    const { getStreamingBackend } = await import('../../../streaming/streaming-factory.js');
+    const engine = await getStreamingBackend();
+
+    // Listen to transaction events
+    const txGroup = engine.createConsumerGroup('segmentation-tx-listener', 'transactions.decided');
+    txGroup.addConsumer('seg-tx-consumer');
+
+    // Listen to risk events
+    const riskGroup = engine.createConsumerGroup('segmentation-risk-listener', 'risk.events');
+    riskGroup.addConsumer('seg-risk-consumer');
+
+    // Poll every 10 seconds for new events
+    setInterval(async () => {
+      try {
+        const txMessages = txGroup.poll('seg-tx-consumer', 20);
+        const riskMessages = riskGroup.poll('seg-risk-consumer', 20);
+
+        const affectedSellerIds = new Set();
+        for (const msg of [...txMessages, ...riskMessages]) {
+          const sellerId = msg.value?.sellerId;
+          if (sellerId) affectedSellerIds.add(sellerId);
+        }
+
+        if (affectedSellerIds.size > 0) {
+          // Invalidate in-memory cache for affected sellers
+          for (const sid of affectedSellerIds) {
+            sellerSegmentCache.delete(sid);
+          }
+          // Invalidate Redis cache if available
+          try {
+            const { getRedisClient, isRedisAvailable } = await import('../../../shared/common/redis-client.js');
+            const redis = getRedisClient();
+            if (redis && isRedisAvailable()) {
+              for (const sid of affectedSellerIds) {
+                await redis.del(`segment:${sid}`);
+              }
+            }
+          } catch (_) {}
+        }
+      } catch (_) {}
+    }, 10000);
+
+    console.log('[seller-segmentation] Real-time event listeners started');
+  } catch (err) {
+    console.warn('[seller-segmentation] Real-time listeners failed (non-critical):', err.message);
+  }
+}
+
+// Fire-and-forget at module load
+initRealtimeSegmentation();
+
+// --- Core Computation ---
 
 function computeSegmentation(sellers, transactions, returns, cases) {
   const txBySeller = {};
@@ -143,7 +396,7 @@ function computeSegmentation(sellers, transactions, returns, cases) {
 }
 
 function computeSellerSegmentation(seller, sellerTx, sellerReturns, sellerCases) {
-  const { weights } = SEGMENT_CONFIG;
+  const { weights } = activeConfig;
 
   // 1. GMV (25%) - sum of transaction amounts, cap at $1M
   const totalGmv = sellerTx.reduce((sum, tx) => sum + (parseFloat(tx.amount) || 0), 0);
@@ -159,7 +412,8 @@ function computeSellerSegmentation(seller, sellerTx, sellerReturns, sellerCases)
   const accountAgeScore = Math.min((ageDays / 365) * 100, 100);
 
   // 4. Risk Score (20%) - invert seller's riskScore (100 - riskScore), default 70
-  const riskScoreDim = seller.riskScore != null ? (100 - seller.riskScore) : 70;
+  const invertedRisk = seller.riskScore != null ? (100 - seller.riskScore) : 70;
+  const riskScoreDim = invertedRisk;
 
   // 5. Compliance (15%) - based on status
   const complianceMap = { ACTIVE: 100, UNDER_REVIEW: 70, SUSPENDED: 30, BLOCKED: 0 };
@@ -184,15 +438,15 @@ function computeSellerSegmentation(seller, sellerTx, sellerReturns, sellerCases)
 
   // Tier assignment
   let tier;
-  if (compositeScore <= SEGMENT_CONFIG.tiers.New.max || ageDays < SEGMENT_CONFIG.newSellerAgeDays) {
+  if (compositeScore <= activeConfig.tiers.New.max || ageDays < activeConfig.newSellerAgeDays) {
     tier = 'New';
-  } else if (compositeScore <= SEGMENT_CONFIG.tiers.Bronze.max) {
+  } else if (compositeScore <= activeConfig.tiers.Bronze.max) {
     tier = 'Bronze';
-  } else if (compositeScore <= SEGMENT_CONFIG.tiers.Silver.max) {
+  } else if (compositeScore <= activeConfig.tiers.Silver.max) {
     tier = 'Silver';
-  } else if (compositeScore <= SEGMENT_CONFIG.tiers.Gold.max) {
+  } else if (compositeScore <= activeConfig.tiers.Gold.max) {
     tier = 'Gold';
-  } else if (compositeScore <= SEGMENT_CONFIG.tiers.Platinum.max) {
+  } else if (compositeScore <= activeConfig.tiers.Platinum.max) {
     tier = 'Platinum';
   } else {
     tier = 'Enterprise';
@@ -301,8 +555,66 @@ function computeSellerSegmentation(seller, sellerTx, sellerReturns, sellerCases)
     tags,
     transactionCount,
     totalGmv: Math.round(totalGmv * 100) / 100,
-    benefits: TIER_BENEFITS[tier]
+    benefits: TIER_BENEFITS[tier],
+    // Placeholders for enrichment pass
+    _invertedRisk: invertedRisk
   };
+}
+
+// --- Enrichment: apply conflict resolution, ML, and trends to all sellers ---
+
+async function enrichSellers(clusteredSellers) {
+  const enriched = await Promise.all(clusteredSellers.map(async (seller) => {
+    // Fix #1: Conflict resolution
+    const { effectiveRiskLevel, riskOverrides, actions } = resolveConflicts(seller.tier, seller.tags, seller.cluster);
+
+    // Fix #3: ML score integration
+    let mlScore = null;
+    let mlSource = null;
+    let finalRiskDim = seller.dimensions.riskScore;
+    const mlResult = await getMLRiskScore(seller);
+    if (mlResult) {
+      mlScore = mlResult.score;
+      mlSource = mlResult.source;
+      // Blend: 50% inverted risk + 50% ML-based
+      finalRiskDim = Math.round((seller._invertedRisk * 0.5) + ((1 - mlScore) * 100 * 0.5));
+    }
+
+    // Fix #4: Trend analysis
+    const trends = await analyzeTrends(seller.sellerId, seller);
+
+    // Cache the result
+    const result = {
+      sellerId: seller.sellerId,
+      businessName: seller.businessName,
+      country: seller.country,
+      status: seller.status,
+      tier: seller.tier,
+      compositeScore: seller.compositeScore,
+      dimensions: {
+        ...seller.dimensions,
+        riskScore: finalRiskDim
+      },
+      tags: seller.tags,
+      cluster: seller.cluster,
+      effectiveRiskLevel,
+      riskOverrides,
+      actions,
+      trends,
+      mlScore,
+      mlSource,
+      benefits: seller.benefits,
+      transactionCount: seller.transactionCount,
+      totalGmv: seller.totalGmv
+    };
+
+    setCachedSegment(seller.sellerId, result);
+    setRedisSegment(seller.sellerId, result); // fire-and-forget
+
+    return result;
+  }));
+
+  return enriched;
 }
 
 async function storeSegmentSnapshot(sellerId, tier, compositeScore, dimensions, tags) {
@@ -333,7 +645,8 @@ async function fetchAllSegmentation() {
   const transactions = transactionsRaw.map(t => t.data);
   const returns = returnsRaw.map(r => r.data);
   const cases = casesRaw.map(c => c.data);
-  return computeSegmentation(sellers, transactions, returns, cases);
+  const clustered = computeSegmentation(sellers, transactions, returns, cases);
+  return enrichSellers(clustered);
 }
 
 // --- Endpoints ---
@@ -349,11 +662,66 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /config - current segmentation config
+// GET /config - current segmentation config (Fix #6)
 router.get('/config', async (req, res) => {
   try {
-    res.json({ success: true, config: SEGMENT_CONFIG });
+    res.json({ success: true, config: activeConfig });
   } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /config - update segmentation config (Fix #6)
+router.put('/config', async (req, res) => {
+  try {
+    const updates = req.body;
+
+    // Validate weights sum to 1.0 if provided
+    if (updates.weights) {
+      const sum = Object.values(updates.weights).reduce((a, b) => a + b, 0);
+      const roundedSum = Math.round(sum * 100) / 100;
+      if (roundedSum !== 1.0) {
+        return res.status(400).json({
+          success: false,
+          error: `Weights must sum to 1.0, got ${roundedSum}`,
+          currentSum: roundedSum
+        });
+      }
+    }
+
+    // Merge with current config
+    const newConfig = { ...activeConfig };
+    if (updates.weights) newConfig.weights = { ...activeConfig.weights, ...updates.weights };
+    if (updates.tiers) newConfig.tiers = { ...activeConfig.tiers, ...updates.tiers };
+    if (updates.newSellerAgeDays != null) newConfig.newSellerAgeDays = updates.newSellerAgeDays;
+
+    // Persist to DB
+    try {
+      const db_ops = getDbOps();
+      await db_ops.insert('segment_config', 'config_id', 'active', {
+        config_id: 'active',
+        ...newConfig,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (_) {
+      // If insert fails (already exists), try update
+      try {
+        const db_ops = getDbOps();
+        await db_ops.update('segment_config', 'active', {
+          ...newConfig,
+          updatedAt: new Date().toISOString()
+        });
+      } catch (_) { /* best-effort */ }
+    }
+
+    activeConfig = newConfig;
+
+    // Invalidate all caches
+    sellerSegmentCache.clear();
+
+    res.json({ success: true, config: activeConfig });
+  } catch (error) {
+    console.error('[Seller Segmentation] Error updating config:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -393,11 +761,95 @@ router.get('/clusters', async (req, res) => {
   }
 });
 
+// GET /alerts - all sellers with active trend alerts (Fix #4)
+router.get('/alerts', async (req, res) => {
+  try {
+    const data = await fetchAllSegmentation();
+    const sellersWithAlerts = data
+      .filter(s => s.trends?.alerts?.length > 0)
+      .map(s => ({
+        sellerId: s.sellerId,
+        businessName: s.businessName,
+        tier: s.tier,
+        compositeScore: s.compositeScore,
+        effectiveRiskLevel: s.effectiveRiskLevel,
+        trend: s.trends.trend,
+        velocity: s.trends.velocity,
+        alerts: s.trends.alerts
+      }))
+      .sort((a, b) => {
+        const severityRank = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, INFO: 3 };
+        const aMax = Math.min(...a.alerts.map(al => severityRank[al.severity] ?? 99));
+        const bMax = Math.min(...b.alerts.map(al => severityRank[al.severity] ?? 99));
+        return aMax - bMax;
+      });
+
+    const summary = {
+      critical: sellersWithAlerts.filter(s => s.alerts.some(a => a.severity === 'CRITICAL')).length,
+      high: sellersWithAlerts.filter(s => s.alerts.some(a => a.severity === 'HIGH')).length,
+      medium: sellersWithAlerts.filter(s => s.alerts.some(a => a.severity === 'MEDIUM')).length,
+      info: sellersWithAlerts.filter(s => s.alerts.some(a => a.severity === 'INFO')).length,
+      total: sellersWithAlerts.length
+    };
+
+    res.json({ success: true, summary, data: sellersWithAlerts });
+  } catch (error) {
+    console.error('[Seller Segmentation] Error fetching alerts:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /actions - all pending actions grouped by priority (Fix #5)
+router.get('/actions', async (req, res) => {
+  try {
+    const data = await fetchAllSegmentation();
+    const actionGroups = { HIGH: [], MEDIUM: [], LOW: [] };
+
+    for (const seller of data) {
+      for (const act of (seller.actions || [])) {
+        const group = actionGroups[act.priority] || actionGroups['MEDIUM'];
+        group.push({
+          sellerId: seller.sellerId,
+          businessName: seller.businessName,
+          tier: seller.tier,
+          effectiveRiskLevel: seller.effectiveRiskLevel,
+          action: act.action,
+          reason: act.reason,
+          priority: act.priority
+        });
+      }
+    }
+
+    const summary = {
+      HIGH: actionGroups.HIGH.length,
+      MEDIUM: actionGroups.MEDIUM.length,
+      LOW: actionGroups.LOW.length,
+      total: actionGroups.HIGH.length + actionGroups.MEDIUM.length + actionGroups.LOW.length
+    };
+
+    res.json({ success: true, summary, actions: actionGroups });
+  } catch (error) {
+    console.error('[Seller Segmentation] Error fetching actions:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // GET /sellers/:sellerId - single seller segmentation
 router.get('/sellers/:sellerId', async (req, res) => {
   try {
+    const sellerId = req.params.sellerId;
+
+    // Check caches
+    const cached = getCachedSegment(sellerId);
+    if (cached) return res.json({ success: true, data: cached });
+    const redisCached = await getRedisSegment(sellerId);
+    if (redisCached) {
+      setCachedSegment(sellerId, redisCached);
+      return res.json({ success: true, data: redisCached });
+    }
+
     const db_ops = getDbOps();
-    const sellerRecord = await db_ops.getById('sellers', 'seller_id', req.params.sellerId);
+    const sellerRecord = await db_ops.getById('sellers', 'seller_id', sellerId);
     if (!sellerRecord) {
       return res.status(404).json({ success: false, error: 'Seller not found' });
     }
@@ -407,13 +859,13 @@ router.get('/sellers/:sellerId', async (req, res) => {
       db_ops.getAll('returns', 50000, 0),
       db_ops.getAll('cases', 10000, 0)
     ]);
-    const sellerTx = transactionsRaw.map(t => t.data).filter(tx => tx.sellerId === req.params.sellerId);
-    const sellerReturns = returnsRaw.map(r => r.data).filter(r => r.sellerId === req.params.sellerId);
-    const sellerCases = casesRaw.map(c => c.data).filter(c => c.sellerId === req.params.sellerId);
+    const sellerTx = transactionsRaw.map(t => t.data).filter(tx => tx.sellerId === sellerId);
+    const sellerReturns = returnsRaw.map(r => r.data).filter(r => r.sellerId === sellerId);
+    const sellerCases = casesRaw.map(c => c.data).filter(c => c.sellerId === sellerId);
     const result = computeSellerSegmentation(seller, sellerTx, sellerReturns, sellerCases);
-    // Apply clustering to single seller
     const [clustered] = clusterSellers([result]);
-    res.json({ success: true, data: clustered });
+    const [enriched] = await enrichSellers([clustered]);
+    res.json({ success: true, data: enriched });
   } catch (error) {
     console.error('[Seller Segmentation] Error fetching seller:', error.message);
     res.status(500).json({ success: false, error: error.message });
@@ -478,6 +930,8 @@ router.get('/tags', async (req, res) => {
 // POST /recalculate - force fresh computation
 router.post('/recalculate', async (req, res) => {
   try {
+    // Clear all caches
+    sellerSegmentCache.clear();
     const data = await fetchAllSegmentation();
     res.json({ success: true, data, recalculatedAt: new Date().toISOString() });
   } catch (error) {

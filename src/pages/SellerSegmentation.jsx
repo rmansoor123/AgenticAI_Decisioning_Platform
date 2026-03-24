@@ -4,7 +4,9 @@ import {
   TrendingUp, Globe, Grid3X3, Crown, Truck, Code,
   AlertTriangle, ArrowDownCircle, Calendar, Award,
   Users, BarChart3, ArrowUpDown, RefreshCw, Star,
-  Shield, Clock, CheckCircle, Zap
+  Shield, Clock, CheckCircle, Zap, Settings,
+  ArrowUp, ArrowRight, ArrowDown, Activity, Cpu,
+  AlertCircle, Play
 } from 'lucide-react'
 import { safeJson } from '../utils/api'
 
@@ -44,6 +46,14 @@ const CLUSTER_COLORS = {
   'Standard': { bg: 'bg-slate-500/20', text: 'text-slate-400', border: 'border-slate-500/30' }
 }
 
+const RISK_LEVEL_CONFIG = {
+  PREMIUM: { bg: 'bg-purple-500/20', text: 'text-purple-400', border: 'border-purple-500/30' },
+  TRUSTED: { bg: 'bg-emerald-500/20', text: 'text-emerald-400', border: 'border-emerald-500/30' },
+  STANDARD: { bg: 'bg-gray-500/20', text: 'text-gray-400', border: 'border-gray-500/30' },
+  WATCH: { bg: 'bg-amber-500/20', text: 'text-amber-400', border: 'border-amber-500/30' },
+  ELEVATED: { bg: 'bg-red-500/20', text: 'text-red-400', border: 'border-red-500/30' }
+}
+
 const DIMENSIONS = ['GMV', 'Volume', 'Age', 'Risk', 'Compliance', 'Satisfaction']
 const DIM_KEYS = ['gmv', 'orderVolume', 'accountAge', 'riskScore', 'compliance', 'satisfaction']
 
@@ -76,6 +86,15 @@ function TierBadge({ tier }) {
   )
 }
 
+function RiskLevelBadge({ level }) {
+  const cfg = RISK_LEVEL_CONFIG[level] || RISK_LEVEL_CONFIG['STANDARD']
+  return (
+    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${cfg.bg} ${cfg.text} border ${cfg.border}`}>
+      {level}
+    </span>
+  )
+}
+
 function ClusterBadge({ cluster }) {
   const name = cluster?.name || 'Standard'
   const colors = CLUSTER_COLORS[name] || CLUSTER_COLORS['Standard']
@@ -101,6 +120,35 @@ function TagBadge({ tag, small = false, onClick }) {
   )
 }
 
+function TrendIndicator({ trends }) {
+  if (!trends || trends.trend === 'INSUFFICIENT_DATA' || trends.trend === 'UNAVAILABLE') {
+    return <span className="text-gray-600 text-xs">--</span>
+  }
+  const { trend, velocity } = trends
+  if (trend === 'IMPROVING') {
+    return (
+      <span className="inline-flex items-center gap-0.5 text-emerald-400" title={`Velocity: ${velocity}/day`}>
+        <ArrowUp size={12} />
+        <span className="text-[10px]">{velocity}</span>
+      </span>
+    )
+  }
+  if (trend === 'DECLINING') {
+    return (
+      <span className="inline-flex items-center gap-0.5 text-red-400" title={`Velocity: ${velocity}/day`}>
+        <ArrowDown size={12} />
+        <span className="text-[10px]">{velocity}</span>
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-0.5 text-gray-500" title={`Velocity: ${velocity}/day`}>
+      <ArrowRight size={12} />
+      <span className="text-[10px]">{velocity}</span>
+    </span>
+  )
+}
+
 export default function SellerSegmentation() {
   const [sellers, setSellers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -116,11 +164,21 @@ export default function SellerSegmentation() {
   const [clusterData, setClusterData] = useState([])
   const [recalculating, setRecalculating] = useState(false)
   const [sellerHistory, setSellerHistory] = useState({})
+  const [alertsData, setAlertsData] = useState(null)
+  const [actionsData, setActionsData] = useState(null)
+  const [configData, setConfigData] = useState(null)
+  const [configOpen, setConfigOpen] = useState(false)
+  const [configWeights, setConfigWeights] = useState(null)
+  const [configSaving, setConfigSaving] = useState(false)
+  const [configError, setConfigError] = useState(null)
 
   useEffect(() => {
     fetchSellers()
     fetchClusters()
     fetchBenefits()
+    fetchAlerts()
+    fetchActions()
+    fetchConfig()
   }, [])
 
   async function fetchSellers() {
@@ -143,7 +201,7 @@ export default function SellerSegmentation() {
       const res = await fetch('/api/seller-tools/segmentation/clusters')
       const data = await safeJson(res)
       setClusterData(data.clusters || [])
-    } catch (_) { /* non-critical */ }
+    } catch (_) {}
   }
 
   async function fetchBenefits() {
@@ -151,7 +209,34 @@ export default function SellerSegmentation() {
       const res = await fetch('/api/seller-tools/segmentation/benefits')
       const data = await safeJson(res)
       setTierBenefits(data.benefits || null)
-    } catch (_) { /* non-critical */ }
+    } catch (_) {}
+  }
+
+  async function fetchAlerts() {
+    try {
+      const res = await fetch('/api/seller-tools/segmentation/alerts')
+      const data = await safeJson(res)
+      setAlertsData(data)
+    } catch (_) {}
+  }
+
+  async function fetchActions() {
+    try {
+      const res = await fetch('/api/seller-tools/segmentation/actions')
+      const data = await safeJson(res)
+      setActionsData(data)
+    } catch (_) {}
+  }
+
+  async function fetchConfig() {
+    try {
+      const res = await fetch('/api/seller-tools/segmentation/config')
+      const data = await safeJson(res)
+      setConfigData(data.config || null)
+      if (data.config?.weights) {
+        setConfigWeights({ ...data.config.weights })
+      }
+    } catch (_) {}
   }
 
   async function fetchSellerHistory(sellerId) {
@@ -172,10 +257,36 @@ export default function SellerSegmentation() {
       const list = data.data || []
       setSellers(Array.isArray(list) ? list : [])
       fetchClusters()
+      fetchAlerts()
+      fetchActions()
     } catch (err) {
       console.error('Recalculate failed:', err.message)
     } finally {
       setRecalculating(false)
+    }
+  }
+
+  async function handleSaveConfig() {
+    if (!configWeights) return
+    setConfigSaving(true)
+    setConfigError(null)
+    try {
+      const res = await fetch('/api/seller-tools/segmentation/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ weights: configWeights })
+      })
+      const data = await safeJson(res)
+      if (data.success === false) {
+        setConfigError(data.error || 'Failed to save config')
+      } else {
+        setConfigData(data.config || null)
+        setConfigError(null)
+      }
+    } catch (err) {
+      setConfigError(err.message)
+    } finally {
+      setConfigSaving(false)
     }
   }
 
@@ -231,6 +342,18 @@ export default function SellerSegmentation() {
     return Array.from(tags)
   }, [sellers])
 
+  // Critical/high alert count for banner
+  const criticalAlertCount = useMemo(() => {
+    if (!alertsData?.summary) return 0
+    return (alertsData.summary.critical || 0) + (alertsData.summary.high || 0)
+  }, [alertsData])
+
+  // Config weights sum
+  const weightsSum = useMemo(() => {
+    if (!configWeights) return 0
+    return Math.round(Object.values(configWeights).reduce((a, b) => a + b, 0) * 100) / 100
+  }, [configWeights])
+
   // Filtered sellers
   const filteredSellers = useMemo(() => {
     let list = [...sellers]
@@ -265,6 +388,11 @@ export default function SellerSegmentation() {
         case 'orders': av = a.transactionCount ?? a.orders ?? a.orderCount ?? 0; bv = b.transactionCount ?? b.orders ?? b.orderCount ?? 0; break
         case 'risk': av = a.riskScore ?? a.risk_score ?? 0; bv = b.riskScore ?? b.risk_score ?? 0; break
         case 'age': av = a.ageDays ?? a.age ?? 0; bv = b.ageDays ?? b.age ?? 0; break
+        case 'effectiveRisk': {
+          const order = { ELEVATED: 4, WATCH: 3, STANDARD: 2, TRUSTED: 1, PREMIUM: 0 }
+          av = order[a.effectiveRiskLevel] ?? 2; bv = order[b.effectiveRiskLevel] ?? 2; break
+        }
+        case 'mlScore': av = a.mlScore ?? -1; bv = b.mlScore ?? -1; break
         default: av = 0; bv = 0
       }
       if (typeof av === 'string') {
@@ -377,6 +505,23 @@ export default function SellerSegmentation() {
           {recalculating ? 'Recalculating...' : 'Recalculate'}
         </button>
       </div>
+
+      {/* Alerts Banner */}
+      {criticalAlertCount > 0 && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 flex items-center gap-3">
+          <AlertCircle size={18} className="text-red-400 shrink-0" />
+          <div className="flex-1">
+            <span className="text-red-400 font-medium text-sm">
+              {criticalAlertCount} seller{criticalAlertCount !== 1 ? 's' : ''} with critical or high severity alerts
+            </span>
+            {alertsData?.summary && (
+              <span className="text-red-400/60 text-xs ml-2">
+                ({alertsData.summary.critical || 0} critical, {alertsData.summary.high || 0} high)
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Tier Distribution Cards */}
       <div className="grid grid-cols-6 gap-3">
@@ -519,78 +664,126 @@ export default function SellerSegmentation() {
 
       {/* Seller Table */}
       <div className="bg-[#12121a] border border-gray-800 rounded-lg overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-800">
-              {[
-                { key: 'sellerId', label: 'Seller ID', w: 'w-32' },
-                { key: 'businessName', label: 'Business Name', w: '' },
-                { key: 'tier', label: 'Tier', w: 'w-28' },
-                { key: 'score', label: 'Score', w: 'w-24' },
-                { key: 'gmv', label: 'GMV', w: 'w-24' },
-                { key: 'orders', label: 'Orders', w: 'w-20' },
-                { key: 'risk', label: 'Risk', w: 'w-20' },
-                { key: 'cluster', label: 'Cluster', w: 'w-32' },
-                { key: 'tags', label: 'Tags', w: 'w-48' }
-              ].map(col => (
-                <th
-                  key={col.key}
-                  className={`px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-300 select-none ${col.w}`}
-                  onClick={col.key !== 'tags' && col.key !== 'cluster' ? () => handleSort(col.key) : undefined}
-                >
-                  <div className="flex items-center gap-1">
-                    {col.label}
-                    {col.key !== 'tags' && col.key !== 'cluster' && getSortIcon(col.key)}
-                  </div>
-                </th>
-              ))}
-              <th className="w-8" />
-            </tr>
-          </thead>
-          <tbody>
-            {filteredSellers.map(seller => {
-              const sid = seller.sellerId || seller.seller_id || ''
-              const bname = seller.businessName || seller.business_name || seller.name || ''
-              const tier = seller.tier || 'New'
-              const score = seller.compositeScore ?? seller.score ?? seller.sellerScore ?? 0
-              const gmv = seller.gmv ?? seller.totalGmv ?? 0
-              const orders = seller.transactionCount ?? seller.orders ?? seller.orderCount ?? 0
-              const rs = seller.riskScore ?? seller.risk_score ?? 0
-              const tags = getSellerTags(seller)
-              const risk = riskLabel(rs)
-              const expanded = expandedRow === sid
-              const cluster = seller.cluster
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-800">
+                {[
+                  { key: 'sellerId', label: 'Seller ID', w: 'w-28' },
+                  { key: 'businessName', label: 'Business', w: '' },
+                  { key: 'tier', label: 'Tier', w: 'w-24' },
+                  { key: 'effectiveRisk', label: 'Risk Level', w: 'w-24' },
+                  { key: 'score', label: 'Score', w: 'w-24' },
+                  { key: 'trend', label: 'Trend', w: 'w-16', noSort: true },
+                  { key: 'gmv', label: 'GMV', w: 'w-20' },
+                  { key: 'orders', label: 'Orders', w: 'w-16' },
+                  { key: 'mlScore', label: 'ML', w: 'w-16' },
+                  { key: 'actions', label: 'Actions', w: 'w-16', noSort: true },
+                  { key: 'cluster', label: 'Cluster', w: 'w-28', noSort: true },
+                  { key: 'tags', label: 'Tags', w: 'w-40', noSort: true }
+                ].map(col => (
+                  <th
+                    key={col.key}
+                    className={`px-2 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider select-none ${col.w} ${col.noSort ? '' : 'cursor-pointer hover:text-gray-300'}`}
+                    onClick={!col.noSort ? () => handleSort(col.key) : undefined}
+                  >
+                    <div className="flex items-center gap-1">
+                      {col.label}
+                      {!col.noSort && getSortIcon(col.key)}
+                    </div>
+                  </th>
+                ))}
+                <th className="w-8" />
+              </tr>
+            </thead>
+            <tbody>
+              {filteredSellers.map(seller => {
+                const sid = seller.sellerId || seller.seller_id || ''
+                const bname = seller.businessName || seller.business_name || seller.name || ''
+                const tier = seller.tier || 'New'
+                const score = seller.compositeScore ?? seller.score ?? seller.sellerScore ?? 0
+                const gmv = seller.gmv ?? seller.totalGmv ?? 0
+                const orders = seller.transactionCount ?? seller.orders ?? seller.orderCount ?? 0
+                const tags = getSellerTags(seller)
+                const expanded = expandedRow === sid
+                const cluster = seller.cluster
 
+                return (
+                  <SellerRow
+                    key={sid}
+                    sid={sid}
+                    bname={bname}
+                    tier={tier}
+                    score={score}
+                    gmv={gmv}
+                    orders={orders}
+                    tags={tags}
+                    cluster={cluster}
+                    expanded={expanded}
+                    dimensions={getSellerDimensions(seller)}
+                    seller={seller}
+                    history={sellerHistory[sid] || null}
+                    onToggle={() => handleExpandRow(sid)}
+                  />
+                )
+              })}
+              {filteredSellers.length === 0 && (
+                <tr>
+                  <td colSpan={13} className="px-3 py-8 text-center text-gray-500">
+                    No sellers match the current filters
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Actions Dashboard (Fix #7) */}
+      {actionsData && actionsData.summary && actionsData.summary.total > 0 && (
+        <div>
+          <h2 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+            <Play size={18} className="text-cyan-400" />
+            Pending Actions
+          </h2>
+          <div className="grid grid-cols-3 gap-3">
+            {['HIGH', 'MEDIUM', 'LOW'].map(priority => {
+              const items = actionsData.actions?.[priority] || []
+              const bgMap = { HIGH: 'border-red-500/30', MEDIUM: 'border-amber-500/30', LOW: 'border-gray-600/30' }
+              const textMap = { HIGH: 'text-red-400', MEDIUM: 'text-amber-400', LOW: 'text-gray-400' }
+              const bgLightMap = { HIGH: 'bg-red-500/10', MEDIUM: 'bg-amber-500/10', LOW: 'bg-gray-500/10' }
+              // Group by action type
+              const grouped = {}
+              items.forEach(item => {
+                if (!grouped[item.action]) grouped[item.action] = []
+                grouped[item.action].push(item)
+              })
               return (
-                <SellerRow
-                  key={sid}
-                  sid={sid}
-                  bname={bname}
-                  tier={tier}
-                  score={score}
-                  gmv={gmv}
-                  orders={orders}
-                  risk={risk}
-                  tags={tags}
-                  cluster={cluster}
-                  expanded={expanded}
-                  dimensions={getSellerDimensions(seller)}
-                  seller={seller}
-                  history={sellerHistory[sid] || null}
-                  onToggle={() => handleExpandRow(sid)}
-                />
+                <div key={priority} className={`bg-[#12121a] border ${bgMap[priority]} rounded-lg p-3`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={`text-xs font-medium ${textMap[priority]} uppercase tracking-wider`}>{priority} Priority</span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${bgLightMap[priority]} ${textMap[priority]}`}>
+                      {items.length}
+                    </span>
+                  </div>
+                  {Object.entries(grouped).length > 0 ? (
+                    <div className="space-y-1.5">
+                      {Object.entries(grouped).map(([actionName, actionItems]) => (
+                        <div key={actionName} className="flex items-center justify-between text-xs">
+                          <span className="text-gray-300 truncate mr-2">{actionName.replace(/_/g, ' ')}</span>
+                          <span className="text-gray-500 shrink-0">{actionItems.length} seller{actionItems.length !== 1 ? 's' : ''}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-gray-600">No pending actions</div>
+                  )}
+                </div>
               )
             })}
-            {filteredSellers.length === 0 && (
-              <tr>
-                <td colSpan={11} className="px-3 py-8 text-center text-gray-500">
-                  No sellers match the current filters
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+          </div>
+        </div>
+      )}
 
       {/* Tag Analytics */}
       <div>
@@ -652,6 +845,68 @@ export default function SellerSegmentation() {
           })}
         </div>
       </div>
+
+      {/* Config Editor (Fix #6) */}
+      <div className="bg-[#12121a] border border-gray-800 rounded-lg">
+        <button
+          onClick={() => setConfigOpen(prev => !prev)}
+          className="w-full flex items-center justify-between p-4 text-left"
+        >
+          <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+            <Settings size={16} className="text-cyan-400" />
+            Segmentation Config (Weights)
+          </h2>
+          {configOpen ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+        </button>
+        {configOpen && configWeights && (
+          <div className="px-4 pb-4 space-y-4">
+            <div className="grid grid-cols-3 gap-4">
+              {Object.entries(configWeights).map(([key, value]) => {
+                const labels = { gmv: 'GMV', orderVolume: 'Order Volume', accountAge: 'Account Age', riskScore: 'Risk Score', compliance: 'Compliance', satisfaction: 'Satisfaction' }
+                return (
+                  <div key={key}>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs text-gray-400">{labels[key] || key}</label>
+                      <span className="text-xs text-gray-300 font-mono">{(value * 100).toFixed(0)}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={Math.round(value * 100)}
+                      onChange={e => {
+                        setConfigWeights(prev => ({ ...prev, [key]: parseInt(e.target.value) / 100 }))
+                      }}
+                      className="w-full h-1.5 bg-gray-700 rounded-full appearance-none cursor-pointer accent-cyan-400"
+                    />
+                  </div>
+                )
+              })}
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="text-xs">
+                <span className="text-gray-500">Weight sum: </span>
+                <span className={weightsSum === 1.0 ? 'text-emerald-400' : 'text-red-400'}>
+                  {weightsSum.toFixed(2)}
+                </span>
+                {weightsSum !== 1.0 && (
+                  <span className="text-red-400 ml-2">Weights must sum to 1.0</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {configError && <span className="text-xs text-red-400">{configError}</span>}
+                <button
+                  onClick={handleSaveConfig}
+                  disabled={configSaving || weightsSum !== 1.0}
+                  className="px-3 py-1.5 bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 rounded-lg text-xs font-medium hover:bg-cyan-500/30 transition-colors disabled:opacity-50"
+                >
+                  {configSaving ? 'Saving...' : 'Save Config'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -667,17 +922,25 @@ const CLUSTERS_FALLBACK = [
   { name: 'Market Leaders', count: 0, description: 'Top-tier sellers' }
 ]
 
-function SellerRow({ sid, bname, tier, score, gmv, orders, risk, tags, cluster, expanded, dimensions, seller, history, onToggle }) {
+function SellerRow({ sid, bname, tier, score, gmv, orders, tags, cluster, expanded, dimensions, seller, history, onToggle }) {
+  const [actionsExpanded, setActionsExpanded] = useState(false)
+  const effectiveRisk = seller.effectiveRiskLevel || 'STANDARD'
+  const actionCount = (seller.actions || []).length
+  const trends = seller.trends
+  const mlScore = seller.mlScore
+  const mlSource = seller.mlSource
+
   return (
     <>
       <tr
         className={`border-b border-gray-800/50 cursor-pointer transition-colors ${expanded ? 'bg-[#0a0a12]' : 'hover:bg-[#0e0e18]'}`}
         onClick={onToggle}
       >
-        <td className="px-3 py-2.5 font-mono text-xs text-cyan-400">{sid}</td>
-        <td className="px-3 py-2.5 text-gray-200">{bname}</td>
-        <td className="px-3 py-2.5"><TierBadge tier={tier} /></td>
-        <td className="px-3 py-2.5">
+        <td className="px-2 py-2.5 font-mono text-xs text-cyan-400">{sid}</td>
+        <td className="px-2 py-2.5 text-gray-200 text-xs">{bname}</td>
+        <td className="px-2 py-2.5"><TierBadge tier={tier} /></td>
+        <td className="px-2 py-2.5"><RiskLevelBadge level={effectiveRisk} /></td>
+        <td className="px-2 py-2.5">
           <div className="flex items-center gap-2">
             <span className="text-gray-200 font-medium text-xs w-7">{score}</span>
             <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden max-w-[60px]">
@@ -685,30 +948,69 @@ function SellerRow({ sid, bname, tier, score, gmv, orders, risk, tags, cluster, 
             </div>
           </div>
         </td>
-        <td className="px-3 py-2.5 text-gray-300 text-xs">{formatCurrency(gmv)}</td>
-        <td className="px-3 py-2.5 text-gray-300 text-xs">{orders.toLocaleString()}</td>
-        <td className="px-3 py-2.5">
-          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${risk.bg} ${risk.color}`}>
-            {risk.label}
-          </span>
+        <td className="px-2 py-2.5">
+          <TrendIndicator trends={trends} />
         </td>
-        <td className="px-3 py-2.5">
+        <td className="px-2 py-2.5 text-gray-300 text-xs">{formatCurrency(gmv)}</td>
+        <td className="px-2 py-2.5 text-gray-300 text-xs">{orders.toLocaleString()}</td>
+        <td className="px-2 py-2.5">
+          {mlScore != null ? (
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-gray-300 font-mono">{(mlScore * 100).toFixed(0)}</span>
+              <span className={`text-[9px] px-1 py-0 rounded ${mlSource === 'live-inference' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'}`}>
+                {mlSource === 'live-inference' ? 'ML' : 'FS'}
+              </span>
+            </div>
+          ) : (
+            <span className="text-gray-600 text-xs">--</span>
+          )}
+        </td>
+        <td className="px-2 py-2.5">
+          {actionCount > 0 ? (
+            <span
+              className="px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/20 text-amber-400 border border-amber-500/30 cursor-pointer"
+              onClick={(e) => { e.stopPropagation(); setActionsExpanded(prev => !prev) }}
+            >
+              {actionCount}
+            </span>
+          ) : (
+            <span className="text-gray-600 text-xs">--</span>
+          )}
+        </td>
+        <td className="px-2 py-2.5">
           <ClusterBadge cluster={cluster} />
         </td>
-        <td className="px-3 py-2.5">
+        <td className="px-2 py-2.5">
           <div className="flex items-center gap-1 flex-wrap">
-            {tags.slice(0, 3).map(t => <TagBadge key={t} tag={t} small />)}
-            {tags.length > 3 && <span className="text-[10px] text-gray-500">+{tags.length - 3}</span>}
+            {tags.slice(0, 2).map(t => <TagBadge key={t} tag={t} small />)}
+            {tags.length > 2 && <span className="text-[10px] text-gray-500">+{tags.length - 2}</span>}
           </div>
         </td>
-        <td className="px-3 py-2.5 text-gray-500">
+        <td className="px-2 py-2.5 text-gray-500">
           <ChevronRight size={14} className={`transition-transform ${expanded ? 'rotate-90' : ''}`} />
         </td>
       </tr>
+      {/* Actions inline popover */}
+      {actionsExpanded && actionCount > 0 && !expanded && (
+        <tr className="bg-[#0e0e18]">
+          <td colSpan={13} className="px-4 py-2">
+            <div className="flex flex-wrap gap-2">
+              {(seller.actions || []).map((act, i) => {
+                const prioColors = { HIGH: 'text-red-400 bg-red-500/10', MEDIUM: 'text-amber-400 bg-amber-500/10', LOW: 'text-gray-400 bg-gray-500/10' }
+                return (
+                  <span key={i} className={`text-[10px] px-2 py-0.5 rounded ${prioColors[act.priority] || prioColors.MEDIUM}`}>
+                    {act.action.replace(/_/g, ' ')} - {act.reason}
+                  </span>
+                )
+              })}
+            </div>
+          </td>
+        </tr>
+      )}
       {expanded && (
         <tr className="bg-[#0a0a12]">
-          <td colSpan={11} className="px-4 py-4">
-            <div className="grid grid-cols-3 gap-6">
+          <td colSpan={13} className="px-4 py-4">
+            <div className="grid grid-cols-4 gap-6">
               {/* Dimension Breakdown */}
               <div>
                 <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Dimension Breakdown</h4>
@@ -761,12 +1063,70 @@ function SellerRow({ sid, bname, tier, score, gmv, orders, risk, tags, cluster, 
                 )}
               </div>
 
-              {/* Segment History */}
+              {/* Actions & Risk Overrides */}
+              <div>
+                <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                  <Activity size={12} />
+                  Actions & Overrides
+                </h4>
+                {(seller.riskOverrides || []).length > 0 && (
+                  <div className="mb-3">
+                    <div className="text-[10px] text-gray-500 uppercase mb-1">Risk Overrides</div>
+                    {seller.riskOverrides.map((ro, i) => (
+                      <div key={i} className="text-xs text-amber-400 mb-0.5">
+                        {ro.signal}: {ro.from} -&gt; {ro.to}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {(seller.actions || []).length > 0 ? (
+                  <div className="space-y-1.5">
+                    {seller.actions.map((act, i) => {
+                      const prioColors = { HIGH: 'border-red-500/30 text-red-400', MEDIUM: 'border-amber-500/30 text-amber-400', LOW: 'border-gray-600/30 text-gray-400' }
+                      return (
+                        <div key={i} className={`text-xs border-l-2 pl-2 ${prioColors[act.priority] || prioColors.MEDIUM}`}>
+                          <div className="font-medium">{act.action.replace(/_/g, ' ')}</div>
+                          <div className="text-gray-500">{act.reason}</div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-600">No pending actions</p>
+                )}
+              </div>
+
+              {/* Segment History & Trends */}
               <div>
                 <h4 className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
                   <Clock size={12} />
-                  Segment History
+                  History & Trends
                 </h4>
+                {/* Trend summary */}
+                {trends && trends.trend !== 'UNAVAILABLE' && trends.trend !== 'INSUFFICIENT_DATA' && (
+                  <div className="mb-3 p-2 bg-[#12121a] rounded border border-gray-800">
+                    <div className="flex items-center gap-2 mb-1">
+                      <TrendIndicator trends={trends} />
+                      <span className="text-xs text-gray-300">
+                        {trends.trend} (velocity: {trends.velocity}/day)
+                      </span>
+                    </div>
+                    {trends.previousScore != null && (
+                      <div className="text-[10px] text-gray-500">
+                        Previous: {trends.previousTier} / {trends.previousScore} pts
+                      </div>
+                    )}
+                    {trends.alerts?.length > 0 && (
+                      <div className="mt-1 space-y-0.5">
+                        {trends.alerts.map((alert, i) => (
+                          <div key={i} className={`text-[10px] ${alert.severity === 'CRITICAL' ? 'text-red-400' : alert.severity === 'HIGH' ? 'text-amber-400' : 'text-gray-400'}`}>
+                            [{alert.severity}] {alert.message}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {history === null ? (
                   <p className="text-xs text-gray-600">Loading...</p>
                 ) : history.length === 0 ? (
