@@ -1301,6 +1301,15 @@ server.listen(PORT, () => {
 ╚═══════════════════════════════════════════════════════════════╝
   `);
 
+  // Fire-and-forget: sync local prompts to Langfuse for version management
+  import('../agents/core/langfuse-prompt-manager.js')
+    .then(({ getLangfusePromptManager }) => {
+      getLangfusePromptManager().syncToLangfuse()
+        .then(result => console.log(`Langfuse prompt sync: ${result.synced} prompts synced`))
+        .catch(err => console.warn('Langfuse prompt sync failed:', err.message));
+    })
+    .catch(() => {});
+
   // Autonomous agents — disabled on startup to avoid LLM rate limit exhaustion.
   // Start them manually via their /api/agents/*/status endpoints or enable below.
   // When using OpenAI (paid API), these 6 agents firing simultaneously will

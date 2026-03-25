@@ -125,6 +125,7 @@ export default function Layout({ children, wsConnected }) {
         { name: 'RAG Evaluation', href: '/rag-evaluation' },
         { name: 'Observability', href: '/observability' },
         { name: 'Autonomous Agents', href: '/autonomous' },
+        { name: 'Prompt Library', href: '/prompt-library' },
         { name: 'ML Training', href: '/ml/training' }
       ]
     }

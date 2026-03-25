@@ -3,6 +3,10 @@
  *
  * Wraps the PromptRegistry singleton + filesystem operations for
  * creating, reading, updating, and deleting prompt markdown files.
+ *
+ * Also integrates with:
+ * - Langfuse Prompt Manager for versioning, sync, and remote fetch
+ * - PromptLayer for call tracking status
  */
 
 import express from 'express';
@@ -10,6 +14,9 @@ import { writeFileSync, unlinkSync, mkdirSync, existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { getPromptRegistry } from '../../agents/core/prompt-registry.js';
+import { getLangfusePromptManager } from '../../agents/core/langfuse-prompt-manager.js';
+import { isPromptLayerAvailable, getPromptLayerStatus } from '../../agents/core/promptlayer-client.js';
+import { isLangfuseAvailable } from '../../shared/common/langfuse-client.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -49,12 +56,66 @@ function buildFrontmatter(metadata) {
 // ROUTES
 // ============================================================================
 
-// GET /stats — Registry statistics (MUST be before /:id route)
+// GET /stats — Registry statistics with Langfuse + PromptLayer status (MUST be before /:id route)
 router.get('/stats', (req, res) => {
   try {
     const registry = getPromptRegistry();
     const stats = registry.getStats();
-    res.json({ success: true, data: stats });
+    const langfuseManager = getLangfusePromptManager();
+    const langfuseStats = langfuseManager.getStats();
+    const promptLayerStatus = getPromptLayerStatus();
+
+    res.json({
+      success: true,
+      data: {
+        ...stats,
+        langfuse: {
+          available: isLangfuseAvailable(),
+          ...langfuseStats
+        },
+        promptLayer: promptLayerStatus
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /sync — Force sync all local prompts to Langfuse
+router.post('/sync', async (req, res) => {
+  try {
+    const langfuseManager = getLangfusePromptManager();
+    const result = await langfuseManager.syncToLangfuse();
+    res.json({
+      success: true,
+      data: {
+        synced: result.synced,
+        errors: result.errors,
+        syncedAt: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /test — Test a prompt with variable interpolation
+router.post('/test', async (req, res) => {
+  try {
+    const { promptName, variables = {} } = req.body;
+
+    if (!promptName) {
+      return res.status(400).json({ success: false, error: 'promptName is required' });
+    }
+
+    const langfuseManager = getLangfusePromptManager();
+    const result = await langfuseManager.testPrompt(promptName, variables);
+
+    if (!result) {
+      return res.status(404).json({ success: false, error: `Prompt "${promptName}" not found` });
+    }
+
+    res.json({ success: true, data: result });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -80,6 +141,30 @@ router.get('/:id', (req, res) => {
       return res.status(404).json({ success: false, error: 'Prompt not found' });
     }
     res.json({ success: true, data: prompt });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /:id/versions — Version history from Langfuse
+router.get('/:id/versions', async (req, res) => {
+  try {
+    const langfuseManager = getLangfusePromptManager();
+    const versions = await langfuseManager.getVersionHistory(req.params.id);
+
+    // Also include local version info
+    const registry = getPromptRegistry();
+    const local = registry.getPromptById(req.params.id);
+
+    res.json({
+      success: true,
+      data: {
+        promptName: req.params.id,
+        localVersion: local?.version || 'unknown',
+        langfuseVersions: versions,
+        langfuseAvailable: isLangfuseAvailable()
+      }
+    });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -150,6 +235,10 @@ router.post('/', (req, res) => {
     // Reload registry
     registry.reload();
 
+    // Fire-and-forget: sync new prompt to Langfuse
+    const langfuseManager = getLangfusePromptManager();
+    langfuseManager.syncToLangfuse().catch(() => {});
+
     // Return the created prompt
     const created = registry.getPromptById(id);
     if (!created) {
@@ -161,7 +250,7 @@ router.post('/', (req, res) => {
   }
 });
 
-// PUT /:id — Update existing prompt (rewrite .md file, reload registry)
+// PUT /:id — Update existing prompt (rewrite .md file, reload registry, push to Langfuse)
 router.put('/:id', (req, res) => {
   try {
     const registry = getPromptRegistry();
@@ -227,6 +316,10 @@ router.put('/:id', (req, res) => {
 
     // Reload registry
     registry.reload();
+
+    // Fire-and-forget: push new version to Langfuse
+    const langfuseManager = getLangfusePromptManager();
+    langfuseManager.syncToLangfuse().catch(() => {});
 
     // Return the updated prompt
     const updated = registry.getPromptById(req.params.id);

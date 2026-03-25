@@ -203,6 +203,22 @@ class LLMClient {
           cache.set(model, temperature, systemPrompt, userPrompt, finalResult);
         }
 
+        // Fire-and-forget: track in PromptLayer
+        try {
+          const { trackPromptCall } = await import('./promptlayer-client.js');
+          trackPromptCall({
+            promptName: options.phase || 'unknown',
+            promptVersion: options.promptVersion || '1',
+            input: userPrompt,
+            output: content,
+            model,
+            latencyMs,
+            tokens: inputTokens + outputTokens,
+            agentId,
+            metadata: { temperature, provider: this.provider }
+          }).catch(() => {});
+        } catch (_) { /* non-critical — PromptLayer may not be available */ }
+
         return finalResult;
       } catch (error) {
         lastError = error;

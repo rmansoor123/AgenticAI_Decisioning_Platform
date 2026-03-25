@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { BookOpen, Search, Plus, Edit3, Trash2, ChevronDown, ChevronRight, FileText, CheckCircle } from 'lucide-react';
+import { BookOpen, Search, Plus, Edit3, Trash2, ChevronDown, ChevronRight, FileText, CheckCircle, RefreshCw, Cloud, Layers, TestTube, Clock } from 'lucide-react';
 import { safeJson } from '../utils/api'
 
 const API_BASE = '/api';
@@ -54,9 +54,9 @@ const PRIORITY_COLORS = {
 
 const PHASE_COLORS = {
   think: 'bg-blue-500/20 text-blue-400',
-  plan: 'bg-purple-500/20 text-purple-400',
-  observe: 'bg-emerald-500/20 text-emerald-400',
-  reflect: 'bg-amber-500/20 text-amber-400',
+  plan: 'bg-green-500/20 text-green-400',
+  observe: 'bg-amber-500/20 text-amber-400',
+  reflect: 'bg-purple-500/20 text-purple-400',
   decide: 'bg-red-500/20 text-red-400',
   replan: 'bg-orange-500/20 text-orange-400',
 };
@@ -77,6 +77,7 @@ function renderMarkdown(text) {
 
 export default function PromptLibrary() {
   const [prompts, setPrompts] = useState([]);
+  const [stats, setStats] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [selectedPrompt, setSelectedPrompt] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -89,6 +90,15 @@ export default function PromptLibrary() {
   const [filters, setFilters] = useState({ agent: 'all', phase: 'all', priority: 'all' });
   const [modal, setModal] = useState(null);
   const [expandedGroups, setExpandedGroups] = useState(new Set(Object.keys(AGENT_LABELS)));
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
+  const [showTestPanel, setShowTestPanel] = useState(false);
+  const [testVariables, setTestVariables] = useState('');
+  const [testResult, setTestResult] = useState(null);
+  const [testLoading, setTestLoading] = useState(false);
+  const [versions, setVersions] = useState(null);
+  const [showVersions, setShowVersions] = useState(false);
+  const [activeTab, setActiveTab] = useState('content'); // content | test | versions
 
   const fetchPrompts = async () => {
     try {
@@ -102,9 +112,21 @@ export default function PromptLibrary() {
     }
   };
 
+  const fetchStats = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/prompts/stats`);
+      const data = await safeJson(res);
+      if (data.success) {
+        setStats(data.data);
+      }
+    } catch (error) {
+      console.error('Error fetching stats:', error);
+    }
+  };
+
   useEffect(() => {
     const init = async () => {
-      await fetchPrompts();
+      await Promise.all([fetchPrompts(), fetchStats()]);
       setLoading(false);
     };
     init();
@@ -113,6 +135,9 @@ export default function PromptLibrary() {
   useEffect(() => {
     if (!selectedId) {
       setSelectedPrompt(null);
+      setVersions(null);
+      setTestResult(null);
+      setActiveTab('content');
       return;
     }
     let cancelled = false;
@@ -130,6 +155,73 @@ export default function PromptLibrary() {
     fetchPrompt();
     return () => { cancelled = true; };
   }, [selectedId]);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch(`${API_BASE}/prompts/sync`, { method: 'POST' });
+      const data = await safeJson(res);
+      if (data.success) {
+        setSyncResult(data.data);
+        await fetchStats();
+      }
+    } catch (error) {
+      console.error('Sync error:', error);
+    }
+    setSyncing(false);
+  };
+
+  const handleTestPrompt = async () => {
+    if (!selectedId) return;
+    setTestLoading(true);
+    setTestResult(null);
+    try {
+      let variables = {};
+      if (testVariables.trim()) {
+        try {
+          variables = JSON.parse(testVariables);
+        } catch {
+          setTestResult({ error: 'Invalid JSON in variables field' });
+          setTestLoading(false);
+          return;
+        }
+      }
+      const res = await fetch(`${API_BASE}/prompts/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ promptName: selectedId, variables })
+      });
+      const data = await safeJson(res);
+      if (data.success) {
+        setTestResult(data.data);
+      } else {
+        setTestResult({ error: data.error || 'Test failed' });
+      }
+    } catch (error) {
+      setTestResult({ error: error.message });
+    }
+    setTestLoading(false);
+  };
+
+  const handleFetchVersions = async () => {
+    if (!selectedId) return;
+    try {
+      const res = await fetch(`${API_BASE}/prompts/${selectedId}/versions`);
+      const data = await safeJson(res);
+      if (data.success) {
+        setVersions(data.data);
+      }
+    } catch (error) {
+      console.error('Error fetching versions:', error);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'versions' && selectedId) {
+      handleFetchVersions();
+    }
+  }, [activeTab, selectedId]);
 
   const filteredPrompts = prompts.filter(p => {
     if (filters.agent !== 'all' && p.agent !== filters.agent) return false;
@@ -162,6 +254,9 @@ export default function PromptLibrary() {
   const handleSelect = (id) => {
     if (editMode || creating) return;
     setSelectedId(id);
+    setActiveTab('content');
+    setTestResult(null);
+    setVersions(null);
   };
 
   const handleEdit = () => {
@@ -232,7 +327,6 @@ export default function PromptLibrary() {
           return;
         }
         await fetchPrompts();
-        // Refetch the selected prompt to get updated data
         const detailRes = await fetch(`${API_BASE}/prompts/${selectedId}`);
         const data = await detailRes.json();
         if (data.success) {
@@ -240,6 +334,7 @@ export default function PromptLibrary() {
         }
         setEditMode(false);
       }
+      await fetchStats();
     } catch (error) {
       console.error('Error saving prompt:', error);
     }
@@ -290,58 +385,29 @@ export default function PromptLibrary() {
           <div>
             <h1 className="text-2xl font-bold text-white">Prompt Library</h1>
             <p className="text-gray-400 text-sm mt-0.5">
-              <span className="text-white font-medium">{prompts.length}</span> prompts registered
-              <span className="text-gray-600 mx-2">|</span>
-              <span className="text-emerald-400">Registry active</span>
+              Manage, version, and test prompts across all {stats?.totalPrompts || prompts.length} agents
             </p>
           </div>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          {/* Agent filter */}
-          <select
-            value={filters.agent}
-            onChange={(e) => setFilters(prev => ({ ...prev, agent: e.target.value }))}
-            className="bg-[#1a1f2e] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-emerald-500/50 focus:outline-none"
+          {/* Sync to Langfuse */}
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className={`flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium transition-all ${
+              syncing
+                ? 'bg-gray-700/30 text-gray-500 border-gray-600 cursor-wait'
+                : 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/30'
+            }`}
           >
-            <option value="all">All Agents</option>
-            {Object.entries(AGENT_LABELS).map(([key, label]) => (
-              <option key={key} value={key}>{label}</option>
-            ))}
-          </select>
-          {/* Phase filter */}
-          <select
-            value={filters.phase}
-            onChange={(e) => setFilters(prev => ({ ...prev, phase: e.target.value }))}
-            className="bg-[#1a1f2e] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-emerald-500/50 focus:outline-none"
-          >
-            <option value="all">All Phases</option>
-            <option value="think">Think</option>
-            <option value="plan">Plan</option>
-            <option value="observe">Observe</option>
-            <option value="reflect">Reflect</option>
-          </select>
-          {/* Priority filter */}
-          <select
-            value={filters.priority}
-            onChange={(e) => setFilters(prev => ({ ...prev, priority: e.target.value }))}
-            className="bg-[#1a1f2e] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-emerald-500/50 focus:outline-none"
-          >
-            <option value="all">All Priorities</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
-          {/* Search */}
-          <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-            <input
-              type="text"
-              placeholder="Search prompts..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="bg-[#1a1f2e] border border-gray-700 rounded-lg pl-10 pr-4 py-2 text-sm text-white placeholder-gray-500 focus:border-emerald-500/50 focus:outline-none w-56"
-            />
-          </div>
+            <Cloud size={16} className={syncing ? 'animate-pulse' : ''} />
+            {syncing ? 'Syncing...' : 'Sync to Langfuse'}
+          </button>
+          {syncResult && (
+            <span className="text-xs text-emerald-400">
+              {syncResult.synced} synced
+            </span>
+          )}
           {/* New Prompt */}
           <button
             onClick={handleNewPrompt}
@@ -353,16 +419,94 @@ export default function PromptLibrary() {
         </div>
       </div>
 
+      {/* Stats Row */}
+      <div className="grid grid-cols-5 gap-4">
+        <div className="bg-[#1a1f2e] border border-gray-700 rounded-xl p-4">
+          <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total Prompts</div>
+          <div className="text-2xl font-bold text-white">{stats?.totalPrompts || prompts.length}</div>
+        </div>
+        <div className="bg-[#1a1f2e] border border-gray-700 rounded-xl p-4">
+          <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">By Agent</div>
+          <div className="text-2xl font-bold text-white">{stats?.byAgent ? Object.keys(stats.byAgent).length : 0}</div>
+          <div className="text-xs text-gray-500 mt-1">agent groups</div>
+        </div>
+        <div className="bg-[#1a1f2e] border border-gray-700 rounded-xl p-4">
+          <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">By Phase</div>
+          <div className="text-2xl font-bold text-white">{stats?.byPhase ? Object.keys(stats.byPhase).length : 0}</div>
+          <div className="text-xs text-gray-500 mt-1">phase types</div>
+        </div>
+        <div className="bg-[#1a1f2e] border border-gray-700 rounded-xl p-4">
+          <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Langfuse Sync</div>
+          <div className={`text-sm font-semibold mt-1 ${stats?.langfuse?.available ? 'text-emerald-400' : 'text-gray-500'}`}>
+            {stats?.langfuse?.available ? 'Connected' : 'Unavailable'}
+          </div>
+          {stats?.langfuse?.synced && (
+            <div className="text-xs text-gray-500 mt-1">{stats.langfuse.synced} synced, {stats.langfuse.fetched} fetched</div>
+          )}
+        </div>
+        <div className="bg-[#1a1f2e] border border-gray-700 rounded-xl p-4">
+          <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">PromptLayer</div>
+          <div className={`text-sm font-semibold mt-1 ${stats?.promptLayer?.available ? 'text-emerald-400' : stats?.promptLayer?.configured ? 'text-amber-400' : 'text-gray-500'}`}>
+            {stats?.promptLayer?.available ? 'Active' : stats?.promptLayer?.configured ? 'Configured' : 'Not Configured'}
+          </div>
+          <div className="text-xs text-gray-500 mt-1">LLM call tracking</div>
+        </div>
+      </div>
+
+      {/* Filters Row */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <select
+          value={filters.agent}
+          onChange={(e) => setFilters(prev => ({ ...prev, agent: e.target.value }))}
+          className="bg-[#1a1f2e] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-emerald-500/50 focus:outline-none"
+        >
+          <option value="all">All Agents</option>
+          {Object.entries(AGENT_LABELS).map(([key, label]) => (
+            <option key={key} value={key}>{label}</option>
+          ))}
+        </select>
+        <select
+          value={filters.phase}
+          onChange={(e) => setFilters(prev => ({ ...prev, phase: e.target.value }))}
+          className="bg-[#1a1f2e] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-emerald-500/50 focus:outline-none"
+        >
+          <option value="all">All Phases</option>
+          <option value="think">Think</option>
+          <option value="plan">Plan</option>
+          <option value="observe">Observe</option>
+          <option value="reflect">Reflect</option>
+        </select>
+        <select
+          value={filters.priority}
+          onChange={(e) => setFilters(prev => ({ ...prev, priority: e.target.value }))}
+          className="bg-[#1a1f2e] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-emerald-500/50 focus:outline-none"
+        >
+          <option value="all">All Priorities</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+        <div className="relative">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+          <input
+            type="text"
+            placeholder="Search prompts..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="bg-[#1a1f2e] border border-gray-700 rounded-lg pl-10 pr-4 py-2 text-sm text-white placeholder-gray-500 focus:border-emerald-500/50 focus:outline-none w-56"
+          />
+        </div>
+      </div>
+
       {/* Main Layout: Sidebar + Content */}
-      <div className="flex gap-6" style={{ minHeight: 'calc(100vh - 220px)' }}>
+      <div className="flex gap-6" style={{ minHeight: 'calc(100vh - 340px)' }}>
         {/* Left Sidebar */}
-        <div className="w-72 shrink-0 bg-[#1a1f2e] border border-gray-700 rounded-xl overflow-y-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
+        <div className="w-72 shrink-0 bg-[#1a1f2e] border border-gray-700 rounded-xl overflow-y-auto" style={{ maxHeight: 'calc(100vh - 340px)' }}>
           {Object.keys(groupedPrompts).length === 0 ? (
             <div className="text-gray-500 text-sm text-center py-8 px-4">No prompts match filters</div>
           ) : (
             Object.entries(groupedPrompts).map(([agent, agentPrompts]) => (
               <div key={agent} className="border-b border-gray-700/50 last:border-b-0">
-                {/* Group Header */}
                 <button
                   onClick={() => toggleGroup(agent)}
                   className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-800/50 transition-all"
@@ -381,7 +525,6 @@ export default function PromptLibrary() {
                     {agentPrompts.length}
                   </span>
                 </button>
-                {/* Prompt Items */}
                 {expandedGroups.has(agent) && (
                   <div className="pb-1">
                     {agentPrompts.map(prompt => (
@@ -412,13 +555,12 @@ export default function PromptLibrary() {
         </div>
 
         {/* Main Content Area */}
-        <div className="flex-1 bg-[#1a1f2e] border border-gray-700 rounded-xl overflow-y-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
+        <div className="flex-1 bg-[#1a1f2e] border border-gray-700 rounded-xl overflow-y-auto" style={{ maxHeight: 'calc(100vh - 340px)' }}>
           {creating ? (
             /* New Prompt Mode */
             <div className="p-6 space-y-6">
               <h2 className="text-xl font-bold text-white">Create New Prompt</h2>
 
-              {/* Metadata Fields */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Prompt ID</label>
@@ -472,7 +614,6 @@ export default function PromptLibrary() {
                 </div>
               </div>
 
-              {/* Side-by-side editor */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Content (Markdown)</label>
@@ -492,7 +633,6 @@ export default function PromptLibrary() {
                 </div>
               </div>
 
-              {/* Action Buttons */}
               <div className="flex justify-end gap-3">
                 <button
                   onClick={handleCancelEdit}
@@ -514,7 +654,6 @@ export default function PromptLibrary() {
             <div className="p-6 space-y-6">
               <h2 className="text-xl font-bold text-white">Edit: {selectedId}</h2>
 
-              {/* Metadata Fields */}
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Agent</label>
@@ -558,7 +697,6 @@ export default function PromptLibrary() {
                 </div>
               </div>
 
-              {/* Side-by-side editor */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Content (Markdown)</label>
@@ -577,7 +715,6 @@ export default function PromptLibrary() {
                 </div>
               </div>
 
-              {/* Action Buttons */}
               <div className="flex justify-end gap-3">
                 <button
                   onClick={handleCancelEdit}
@@ -599,7 +736,7 @@ export default function PromptLibrary() {
               {/* Prompt Header */}
               <div className="flex items-start justify-between">
                 <div className="space-y-3">
-                  <h2 className="text-2xl font-bold text-white">{selectedPrompt.id}</h2>
+                  <h2 className="text-2xl font-bold text-white font-mono">{selectedPrompt.id}</h2>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className={`text-xs px-2.5 py-1 rounded border ${AGENT_BG_COLORS[selectedPrompt.agent] || ''}`}>
                       {AGENT_LABELS[selectedPrompt.agent] || selectedPrompt.agent}
@@ -635,13 +772,136 @@ export default function PromptLibrary() {
                 </div>
               </div>
 
-              {/* Content */}
-              <div className="border-t border-gray-700 pt-6">
+              {/* Tabs */}
+              <div className="flex border-b border-gray-700">
+                <button
+                  onClick={() => setActiveTab('content')}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    activeTab === 'content'
+                      ? 'border-emerald-500 text-white'
+                      : 'border-transparent text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  <FileText size={14} className="inline mr-1.5" />
+                  Content
+                </button>
+                <button
+                  onClick={() => setActiveTab('test')}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    activeTab === 'test'
+                      ? 'border-emerald-500 text-white'
+                      : 'border-transparent text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  <TestTube size={14} className="inline mr-1.5" />
+                  Test
+                </button>
+                <button
+                  onClick={() => setActiveTab('versions')}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    activeTab === 'versions'
+                      ? 'border-emerald-500 text-white'
+                      : 'border-transparent text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  <Clock size={14} className="inline mr-1.5" />
+                  Versions
+                </button>
+              </div>
+
+              {/* Tab Content */}
+              {activeTab === 'content' && (
                 <div
                   className="text-sm text-gray-300 leading-relaxed"
                   dangerouslySetInnerHTML={{ __html: renderMarkdown(selectedPrompt.content) }}
                 />
-              </div>
+              )}
+
+              {activeTab === 'test' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-1">
+                      Variables (JSON) -- use {'{{variableName}}'} in your prompt
+                    </label>
+                    <textarea
+                      value={testVariables}
+                      onChange={(e) => setTestVariables(e.target.value)}
+                      placeholder={'{\n  "agentName": "PayoutRiskAgent",\n  "tools": "verify_bank, check_velocity"\n}'}
+                      className="w-full bg-[#12121a] border border-gray-700 rounded-lg px-4 py-3 text-sm text-white font-mono focus:border-emerald-500/50 focus:outline-none resize-none h-32"
+                    />
+                  </div>
+                  <button
+                    onClick={handleTestPrompt}
+                    disabled={testLoading}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg text-sm font-medium hover:bg-emerald-500/30 transition-all"
+                  >
+                    <TestTube size={14} />
+                    {testLoading ? 'Testing...' : 'Test Prompt'}
+                  </button>
+                  {testResult && (
+                    <div className="bg-[#12121a] border border-gray-700 rounded-lg p-4">
+                      {testResult.error ? (
+                        <div className="text-red-400 text-sm">{testResult.error}</div>
+                      ) : (
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-3 text-xs text-gray-500">
+                            <span>Source: <span className={testResult.source === 'langfuse' ? 'text-indigo-400' : 'text-emerald-400'}>{testResult.source}</span></span>
+                            <span>Version: {testResult.version}</span>
+                            {testResult.variablesApplied?.length > 0 && (
+                              <span>Variables: {testResult.variablesApplied.join(', ')}</span>
+                            )}
+                          </div>
+                          <div className="text-sm text-gray-300 font-mono whitespace-pre-wrap bg-gray-900/50 rounded-lg p-3 max-h-96 overflow-y-auto">
+                            {testResult.content}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'versions' && (
+                <div className="space-y-4">
+                  {versions ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-3 text-sm text-gray-400">
+                        <span>Local version: <span className="text-white font-mono">v{versions.localVersion}</span></span>
+                        <span className={`text-xs px-2 py-0.5 rounded ${versions.langfuseAvailable ? 'bg-emerald-500/20 text-emerald-400' : 'bg-gray-700/50 text-gray-500'}`}>
+                          {versions.langfuseAvailable ? 'Langfuse Connected' : 'Langfuse Unavailable'}
+                        </span>
+                      </div>
+                      {versions.langfuseVersions?.length > 0 ? (
+                        <div className="space-y-2">
+                          {versions.langfuseVersions.map((v, i) => (
+                            <div key={i} className="bg-[#12121a] border border-gray-700 rounded-lg p-3 flex items-center justify-between">
+                              <div>
+                                <span className="text-sm text-white font-mono">v{v.version}</span>
+                                {v.labels?.length > 0 && (
+                                  <span className="ml-2 text-xs bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded">
+                                    {v.labels.join(', ')}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                {v.contentPreview && `${v.contentPreview}...`}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-gray-500 text-sm py-4">
+                          {versions.langfuseAvailable
+                            ? 'No versions found in Langfuse. Click "Sync to Langfuse" to push prompts.'
+                            : 'Langfuse not connected. Version history is available when Langfuse is configured.'}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-gray-500 text-sm py-4">Loading version history...</div>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             /* No Selection Placeholder */
@@ -663,7 +923,7 @@ export default function PromptLibrary() {
               <h3 className="text-lg font-semibold text-white">Confirm Save</h3>
             </div>
             <p className="text-gray-400 text-sm mb-6">
-              Save changes to <code className="bg-gray-800 px-1.5 py-0.5 rounded text-emerald-400 text-sm">{creating ? newId : selectedId}</code>? This will immediately update the prompt used by agents.
+              Save changes to <code className="bg-gray-800 px-1.5 py-0.5 rounded text-emerald-400 text-sm">{creating ? newId : selectedId}</code>? This will immediately update the prompt used by agents and push a new version to Langfuse.
             </p>
             <div className="flex justify-end gap-3">
               <button
