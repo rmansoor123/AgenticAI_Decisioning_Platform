@@ -94,7 +94,8 @@ export default function Layout({ children, wsConnected }) {
       children: [
         { name: 'Payment Processing', href: '/financial/payments' },
         { name: 'Billing & Fees', href: '/financial/billing' },
-        { name: 'Invoicing', href: '/financial/invoicing' }
+        { name: 'Invoicing', href: '/financial/invoicing' },
+        { name: 'Financial Platform', href: '/financial-platform' }
       ]
     },
     {
