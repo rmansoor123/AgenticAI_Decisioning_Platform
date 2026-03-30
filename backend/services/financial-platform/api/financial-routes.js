@@ -8,6 +8,13 @@ import { getCreditLineAgent } from '../agents/CreditLineAgent.js';
 import { getPayoutReleaseAgent } from '../agents/PayoutReleaseAgent.js';
 import { getCashFlowForecastAgent } from '../agents/CashFlowForecastAgent.js';
 import { getLoanServicingAgent } from '../agents/LoanServicingAgent.js';
+import { getPaymentProcessingAgent } from '../agents/PaymentProcessingAgent.js';
+import { getSellerWalletAgent } from '../agents/SellerWalletAgent.js';
+import { getSavingsAgent } from '../agents/SavingsAgent.js';
+import { getTaxAgent } from '../agents/TaxAgent.js';
+import { getWorkingCapitalAgent } from '../agents/WorkingCapitalAgent.js';
+import { getInsuranceAgent } from '../agents/InsuranceAgent.js';
+import { getFXAgent } from '../agents/FXAgent.js';
 import { SellerFinancialProfile } from '../models/SellerFinancialProfile.js';
 import { getLedger } from '../services/ledger.js';
 import { getPaymentProcessor } from '../services/payment-processor.js';
@@ -156,6 +163,109 @@ router.get('/ledger/:sellerId', async (req, res) => {
   }
 });
 
+// Payment Processing
+router.post('/payment/process', async (req, res) => {
+  try {
+    const agent = getPaymentProcessingAgent();
+    const result = await agent.evaluate(req.body);
+    res.json({ success: true, data: result });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Wallet
+router.post('/wallet', async (req, res) => {
+  try {
+    const agent = getSellerWalletAgent();
+    const result = await agent.evaluate(req.body);
+    res.json({ success: true, data: result });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+router.get('/wallet/:sellerId', async (req, res) => {
+  try {
+    const agent = getSellerWalletAgent();
+    const result = await agent.evaluate({ sellerId: req.params.sellerId, action: 'BALANCE' });
+    res.json({ success: true, data: result });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Savings
+router.post('/savings', async (req, res) => {
+  try {
+    const agent = getSavingsAgent();
+    const result = await agent.evaluate(req.body);
+    res.json({ success: true, data: result });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+router.get('/savings/:sellerId', async (req, res) => {
+  try {
+    const agent = getSavingsAgent();
+    const result = await agent.evaluate({ sellerId: req.params.sellerId, action: 'STATUS' });
+    res.json({ success: true, data: result });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Tax
+router.post('/tax', async (req, res) => {
+  try {
+    const agent = getTaxAgent();
+    const result = await agent.evaluate(req.body);
+    res.json({ success: true, data: result });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+router.get('/tax/:sellerId/report', async (req, res) => {
+  try {
+    const agent = getTaxAgent();
+    const result = await agent.evaluate({ sellerId: req.params.sellerId, action: 'ANNUAL_REPORT' });
+    res.json({ success: true, data: result });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Working Capital (Merchant Cash Advance)
+router.post('/capital', async (req, res) => {
+  try {
+    const agent = getWorkingCapitalAgent();
+    const result = await agent.evaluate(req.body);
+    res.json({ success: true, data: result });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+router.get('/capital/:sellerId/qualify', async (req, res) => {
+  try {
+    const agent = getWorkingCapitalAgent();
+    const result = await agent.evaluate({ sellerId: req.params.sellerId, action: 'QUALIFY', gmv30d: 50000, riskScore: 30, accountAgeDays: 180 });
+    res.json({ success: true, data: result });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// Insurance
+router.post('/insurance', async (req, res) => {
+  try {
+    const agent = getInsuranceAgent();
+    const result = await agent.evaluate(req.body);
+    res.json({ success: true, data: result });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// FX
+router.post('/fx', async (req, res) => {
+  try {
+    const agent = getFXAgent();
+    const result = await agent.evaluate(req.body);
+    res.json({ success: true, data: result });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+router.get('/fx/rates/:currency', async (req, res) => {
+  try {
+    const agent = getFXAgent();
+    const result = await agent.evaluate({ action: 'RATES', fromCurrency: req.params.currency.toUpperCase() });
+    res.json({ success: true, data: result });
+  } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
 // GET /stats — overall financial platform stats
 router.get('/stats', async (req, res) => {
   try {
@@ -166,12 +276,21 @@ router.get('/stats', async (req, res) => {
     const loanServicing = getLoanServicingAgent().getStats();
     const ledger = await getLedger().getStats();
     const processor = getPaymentProcessor().getStats();
+    const paymentProcessing = getPaymentProcessingAgent().getStats();
+    const wallet = getSellerWalletAgent().getStats();
+    const savings = getSavingsAgent().getStats();
+    const tax = getTaxAgent().getStats();
+    const workingCapital = getWorkingCapitalAgent().getStats();
+    const insurance = getInsuranceAgent().getStats();
+    const fx = getFXAgent().getStats();
 
     res.json({
       success: true,
       data: {
         underwriting, creditLine, payoutRelease,
-        forecast, loanServicing, ledger, processor
+        forecast, loanServicing, ledger, processor,
+        paymentProcessing, wallet, savings, tax,
+        workingCapital, insurance, fx
       }
     });
   } catch (error) {

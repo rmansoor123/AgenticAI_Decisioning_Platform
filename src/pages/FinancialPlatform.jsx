@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import {
   DollarSign, CreditCard, ArrowUpDown, TrendingUp, BookOpen, FileText,
   ChevronDown, ChevronRight, Search, CheckCircle, XCircle, AlertTriangle,
-  Loader2, BarChart3, Clock, Shield
+  Loader2, BarChart3, Clock, Shield, Wallet, PiggyBank, Landmark, ShieldCheck,
+  ArrowLeftRight, Receipt, Briefcase
 } from 'lucide-react'
 import { safeJson } from '../utils/api'
 
@@ -84,12 +85,19 @@ function RulesTable({ rules }) {
   )
 }
 
+const inputClass = 'w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500'
+
 // ---- Tab: Overview ----
 function OverviewTab() {
   const [stats, setStats] = useState(null)
   const [rules, setRules] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [fxRates, setFxRates] = useState(null)
+  const [fxLoading, setFxLoading] = useState(false)
+  const [taxForm, setTaxForm] = useState({ amount: 1000, country: 'US', state: 'CA' })
+  const [taxResult, setTaxResult] = useState(null)
+  const [taxLoading, setTaxLoading] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -113,6 +121,37 @@ function OverviewTab() {
     load()
   }, [])
 
+  const loadFxRates = async () => {
+    setFxLoading(true)
+    try {
+      const res = await fetch(`${API}/fx/rates/USD`)
+      const data = await safeJson(res)
+      setFxRates(data.data || data)
+    } catch (e) {
+      setFxRates({ error: e.message })
+    } finally {
+      setFxLoading(false)
+    }
+  }
+
+  const calculateTax = async (e) => {
+    e.preventDefault()
+    setTaxLoading(true)
+    try {
+      const res = await fetch(`${API}/tax`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'CALCULATE', ...taxForm })
+      })
+      const data = await safeJson(res)
+      setTaxResult(data.data || data)
+    } catch (e) {
+      setTaxResult({ error: e.message })
+    } finally {
+      setTaxLoading(false)
+    }
+  }
+
   if (loading) return <div className="flex items-center gap-2 text-gray-400"><Loader2 className="w-4 h-4 animate-spin" /> Loading overview...</div>
   if (error) return <div className="text-red-400 text-sm">Error: {error}</div>
 
@@ -128,6 +167,68 @@ function OverviewTab() {
         <StatCard label="Forecasts" value={s.forecasts?.count ?? 0} sub="generated" icon={TrendingUp} color="text-cyan-400" />
         <StatCard label="Loans" value={s.loans?.processed ?? 0} sub={`${s.loans?.onTime ?? 0} on-time / ${s.loans?.late ?? 0} late / ${s.loans?.defaults ?? 0} defaults`} icon={FileText} color="text-amber-400" />
         <StatCard label="Ledger" value={s.ledger?.totalEntries ?? 0} sub={`Net flow: $${(s.ledger?.netFlow ?? 0).toLocaleString()}`} icon={BookOpen} color="text-emerald-400" />
+      </div>
+
+      {/* FX Rates Section */}
+      <div className="bg-[#12121a] border border-gray-800 rounded-lg p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+            <ArrowLeftRight className="w-5 h-5 text-blue-400" /> FX Rates (USD)
+          </h3>
+          <button onClick={loadFxRates} disabled={fxLoading} className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50">
+            {fxLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Load Rates'}
+          </button>
+        </div>
+        {fxRates && !fxRates.error && (
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            {(fxRates.rates ? Object.entries(fxRates.rates) : []).map(([currency, rate]) => (
+              <div key={currency} className="bg-gray-800/50 rounded-lg px-3 py-2 text-sm">
+                <span className="text-gray-400">USD/{currency}</span>
+                <p className="text-white font-semibold">{typeof rate === 'number' ? rate.toFixed(4) : rate}</p>
+              </div>
+            ))}
+            {fxRates.rates && Object.keys(fxRates.rates).length === 0 && (
+              <p className="text-gray-500 text-sm col-span-full">No rates available.</p>
+            )}
+          </div>
+        )}
+        {fxRates?.error && <p className="text-red-400 text-sm">Error: {fxRates.error}</p>}
+        {!fxRates && <p className="text-gray-500 text-sm">Click "Load Rates" to fetch current FX rates.</p>}
+      </div>
+
+      {/* Tax Calculator Section */}
+      <div className="bg-[#12121a] border border-gray-800 rounded-lg p-6">
+        <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+          <Receipt className="w-5 h-5 text-amber-400" /> Tax Calculator
+        </h3>
+        <form onSubmit={calculateTax} className="flex items-end gap-4 flex-wrap">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Amount ($)</label>
+            <input type="number" min={0} className={`${inputClass} w-32`} value={taxForm.amount} onChange={e => setTaxForm({ ...taxForm, amount: Number(e.target.value) })} />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Country</label>
+            <select className={`${inputClass} w-28`} value={taxForm.country} onChange={e => setTaxForm({ ...taxForm, country: e.target.value })}>
+              {['US', 'CA', 'GB', 'DE', 'FR', 'AU', 'JP'].map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">State</label>
+            <input type="text" className={`${inputClass} w-24`} value={taxForm.state} onChange={e => setTaxForm({ ...taxForm, state: e.target.value })} placeholder="e.g. CA" />
+          </div>
+          <button type="submit" disabled={taxLoading} className="bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50">
+            {taxLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Calculate'}
+          </button>
+        </form>
+        {taxResult && !taxResult.error && (
+          <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div><span className="text-gray-400">Subtotal</span><p className="text-white font-semibold">${(taxResult.subtotal ?? taxForm.amount).toLocaleString()}</p></div>
+            <div><span className="text-gray-400">Tax Rate</span><p className="text-white font-semibold">{taxResult.taxRate != null ? `${(taxResult.taxRate * 100).toFixed(2)}%` : 'N/A'}</p></div>
+            <div><span className="text-gray-400">Tax Amount</span><p className="text-amber-400 font-semibold">${(taxResult.taxAmount ?? 0).toLocaleString()}</p></div>
+            <div><span className="text-gray-400">Total</span><p className="text-white font-semibold">${(taxResult.total ?? 0).toLocaleString()}</p></div>
+          </div>
+        )}
+        {taxResult?.error && <p className="text-red-400 text-sm mt-2">Error: {taxResult.error}</p>}
       </div>
 
       {/* Policy Rules */}
@@ -182,8 +283,6 @@ function UnderwritingTab() {
       setLoading(false)
     }
   }
-
-  const inputClass = 'w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500'
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -327,8 +426,6 @@ function PayoutsTab() {
       setLoading(false)
     }
   }
-
-  const inputClass = 'w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500'
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -478,8 +575,6 @@ function LoansTab() {
       setLoading(false)
     }
   }
-
-  const inputClass = 'w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500'
 
   const paymentStatusColor = (status) => {
     if (!status) return 'gray'
@@ -635,6 +730,580 @@ function LoansTab() {
   )
 }
 
+// ---- Tab: Wallet ----
+function WalletTab() {
+  const [sellerId, setSellerId] = useState('')
+  const [balance, setBalance] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const [actionForm, setActionForm] = useState({ action: 'DEPOSIT', amount: 1000 })
+  const [actionResult, setActionResult] = useState(null)
+  const [actionLoading, setActionLoading] = useState(false)
+
+  const fetchBalance = async (e) => {
+    e.preventDefault()
+    if (!sellerId.trim()) return
+    setLoading(true)
+    setError(null)
+    setBalance(null)
+    try {
+      const res = await fetch(`${API}/wallet/${sellerId}`)
+      const data = await safeJson(res)
+      setBalance(data.data || data)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const performAction = async () => {
+    if (!sellerId.trim()) return
+    setActionLoading(true)
+    setActionResult(null)
+    try {
+      const res = await fetch(`${API}/wallet`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sellerId, ...actionForm })
+      })
+      const data = await safeJson(res)
+      setActionResult(data.data || data)
+    } catch (e) {
+      setActionResult({ error: e.message })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Balance Lookup */}
+      <div className="bg-[#12121a] border border-gray-800 rounded-lg p-6">
+        <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+          <Wallet className="w-5 h-5 text-green-400" /> Seller Wallet
+        </h3>
+        <form onSubmit={fetchBalance} className="flex items-end gap-3 mb-4">
+          <div className="flex-1 max-w-md">
+            <label className="block text-xs text-gray-400 mb-1">Seller ID</label>
+            <input type="text" className={inputClass} value={sellerId} onChange={e => setSellerId(e.target.value)} placeholder="SLR-..." required />
+          </div>
+          <button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50">
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Get Balance'}
+          </button>
+        </form>
+        {error && <p className="text-red-400 text-sm mb-4">Error: {error}</p>}
+        {balance && (
+          <div className="grid grid-cols-3 gap-4 text-sm">
+            <div className="bg-gray-800/50 rounded-lg p-3">
+              <span className="text-gray-400">Total Balance</span>
+              <p className="text-white text-xl font-bold">${(balance.totalBalance ?? balance.balance ?? 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-gray-800/50 rounded-lg p-3">
+              <span className="text-gray-400">Available</span>
+              <p className="text-green-400 text-xl font-bold">${(balance.availableBalance ?? 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-gray-800/50 rounded-lg p-3">
+              <span className="text-gray-400">On Hold</span>
+              <p className="text-amber-400 text-xl font-bold">${(balance.holdBalance ?? 0).toLocaleString()}</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div className="bg-[#12121a] border border-gray-800 rounded-lg p-6">
+        <h3 className="text-sm font-semibold text-white mb-4">Wallet Actions</h3>
+        <div className="flex items-end gap-3 flex-wrap">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Action</label>
+            <select className={`${inputClass} w-36`} value={actionForm.action} onChange={e => setActionForm({ ...actionForm, action: e.target.value })}>
+              {['DEPOSIT', 'WITHDRAW', 'TRANSFER', 'HOLD'].map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Amount ($)</label>
+            <input type="number" min={0} className={`${inputClass} w-32`} value={actionForm.amount} onChange={e => setActionForm({ ...actionForm, amount: Number(e.target.value) })} />
+          </div>
+          <button onClick={performAction} disabled={actionLoading || !sellerId.trim()} className="bg-green-600 hover:bg-green-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50">
+            {actionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Execute'}
+          </button>
+        </div>
+        {actionResult && !actionResult.error && (
+          <div className="mt-4 bg-gray-800/50 rounded-lg p-3">
+            <p className="text-green-400 text-sm">Action completed successfully.</p>
+            <pre className="text-xs text-gray-300 mt-2 overflow-x-auto">{JSON.stringify(actionResult, null, 2)}</pre>
+          </div>
+        )}
+        {actionResult?.error && <p className="text-red-400 text-sm mt-4">Error: {actionResult.error}</p>}
+      </div>
+    </div>
+  )
+}
+
+// ---- Tab: Savings ----
+function SavingsTab() {
+  const [sellerId, setSellerId] = useState('')
+  const [status, setStatus] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const [actionForm, setActionForm] = useState({ action: 'DEPOSIT', amount: 5000 })
+  const [actionResult, setActionResult] = useState(null)
+  const [actionLoading, setActionLoading] = useState(false)
+
+  const fetchStatus = async (e) => {
+    e.preventDefault()
+    if (!sellerId.trim()) return
+    setLoading(true)
+    setError(null)
+    setStatus(null)
+    try {
+      const res = await fetch(`${API}/savings/${sellerId}`)
+      const data = await safeJson(res)
+      setStatus(data.data || data)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const performAction = async () => {
+    if (!sellerId.trim()) return
+    setActionLoading(true)
+    setActionResult(null)
+    try {
+      const res = await fetch(`${API}/savings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sellerId, ...actionForm })
+      })
+      const data = await safeJson(res)
+      setActionResult(data.data || data)
+    } catch (e) {
+      setActionResult({ error: e.message })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const apyTiers = [
+    { tier: 'Base (< $10K)', apy: '2.50%' },
+    { tier: 'Silver ($10K - $50K)', apy: '3.25%' },
+    { tier: 'Gold ($50K - $250K)', apy: '4.00%' },
+    { tier: 'Platinum (> $250K)', apy: '4.75%' },
+  ]
+
+  return (
+    <div className="space-y-6">
+      {/* Status Lookup */}
+      <div className="bg-[#12121a] border border-gray-800 rounded-lg p-6">
+        <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+          <PiggyBank className="w-5 h-5 text-purple-400" /> Savings Account
+        </h3>
+        <form onSubmit={fetchStatus} className="flex items-end gap-3 mb-4">
+          <div className="flex-1 max-w-md">
+            <label className="block text-xs text-gray-400 mb-1">Seller ID</label>
+            <input type="text" className={inputClass} value={sellerId} onChange={e => setSellerId(e.target.value)} placeholder="SLR-..." required />
+          </div>
+          <button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50">
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Get Status'}
+          </button>
+        </form>
+        {error && <p className="text-red-400 text-sm mb-4">Error: {error}</p>}
+        {status && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div className="bg-gray-800/50 rounded-lg p-3">
+              <span className="text-gray-400">Balance</span>
+              <p className="text-white text-xl font-bold">${(status.balance ?? 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-gray-800/50 rounded-lg p-3">
+              <span className="text-gray-400">APY</span>
+              <p className="text-purple-400 text-xl font-bold">{status.apy != null ? `${(status.apy * 100).toFixed(2)}%` : 'N/A'}</p>
+            </div>
+            <div className="bg-gray-800/50 rounded-lg p-3">
+              <span className="text-gray-400">Interest Earned</span>
+              <p className="text-green-400 text-xl font-bold">${(status.interestEarned ?? 0).toLocaleString()}</p>
+            </div>
+            <div className="bg-gray-800/50 rounded-lg p-3">
+              <span className="text-gray-400">Tier</span>
+              <p className="text-white text-xl font-bold">{status.tier ?? 'N/A'}</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* APY Tiers */}
+      <div className="bg-[#12121a] border border-gray-800 rounded-lg p-6">
+        <h3 className="text-sm font-semibold text-white mb-3">APY by Tier</h3>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-gray-500 border-b border-gray-800">
+              <th className="pb-2">Tier</th>
+              <th className="pb-2">APY</th>
+            </tr>
+          </thead>
+          <tbody>
+            {apyTiers.map(t => (
+              <tr key={t.tier} className="border-b border-gray-800/50">
+                <td className="py-2 text-white">{t.tier}</td>
+                <td className="py-2 text-purple-400 font-semibold">{t.apy}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Actions */}
+      <div className="bg-[#12121a] border border-gray-800 rounded-lg p-6">
+        <h3 className="text-sm font-semibold text-white mb-4">Savings Actions</h3>
+        <div className="flex items-end gap-3 flex-wrap">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Action</label>
+            <select className={`${inputClass} w-40`} value={actionForm.action} onChange={e => setActionForm({ ...actionForm, action: e.target.value })}>
+              {['DEPOSIT', 'WITHDRAW', 'PAY_INTEREST'].map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Amount ($)</label>
+            <input type="number" min={0} className={`${inputClass} w-32`} value={actionForm.amount} onChange={e => setActionForm({ ...actionForm, amount: Number(e.target.value) })} />
+          </div>
+          <button onClick={performAction} disabled={actionLoading || !sellerId.trim()} className="bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50">
+            {actionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Execute'}
+          </button>
+        </div>
+        {actionResult && !actionResult.error && (
+          <div className="mt-4 bg-gray-800/50 rounded-lg p-3">
+            <p className="text-green-400 text-sm">Action completed successfully.</p>
+            <pre className="text-xs text-gray-300 mt-2 overflow-x-auto">{JSON.stringify(actionResult, null, 2)}</pre>
+          </div>
+        )}
+        {actionResult?.error && <p className="text-red-400 text-sm mt-4">Error: {actionResult.error}</p>}
+      </div>
+    </div>
+  )
+}
+
+// ---- Tab: Capital (Working Capital / MCA) ----
+function CapitalTab() {
+  const [form, setForm] = useState({
+    sellerId: '',
+    gmv30d: 50000,
+    riskScore: 30,
+    accountAgeDays: 180,
+    action: 'QUALIFY'
+  })
+  const [result, setResult] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  const handleQualify = async (e) => {
+    e.preventDefault()
+    setLoading(true)
+    setError(null)
+    setResult(null)
+    try {
+      const res = await fetch(`${API}/capital`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form)
+      })
+      const data = await safeJson(res)
+      setResult(data.data || data)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const requestAdvance = async () => {
+    if (!form.sellerId.trim()) return
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch(`${API}/capital`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...form, action: 'REQUEST_ADVANCE' })
+      })
+      const data = await safeJson(res)
+      setResult(data.data || data)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Form */}
+      <div className="bg-[#12121a] border border-gray-800 rounded-lg p-6">
+        <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+          <Briefcase className="w-5 h-5 text-cyan-400" /> Working Capital / MCA
+        </h3>
+        <form onSubmit={handleQualify} className="space-y-4">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Seller ID</label>
+            <input type="text" className={inputClass} value={form.sellerId} onChange={e => setForm({ ...form, sellerId: e.target.value })} placeholder="SLR-..." required />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">30-day GMV ($)</label>
+              <input type="number" min={0} className={inputClass} value={form.gmv30d} onChange={e => setForm({ ...form, gmv30d: Number(e.target.value) })} />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Risk Score (0-100)</label>
+              <input type="number" min={0} max={100} className={inputClass} value={form.riskScore} onChange={e => setForm({ ...form, riskScore: Number(e.target.value) })} />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Account Age (days)</label>
+            <input type="number" min={0} className={inputClass} value={form.accountAgeDays} onChange={e => setForm({ ...form, accountAgeDays: Number(e.target.value) })} />
+          </div>
+          <div className="flex gap-3">
+            <button type="submit" disabled={loading} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded-lg transition-colors disabled:opacity-50">
+              {loading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Checking...</span> : 'Check Qualification'}
+            </button>
+            <button type="button" onClick={requestAdvance} disabled={loading || !form.sellerId.trim()} className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white font-medium py-2 rounded-lg transition-colors disabled:opacity-50">
+              Request Advance
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* Result */}
+      <div className="bg-[#12121a] border border-gray-800 rounded-lg p-6">
+        <h3 className="text-lg font-semibold text-white mb-4">Result</h3>
+        {error && <div className="text-red-400 text-sm mb-4">Error: {error}</div>}
+        {!result && !error && <p className="text-gray-500 text-sm">Submit seller details to check qualification.</p>}
+        {result && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              <Badge color={result.qualified ? 'green' : 'red'}>
+                {result.qualified ? 'Qualified' : 'Not Qualified'}
+              </Badge>
+              {result.status && <Badge color="blue">{result.status}</Badge>}
+            </div>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              {result.maxAdvance != null && (
+                <div>
+                  <span className="text-gray-400">Max Advance</span>
+                  <p className="text-white font-semibold">${(result.maxAdvance ?? 0).toLocaleString()}</p>
+                </div>
+              )}
+              {result.factorRate != null && (
+                <div>
+                  <span className="text-gray-400">Factor Rate</span>
+                  <p className="text-white font-semibold">{result.factorRate}</p>
+                </div>
+              )}
+              {result.holdbackRate != null && (
+                <div>
+                  <span className="text-gray-400">Holdback Rate</span>
+                  <p className="text-white font-semibold">{(result.holdbackRate * 100).toFixed(1)}%</p>
+                </div>
+              )}
+              {result.estimatedRepaymentDays != null && (
+                <div>
+                  <span className="text-gray-400">Est. Repayment</span>
+                  <p className="text-white font-semibold">{result.estimatedRepaymentDays} days</p>
+                </div>
+              )}
+            </div>
+            {result.reasoning && (
+              <div>
+                <span className="text-gray-400 text-xs">Reasoning</span>
+                <p className="text-gray-300 text-sm mt-1">{result.reasoning}</p>
+              </div>
+            )}
+            {result.disqualificationReasons && result.disqualificationReasons.length > 0 && (
+              <div>
+                <span className="text-gray-400 text-xs">Disqualification Reasons</span>
+                <ul className="mt-1 space-y-1">
+                  {result.disqualificationReasons.map((r, i) => (
+                    <li key={i} className="text-red-400 text-sm flex items-center gap-2">
+                      <XCircle className="w-3 h-3 flex-shrink-0" /> {r}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---- Tab: Insurance ----
+function InsuranceTab() {
+  const [quoteForm, setQuoteForm] = useState({
+    product: 'CHARGEBACK_PROTECTION',
+    sellerTier: 'Silver',
+    coverageAmount: 10000,
+    action: 'QUOTE'
+  })
+  const [quoteResult, setQuoteResult] = useState(null)
+  const [quoteLoading, setQuoteLoading] = useState(false)
+  const [actionResult, setActionResult] = useState(null)
+  const [actionLoading, setActionLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  const products = [
+    { id: 'CHARGEBACK_PROTECTION', name: 'Chargeback Protection', desc: 'Covers losses from customer chargebacks', icon: ShieldCheck, color: 'text-green-400' },
+    { id: 'SHIPPING_INSURANCE', name: 'Shipping Insurance', desc: 'Covers lost, stolen, or damaged shipments', icon: Shield, color: 'text-blue-400' },
+    { id: 'INVENTORY_PROTECTION', name: 'Inventory Protection', desc: 'Covers inventory loss from disasters or theft', icon: Landmark, color: 'text-amber-400' },
+  ]
+
+  const getQuote = async (e) => {
+    e.preventDefault()
+    setQuoteLoading(true)
+    setError(null)
+    setQuoteResult(null)
+    try {
+      const res = await fetch(`${API}/insurance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(quoteForm)
+      })
+      const data = await safeJson(res)
+      setQuoteResult(data.data || data)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setQuoteLoading(false)
+    }
+  }
+
+  const performAction = async (action) => {
+    setActionLoading(true)
+    setActionResult(null)
+    try {
+      const res = await fetch(`${API}/insurance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...quoteForm, action })
+      })
+      const data = await safeJson(res)
+      setActionResult(data.data || data)
+    } catch (e) {
+      setActionResult({ error: e.message })
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Product Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {products.map(p => (
+          <div
+            key={p.id}
+            onClick={() => setQuoteForm({ ...quoteForm, product: p.id })}
+            className={`bg-[#12121a] border rounded-lg p-4 cursor-pointer transition-colors ${
+              quoteForm.product === p.id ? 'border-blue-500' : 'border-gray-800 hover:border-gray-700'
+            }`}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <p.icon className={`w-5 h-5 ${p.color}`} />
+              <span className="text-sm font-semibold text-white">{p.name}</span>
+            </div>
+            <p className="text-xs text-gray-400">{p.desc}</p>
+            {quoteForm.product === p.id && <Badge color="blue">Selected</Badge>}
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Quote Form */}
+        <div className="bg-[#12121a] border border-gray-800 rounded-lg p-6">
+          <h3 className="text-lg font-semibold text-white mb-4">Get Insurance Quote</h3>
+          <form onSubmit={getQuote} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Seller Tier</label>
+                <select className={inputClass} value={quoteForm.sellerTier} onChange={e => setQuoteForm({ ...quoteForm, sellerTier: e.target.value })}>
+                  {['New', 'Bronze', 'Silver', 'Gold', 'Platinum', 'Enterprise'].map(t => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Coverage Amount ($)</label>
+                <input type="number" min={0} className={inputClass} value={quoteForm.coverageAmount} onChange={e => setQuoteForm({ ...quoteForm, coverageAmount: Number(e.target.value) })} />
+              </div>
+            </div>
+            <button type="submit" disabled={quoteLoading} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded-lg transition-colors disabled:opacity-50">
+              {quoteLoading ? <span className="flex items-center justify-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Getting Quote...</span> : 'Get Quote'}
+            </button>
+            <div className="flex gap-3">
+              <button type="button" onClick={() => performAction('ENROLL')} disabled={actionLoading} className="flex-1 bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 rounded-lg transition-colors disabled:opacity-50">
+                Enroll
+              </button>
+              <button type="button" onClick={() => performAction('CLAIM')} disabled={actionLoading} className="flex-1 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium py-2 rounded-lg transition-colors disabled:opacity-50">
+                File Claim
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* Results */}
+        <div className="bg-[#12121a] border border-gray-800 rounded-lg p-6">
+          <h3 className="text-lg font-semibold text-white mb-4">Quote / Result</h3>
+          {error && <div className="text-red-400 text-sm mb-4">Error: {error}</div>}
+          {!quoteResult && !actionResult && !error && <p className="text-gray-500 text-sm">Select a product and get a quote.</p>}
+          {quoteResult && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                {quoteResult.premium != null && (
+                  <div>
+                    <span className="text-gray-400">Monthly Premium</span>
+                    <p className="text-white font-semibold">${(quoteResult.premium ?? 0).toLocaleString()}</p>
+                  </div>
+                )}
+                {quoteResult.deductible != null && (
+                  <div>
+                    <span className="text-gray-400">Deductible</span>
+                    <p className="text-white font-semibold">${(quoteResult.deductible ?? 0).toLocaleString()}</p>
+                  </div>
+                )}
+                {quoteResult.coverageLimit != null && (
+                  <div>
+                    <span className="text-gray-400">Coverage Limit</span>
+                    <p className="text-white font-semibold">${(quoteResult.coverageLimit ?? 0).toLocaleString()}</p>
+                  </div>
+                )}
+                {quoteResult.annualCost != null && (
+                  <div>
+                    <span className="text-gray-400">Annual Cost</span>
+                    <p className="text-white font-semibold">${(quoteResult.annualCost ?? 0).toLocaleString()}</p>
+                  </div>
+                )}
+              </div>
+              {quoteResult.reasoning && (
+                <div>
+                  <span className="text-gray-400 text-xs">Details</span>
+                  <p className="text-gray-300 text-sm mt-1">{quoteResult.reasoning}</p>
+                </div>
+              )}
+            </div>
+          )}
+          {actionResult && !actionResult.error && (
+            <div className="mt-4 bg-gray-800/50 rounded-lg p-3">
+              <p className="text-green-400 text-sm">Action completed.</p>
+              <pre className="text-xs text-gray-300 mt-2 overflow-x-auto">{JSON.stringify(actionResult, null, 2)}</pre>
+            </div>
+          )}
+          {actionResult?.error && <p className="text-red-400 text-sm mt-4">Error: {actionResult.error}</p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ---- Seller Financial Profile ----
 function SellerProfile() {
   const [sellerId, setSellerId] = useState('')
@@ -675,8 +1344,6 @@ function SellerProfile() {
       setForecastLoading(false)
     }
   }
-
-  const inputClass = 'bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500'
 
   return (
     <div className="bg-[#12121a] border border-gray-800 rounded-lg p-6">
@@ -779,7 +1446,7 @@ function SellerProfile() {
 }
 
 // ---- Main Page ----
-const TABS = ['Overview', 'Underwriting', 'Payouts', 'Loans']
+const TABS = ['Overview', 'Underwriting', 'Payouts', 'Loans', 'Wallet', 'Savings', 'Capital', 'Insurance']
 
 export default function FinancialPlatform() {
   const [activeTab, setActiveTab] = useState('Overview')
@@ -789,16 +1456,16 @@ export default function FinancialPlatform() {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-white">Financial Platform</h1>
-        <p className="text-gray-400 mt-1">Credit underwriting, payout gating, cash flow forecasting, and loan servicing</p>
+        <p className="text-gray-400 mt-1">Credit underwriting, payout gating, cash flow forecasting, loan servicing, wallet, savings, capital, and insurance</p>
       </div>
 
       {/* Tab Navigation */}
-      <div className="flex gap-1 border-b border-gray-800">
+      <div className="flex gap-1 border-b border-gray-800 overflow-x-auto">
         {TABS.map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap ${
               activeTab === tab
                 ? 'border-blue-500 text-white'
                 : 'border-transparent text-gray-400 hover:text-gray-200'
@@ -814,6 +1481,10 @@ export default function FinancialPlatform() {
       {activeTab === 'Underwriting' && <UnderwritingTab />}
       {activeTab === 'Payouts' && <PayoutsTab />}
       {activeTab === 'Loans' && <LoansTab />}
+      {activeTab === 'Wallet' && <WalletTab />}
+      {activeTab === 'Savings' && <SavingsTab />}
+      {activeTab === 'Capital' && <CapitalTab />}
+      {activeTab === 'Insurance' && <InsuranceTab />}
 
       {/* Seller Financial Profile — always visible at the bottom */}
       <SellerProfile />
