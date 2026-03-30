@@ -60,6 +60,7 @@ import PaymentProcessing from './pages/PaymentProcessing'
 import BillingFees from './pages/BillingFees'
 import Invoicing from './pages/Invoicing'
 import FinancialPlatform from './pages/FinancialPlatform'
+import DevTools from './pages/DevTools'
 
 const API_BASE = '/api'
 // Connect directly to backend WebSocket to avoid Vite HMR proxy conflict
@@ -253,6 +254,7 @@ function App() {
           <Route path="/financial/billing" element={<BillingFees />} />
           <Route path="/financial/invoicing" element={<Invoicing />} />
           <Route path="/financial-platform" element={<FinancialPlatform />} />
+          <Route path="/dev-tools" element={<DevTools />} />
         </Routes>
       </Layout>
     </BrowserRouter>

@@ -388,6 +388,9 @@ import returnsAbuseRouter, { setReturnsAbuseAgent } from '../services/autonomous
 import onboardingModelRouter from '../services/ml-platform/inference/onboarding-endpoints.js';
 import streamingStatsRouter from '../streaming/onboarding-stats-endpoint.js';
 import featureStatsRouter from '../streaming/feature-stats-endpoint.js';
+import swaggerUi from 'swagger-ui-express';
+import { swaggerSpec } from '../api-docs/swagger-config.js';
+import devToolsRouter from '../services/dev-tools/index.js';
 
 const app = express();
 const server = createServer(app);
@@ -900,6 +903,15 @@ app.use('/api/ml/training', mlTrainingRouter);
 // Streaming + Feature Store Stats
 app.use('/api/streaming', streamingStatsRouter);
 app.use('/api/features', featureStatsRouter);
+
+// Swagger API docs
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'AgenticAI Platform API Docs'
+}));
+
+// Dev Tools
+app.use('/api/dev', devToolsRouter);
 
 // Decision Engine
 app.use('/api/rules', rulesRouter);

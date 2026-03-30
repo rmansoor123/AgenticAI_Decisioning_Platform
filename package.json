@@ -12,10 +12,16 @@
     "test:quick": "USE_LLM=false node backend/agents/core/__tests__/run-all-tests.js --quick",
     "test:golden": "USE_LLM=false node backend/agents/core/__tests__/golden-test-suite.test.js",
     "test:analytics": "USE_LLM=false node backend/agents/core/__tests__/analytics-backend.test.js",
-    "test:coverage": "cd backend && npm run test:coverage"
+    "test:coverage": "cd backend && npm run test:coverage",
+    "test:vitest": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
+    "@opentelemetry/auto-instrumentations-node": "^0.72.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.214.0",
+    "@opentelemetry/sdk-node": "^0.214.0",
     "kafkajs": "^2.2.4",
+    "litellm": "^0.12.0",
     "lucide-react": "^0.563.0",
     "pg": "^8.20.0",
     "promptlayer": "^1.2.2",
@@ -23,7 +29,10 @@
     "react-dom": "^19.2.0",
     "react-force-graph-2d": "^1.29.0",
     "react-router-dom": "^7.13.0",
-    "recharts": "^3.7.0"
+    "recharts": "^3.7.0",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
+    "vitest": "^4.1.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

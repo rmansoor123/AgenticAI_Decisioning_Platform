@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom'
 import {
   Shield, Activity, Database, Brain, Cog, FlaskConical,
   Home, RefreshCw, Menu, X, ChevronDown, Server, Bot, Users, ShieldAlert, Eye, BookOpen, FolderOpen,
-  Settings, Package, DollarSign, UserCog, Truck, RotateCcw, Layers, ShieldCheck, Tag
+  Settings, Package, DollarSign, UserCog, Truck, RotateCcw, Layers, ShieldCheck, Tag, Wrench
 } from 'lucide-react'
 import Chatbot from './Chatbot'
 
@@ -127,7 +127,8 @@ export default function Layout({ children, wsConnected }) {
         { name: 'Observability', href: '/observability' },
         { name: 'Autonomous Agents', href: '/autonomous' },
         { name: 'Prompt Library', href: '/prompt-library' },
-        { name: 'ML Training', href: '/ml/training' }
+        { name: 'ML Training', href: '/ml/training' },
+        { name: 'Developer Tools', href: '/dev-tools' }
       ]
     }
   ]
