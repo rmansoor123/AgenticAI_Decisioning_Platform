@@ -377,6 +377,7 @@ import behavioralAnalyticsRouter from '../services/business/behavioral-analytics
 import buyerTrustRouter from '../services/business/buyer-trust/index.js';
 import policyEnforcementRouter from '../services/business/policy-enforcement/index.js';
 import sellerSegmentationRouter from '../services/business/seller-segmentation/index.js';
+import financialPlatformRouter from '../services/financial-platform/api/financial-routes.js';
 import billingRouter from '../services/business/billing/index.js';
 import paymentWorkflowRouter from '../services/business/payment-processing-workflow/index.js';
 import invoicingRouter from '../services/business/invoicing/index.js';
@@ -876,6 +877,7 @@ app.use('/api/buyer-trust', buyerTrustRouter);
 app.use('/api/policy', policyEnforcementRouter);
 app.use('/api/seller-tools/segmentation', sellerSegmentationRouter);
 app.use('/api/financial/billing', billingRouter);
+app.use('/api/financial-platform', financialPlatformRouter);
 app.use('/api/financial/payments', paymentWorkflowRouter);
 app.use('/api/financial/invoices', invoicingRouter);
 
