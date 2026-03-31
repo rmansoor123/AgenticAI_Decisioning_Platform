@@ -107,7 +107,8 @@ export default function Layout({ children, wsConnected }) {
         { name: 'Technology Reference', href: '/education' },
         { name: 'Architecture Guide', href: '/education/architecture' },
         { name: 'Platform Roadmap', href: '/education/roadmap' },
-        { name: 'Industry Tech Stacks', href: '/education/tech-stacks' }
+        { name: 'Industry Tech Stacks', href: '/education/tech-stacks' },
+        { name: 'AI Safety & Risks', href: '/education/ai-safety' }
       ]
     },
     {
