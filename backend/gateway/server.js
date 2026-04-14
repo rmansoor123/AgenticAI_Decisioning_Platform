@@ -342,6 +342,8 @@ import sellerShippingRouter from '../services/business/seller-shipping/index.js'
 import dataIngestionRouter from '../services/data-platform/ingestion/index.js';
 import dataCatalogRouter from '../services/data-platform/catalog/index.js';
 import queryFederationRouter from '../services/data-platform/query-federation/index.js';
+import connectorRoutes from '../services/data-platform/connectors/connector-routes.js';
+import { seedConnectors } from '../services/data-platform/connectors/seed-connectors.js';
 import mlInferenceRouter from '../services/ml-platform/inference/index.js';
 import mlGovernanceRouter from '../services/ml-platform/governance/index.js';
 import mlMonitoringRouter from '../services/ml-platform/monitoring/index.js';
@@ -893,6 +895,9 @@ app.use('/api/data/query', queryFederationRouter);
 import dataAgentRouter from '../services/data-platform/data-agent-router.js';
 app.use('/api/data/agent', dataAgentRouter);
 
+// Data Connectors
+app.use('/api/data-platform/connectors', connectorRoutes);
+
 // ML Platform
 app.use('/api/ml/inference', mlInferenceRouter);
 app.use('/api/ml/inference', onboardingModelRouter);
@@ -1314,6 +1319,9 @@ server.listen(PORT, () => {
 ║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
   `);
+
+  // Seed data connectors (fire-and-forget)
+  seedConnectors().catch(err => console.warn('Connector seeding failed:', err.message));
 
   // Fire-and-forget: sync local prompts to Langfuse for version management
   import('../agents/core/langfuse-prompt-manager.js')
