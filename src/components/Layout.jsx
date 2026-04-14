@@ -129,7 +129,8 @@ export default function Layout({ children, wsConnected }) {
         { name: 'Autonomous Agents', href: '/autonomous' },
         { name: 'Prompt Library', href: '/prompt-library' },
         { name: 'ML Training', href: '/ml/training' },
-        { name: 'Developer Tools', href: '/dev-tools' }
+        { name: 'Developer Tools', href: '/dev-tools' },
+        { name: 'Data Connectors', href: '/data-connectors' }
       ]
     }
   ]

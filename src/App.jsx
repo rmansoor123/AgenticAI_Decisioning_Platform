@@ -62,6 +62,7 @@ import Invoicing from './pages/Invoicing'
 import FinancialPlatform from './pages/FinancialPlatform'
 import DevTools from './pages/DevTools'
 import AISafetyRisks from './pages/AISafetyRisks'
+import DataConnectors from './pages/DataConnectors'
 
 const API_BASE = '/api'
 // Connect directly to backend WebSocket to avoid Vite HMR proxy conflict
@@ -257,6 +258,7 @@ function App() {
           <Route path="/financial-platform" element={<FinancialPlatform />} />
           <Route path="/dev-tools" element={<DevTools />} />
           <Route path="/education/ai-safety" element={<AISafetyRisks />} />
+          <Route path="/data-connectors" element={<DataConnectors />} />
         </Routes>
       </Layout>
     </BrowserRouter>
