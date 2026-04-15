@@ -152,7 +152,89 @@ router.get('/rules', async (req, res) => {
   }
 });
 
-// GET /ledger/:sellerId — seller ledger entries
+// Enhanced Ledger endpoints
+router.post('/ledger/record', async (req, res) => {
+  try {
+    const ledger = getLedger();
+    const result = await ledger.record(req.body);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/ledger/reverse', async (req, res) => {
+  try {
+    const ledger = getLedger();
+    const result = await ledger.reverse(req.body.entryId, req.body.reason);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/ledger/hold', async (req, res) => {
+  try {
+    const ledger = getLedger();
+    const result = await ledger.placeHold(req.body.sellerId, req.body.amount, req.body.reason);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/ledger/release', async (req, res) => {
+  try {
+    const ledger = getLedger();
+    const result = await ledger.releaseHold(req.body.sellerId, req.body.amount, req.body.reason);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/ledger/reconcile', async (req, res) => {
+  try {
+    const ledger = getLedger();
+    const result = await ledger.reconcile();
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/ledger/types', (req, res) => {
+  const ledger = getLedger();
+  res.json({
+    success: true,
+    data: {
+      transactionTypes: ledger.getTransactionTypes(),
+      accountTypes: ledger.getAccountTypes()
+    }
+  });
+});
+
+router.get('/ledger/:sellerId/balances', async (req, res) => {
+  try {
+    const ledger = getLedger();
+    const result = await ledger.getSellerBalances(req.params.sellerId);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/ledger/:sellerId/entries', async (req, res) => {
+  try {
+    const ledger = getLedger();
+    const entries = await ledger.getSellerLedger(req.params.sellerId, parseInt(req.query.limit) || 50);
+    res.json({ success: true, data: entries });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /ledger/:sellerId — seller ledger entries (legacy, kept for backward compatibility)
 router.get('/ledger/:sellerId', async (req, res) => {
   try {
     const ledger = getLedger();

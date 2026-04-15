@@ -380,6 +380,8 @@ import buyerTrustRouter from '../services/business/buyer-trust/index.js';
 import policyEnforcementRouter from '../services/business/policy-enforcement/index.js';
 import sellerSegmentationRouter from '../services/business/seller-segmentation/index.js';
 import financialPlatformRouter from '../services/financial-platform/api/financial-routes.js';
+import reliabilityRoutes from '../services/financial-platform/api/reliability-routes.js';
+import { getPlatformReliability } from '../services/financial-platform/services/platform-reliability.js';
 import billingRouter from '../services/business/billing/index.js';
 import paymentWorkflowRouter from '../services/business/payment-processing-workflow/index.js';
 import invoicingRouter from '../services/business/invoicing/index.js';
@@ -404,7 +406,7 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// Request logging
+// Request logging + SLA tracking
 app.use((req, res, next) => {
   const start = Date.now();
   res.on('finish', () => {
@@ -412,6 +414,12 @@ app.use((req, res, next) => {
     if (process.env.NODE_ENV !== 'production') {
       console.log(`${req.method} ${req.path} ${res.statusCode} ${duration}ms`);
     }
+    try {
+      getPlatformReliability().recordRequest({
+        endpoint: req.path, method: req.method,
+        statusCode: res.statusCode, latencyMs: duration
+      });
+    } catch (_) {}
   });
   next();
 });
@@ -883,6 +891,7 @@ app.use('/api/policy', policyEnforcementRouter);
 app.use('/api/seller-tools/segmentation', sellerSegmentationRouter);
 app.use('/api/financial/billing', billingRouter);
 app.use('/api/financial-platform', financialPlatformRouter);
+app.use('/api/platform/reliability', reliabilityRoutes);
 app.use('/api/financial/payments', paymentWorkflowRouter);
 app.use('/api/financial/invoices', invoicingRouter);
 

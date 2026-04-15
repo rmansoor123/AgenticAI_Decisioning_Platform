@@ -130,7 +130,9 @@ export default function Layout({ children, wsConnected }) {
         { name: 'Prompt Library', href: '/prompt-library' },
         { name: 'ML Training', href: '/ml/training' },
         { name: 'Developer Tools', href: '/dev-tools' },
-        { name: 'Data Connectors', href: '/data-connectors' }
+        { name: 'Data Connectors', href: '/data-connectors' },
+        { name: 'Platform Reliability', href: '/platform/reliability' },
+        { name: 'Developer Portal', href: '/developer-portal' }
       ]
     }
   ]
