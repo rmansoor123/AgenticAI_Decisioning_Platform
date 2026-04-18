@@ -11,6 +11,11 @@ import { getTaskGenerator } from '../environments/task-generator.js';
 import { getRewardSystem } from '../environments/reward-system.js';
 import { getEvalFramework } from '../evaluation/eval-framework.js';
 import { getDatasetRegistry } from '../datasets/dataset-registry.js';
+import { getRLTrainer } from '../evaluation/rl-trainer.js';
+import { getBrowserEnvironment } from '../environments/browser-environment.js';
+import { getMCPEnvironment } from '../environments/mcp-environment.js';
+import { getLiveDataEnvironment } from '../environments/live-data-environment.js';
+import { getDialogueEnvironment } from '../environments/dialogue-environment.js';
 
 const router = express.Router();
 
@@ -123,6 +128,69 @@ router.post('/datasets', (req, res) => {
   catch (e) { res.status(400).json({ success: false, error: e.message }); }
 });
 
+// --- RL Training ---
+router.post('/rl/train', async (req, res) => {
+  try { res.json({ success: true, data: await getRLTrainer().trainFromTrajectories(req.body.trajectories || [], req.body.domain) }); }
+  catch (e) { res.status(400).json({ success: false, error: e.message }); }
+});
+
+router.post('/rl/train-dpo', async (req, res) => {
+  try { res.json({ success: true, data: await getRLTrainer().trainDPO(req.body.preferred, req.body.rejected, req.body.domain) }); }
+  catch (e) { res.status(400).json({ success: false, error: e.message }); }
+});
+
+router.get('/rl/policy/:domain', (req, res) => {
+  const policy = getRLTrainer().getPolicy(req.params.domain);
+  res.json({ success: true, data: policy });
+});
+
+// --- Browser Environments ---
+router.get('/browser/workflows', (req, res) => {
+  res.json({ success: true, data: getBrowserEnvironment().listWorkflows() });
+});
+
+router.post('/browser/run/:workflowId', async (req, res) => {
+  try { res.json({ success: true, data: await getBrowserEnvironment().runWorkflow(req.params.workflowId) }); }
+  catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// --- MCP Environments ---
+router.get('/mcp/registries', (req, res) => {
+  res.json({ success: true, data: getMCPEnvironment().listRegistries() });
+});
+
+router.get('/mcp/registries/:registryId', (req, res) => {
+  const reg = getMCPEnvironment().getRegistry(req.params.registryId);
+  if (!reg) return res.status(404).json({ success: false, error: 'Registry not found' });
+  res.json({ success: true, data: reg });
+});
+
+router.post('/mcp/run/:registryId', async (req, res) => {
+  try { res.json({ success: true, data: await getMCPEnvironment().runEpisode(req.params.registryId, req.body.task || 'Evaluate this seller application') }); }
+  catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// --- Live Data Environments ---
+router.get('/live-data/state/:sellerId', async (req, res) => {
+  try { res.json({ success: true, data: await getLiveDataEnvironment().createStateFromSeller(req.params.sellerId) }); }
+  catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+router.get('/live-data/batch', async (req, res) => {
+  try { res.json({ success: true, data: await getLiveDataEnvironment().createBatchStates(parseInt(req.query.count) || 10) }); }
+  catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// --- Dialogue Environments ---
+router.get('/dialogue/scenarios', (req, res) => {
+  res.json({ success: true, data: getDialogueEnvironment().listScenarios() });
+});
+
+router.post('/dialogue/run/:scenarioId', async (req, res) => {
+  try { res.json({ success: true, data: await getDialogueEnvironment().runDialogue(req.params.scenarioId) }); }
+  catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
 // --- Stats ---
 router.get('/stats', (req, res) => {
   res.json({
@@ -133,7 +201,12 @@ router.get('/stats', (req, res) => {
       tasks: getTaskGenerator().getStats(),
       rewards: getRewardSystem().getStats(),
       evaluation: getEvalFramework().getStats(),
-      datasets: getDatasetRegistry().getStats()
+      datasets: getDatasetRegistry().getStats(),
+      rlTrainer: getRLTrainer().getStats(),
+      browserEnvironment: getBrowserEnvironment().getStats(),
+      mcpEnvironment: getMCPEnvironment().getStats(),
+      liveDataEnvironment: getLiveDataEnvironment().getStats(),
+      dialogueEnvironment: getDialogueEnvironment().getStats()
     }
   });
 });
