@@ -1059,6 +1059,21 @@ app.use('/api/agents/profile-mutation', profileMutationRouter);
 app.use('/api/agents/returns-abuse', returnsAbuseRouter);
 app.use('/api/agents/rule-optimization', ruleOptimizationRouter);
 
+// Training Lab
+import trainingLabRoutes from '../services/training-lab/api/training-lab-routes.js';
+app.use('/api/training-lab', trainingLabRoutes);
+
+// Seed default RL environments
+try {
+  const { getEnvironmentBuilder } = await import('../services/training-lab/environments/environment-builder.js');
+  const builder = getEnvironmentBuilder();
+  builder.create({ envId: 'ENV-FRAUD-INVESTIGATION', name: 'Fraud Investigation', domain: 'fraud_investigation', difficulty: 'MEDIUM', description: 'Investigate potential fraud cases — gather evidence, assess risk, make decisions' });
+  builder.create({ envId: 'ENV-CREDIT-UNDERWRITING', name: 'Credit Underwriting', domain: 'credit_underwriting', difficulty: 'MEDIUM', description: 'Evaluate credit applications — check financials, assess risk, set credit limits' });
+  builder.create({ envId: 'ENV-SELLER-ONBOARDING', name: 'Seller Onboarding', domain: 'seller_onboarding', difficulty: 'EASY', description: 'Process seller applications — verify identity, check compliance, approve or reject' });
+  builder.create({ envId: 'ENV-PAYMENT-PROCESSING', name: 'Payment Processing', domain: 'payment_processing', difficulty: 'HARD', description: 'Authorize payments — check fraud signals, apply rules, decide in real-time' });
+  console.log('Seeded 4 RL environments');
+} catch (e) { console.warn('RL environment seeding failed:', e.message); }
+
 // ============================================================================
 // METRICS & DASHBOARD ENDPOINTS
 // ============================================================================

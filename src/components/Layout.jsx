@@ -112,6 +112,18 @@ export default function Layout({ children, wsConnected }) {
       ]
     },
     {
+      name: 'AI Training Lab',
+      href: '/training-lab',
+      icon: FlaskConical,
+      color: 'text-indigo-400',
+      children: [
+        { name: 'Training Pipeline', href: '/training-lab' },
+        { name: 'RL Environments', href: '/training-lab/environments' },
+        { name: 'Evaluation', href: '/training-lab/evaluation' },
+        { name: 'Datasets', href: '/training-lab/datasets' }
+      ]
+    },
+    {
       name: 'Platform',
       href: '/data',
       icon: Layers,
