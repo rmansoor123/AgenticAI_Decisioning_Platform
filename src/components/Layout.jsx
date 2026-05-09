@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom'
 import {
   Shield, Activity, Database, Brain, Cog, FlaskConical,
   Home, RefreshCw, Menu, X, ChevronDown, Server, Bot, Users, ShieldAlert, Eye, BookOpen, FolderOpen,
-  Settings, Package, DollarSign, UserCog, Truck, RotateCcw, Layers, ShieldCheck, Tag, Wrench
+  Settings, Package, DollarSign, UserCog, Truck, RotateCcw, Layers, ShieldCheck, Tag, Wrench, TrendingUp
 } from 'lucide-react'
 import Chatbot from './Chatbot'
 
@@ -84,6 +84,15 @@ export default function Layout({ children, wsConnected }) {
       color: 'text-teal-400',
       children: [
         { name: 'Seller Segmentation', href: '/seller-tools/segmentation' }
+      ]
+    },
+    {
+      name: 'Growth & Engagement',
+      href: '/growth',
+      icon: TrendingUp,
+      color: 'text-green-400',
+      children: [
+        { name: 'Growth Platform', href: '/growth' }
       ]
     },
     {

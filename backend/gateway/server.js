@@ -1059,6 +1059,10 @@ app.use('/api/agents/profile-mutation', profileMutationRouter);
 app.use('/api/agents/returns-abuse', returnsAbuseRouter);
 app.use('/api/agents/rule-optimization', ruleOptimizationRouter);
 
+// Growth & Engagement Platform
+import growthRoutes from '../services/growth-platform/api/growth-routes.js';
+app.use('/api/growth', growthRoutes);
+
 // Training Lab
 import trainingLabRoutes from '../services/training-lab/api/training-lab-routes.js';
 app.use('/api/training-lab', trainingLabRoutes);

@@ -66,6 +66,7 @@ import DataConnectors from './pages/DataConnectors'
 import PlatformReliability from './pages/PlatformReliability'
 import DeveloperPortal from './pages/DeveloperPortal'
 import TrainingLab from './pages/TrainingLab'
+import GrowthPlatform from './pages/GrowthPlatform'
 
 const API_BASE = '/api'
 // Connect directly to backend WebSocket to avoid Vite HMR proxy conflict
@@ -266,6 +267,7 @@ function App() {
           <Route path="/developer-portal" element={<DeveloperPortal />} />
           <Route path="/training-lab" element={<TrainingLab />} />
           <Route path="/training-lab/*" element={<TrainingLab />} />
+          <Route path="/growth" element={<GrowthPlatform />} />
         </Routes>
       </Layout>
     </BrowserRouter>
