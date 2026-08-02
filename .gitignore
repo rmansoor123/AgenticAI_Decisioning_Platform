@@ -23,6 +23,19 @@ __pycache__/
 *.egg-info/
 *.egg
 
+# Test coverage output
+coverage
+backend/coverage
+
+# Local databases (Postgres is the production backend)
+*.db
+*.db-shm
+*.db-wal
+
+# Runtime data caches (OFAC SDN list, local SQLite stores)
+/data/
+/backend/data/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
