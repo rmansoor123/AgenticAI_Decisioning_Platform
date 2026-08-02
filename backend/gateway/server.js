@@ -357,6 +357,7 @@ import promptsRouter from '../services/prompts/index.js';
 import feedbackRouter from '../services/feedback/index.js';
 import { getEvalTracker } from '../agents/core/eval-tracker.js';
 import riskProfileRouter from '../services/risk-profile/index.js';
+import safetyChecklistRouter from '../services/safety-checklist/index.js';
 import observabilityRouter from '../services/observability/index.js';
 import analyticsRouter from '../services/analytics/index.js';
 import caseQueueRouter from '../services/case-queue/index.js';
@@ -1015,6 +1016,9 @@ app.get('/api/agents/adversarial/:executionId', (req, res) => {
 
 // Risk Profile
 app.use('/api/risk-profile', riskProfileRouter);
+
+// Safety Checklist (AI Safety page data source)
+app.use('/api/safety-checklist', safetyChecklistRouter);
 
 // Observability
 app.use('/api/observability', observabilityRouter);

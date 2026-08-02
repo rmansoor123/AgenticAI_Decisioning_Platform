@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   ShieldAlert, ChevronDown, ChevronRight, CheckCircle, AlertTriangle, XCircle,
-  Brain, Scale, AlertOctagon, Shield, Bot, Landmark, BookOpen, ClipboardCheck
+  Brain, Scale, AlertOctagon, Shield, Bot, Landmark, BookOpen, ClipboardCheck, Loader2
 } from 'lucide-react'
+
+const API_BASE = '/api'
 
 const sectionIcons = [ShieldAlert, Scale, AlertOctagon, Shield, Bot, Landmark, BookOpen, ClipboardCheck]
 
@@ -490,7 +492,7 @@ function Section7() {
   )
 }
 
-function ChecklistItem({ status, label }) {
+function ChecklistItem({ status, label, note }) {
   const icons = {
     done: <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />,
     partial: <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />,
@@ -503,87 +505,83 @@ function ChecklistItem({ status, label }) {
   }
 
   return (
-    <div className="flex items-start gap-3">
+    <div className="flex items-start gap-3" title={note || undefined}>
       {icons[status]}
-      <span className={`text-sm ${colors[status]}`}>{label}</span>
+      <div className="flex-1">
+        <span className={`text-sm ${colors[status]}`}>{label}</span>
+        {note && (
+          <div className="text-[11px] text-gray-500 font-mono mt-0.5 leading-tight">{note}</div>
+        )}
+      </div>
     </div>
   )
 }
 
 function Section8() {
-  const groups = [
-    {
-      title: 'Decision Safety',
-      items: [
-        { status: 'done', label: 'Policy engine overrides LLM on every decision' },
-        { status: 'done', label: 'Judge review for REJECT/BLOCK decisions' },
-        { status: 'done', label: 'Hardcoded fallback when LLM unavailable' },
-        { status: 'done', label: 'Human review queue (case queue) for uncertain decisions' },
-        { status: 'done', label: 'Score decay prevents permanent stigma' },
-        { status: 'partial', label: 'Prompt injection detection (basic input sanitization only)' },
-        { status: 'not-started', label: 'Adversarial testing of agent reasoning' },
-        { status: 'not-started', label: 'Seller appeal mechanism' },
-        { status: 'not-started', label: 'Bias detection and fairness metrics' }
-      ]
-    },
-    {
-      title: 'Transparency',
-      items: [
-        { status: 'done', label: 'SHAP-like feature contributions for ML' },
-        { status: 'done', label: 'Full chain of thought logged (Langfuse)' },
-        { status: 'done', label: 'Decision audit trail (every decision persisted)' },
-        { status: 'partial', label: 'Explainable decisions (scores visible, but reasoning not always clear)' },
-        { status: 'not-started', label: 'Seller-facing decision explanations' },
-        { status: 'not-started', label: 'Transparency reports (decision rates by segment)' }
-      ]
-    },
-    {
-      title: 'Data & Privacy',
-      items: [
-        { status: 'done', label: 'PII not in application logs' },
-        { status: 'done', label: 'Database access only through factories' },
-        { status: 'partial', label: 'Data retention policies (score decay, but no hard deletion)' },
-        { status: 'not-started', label: 'Right to deletion (GDPR Article 17)' },
-        { status: 'not-started', label: 'Data anonymization for training' },
-        { status: 'not-started', label: 'Consent management' }
-      ]
-    },
-    {
-      title: 'Monitoring & Response',
-      items: [
-        { status: 'done', label: 'Langfuse observability (traces, metrics)' },
-        { status: 'done', label: 'Prediction drift detection (PSI)' },
-        { status: 'done', label: 'Segment trend alerts (tier drops, score decay)' },
-        { status: 'partial', label: 'Model performance monitoring (basic, not automated)' },
-        { status: 'not-started', label: 'Automated bias monitoring' },
-        { status: 'not-started', label: 'Incident response playbook' },
-        { status: 'not-started', label: 'Regular fairness audits' }
-      ]
-    }
-  ]
+  const [groups, setGroups] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch(`${API_BASE}/safety-checklist`)
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.json()
+      })
+      .then(body => {
+        if (cancelled) return
+        setGroups(body.groups || [])
+        setLoading(false)
+      })
+      .catch(err => {
+        if (cancelled) return
+        setError(err.message)
+        setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [])
 
   return (
     <div className="text-sm leading-relaxed">
       <p className="text-gray-400 mt-4 mb-6">
         Actionable checklist for production readiness. Items are grouped by domain and marked by current status.
+        Data is sourced live from <span className="font-mono text-gray-300">/api/safety-checklist</span>.
       </p>
       <div className="flex items-center gap-6 mb-6 text-xs text-gray-400">
         <div className="flex items-center gap-2"><CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> Done</div>
         <div className="flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> Partial</div>
         <div className="flex items-center gap-2"><XCircle className="w-3.5 h-3.5 text-red-400" /> Not Started</div>
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {groups.map((group, i) => (
-          <div key={i} className="bg-[#0a0a12] border border-gray-800/60 rounded-lg p-5">
-            <h4 className="text-sm font-semibold text-white mb-4">{group.title}</h4>
-            <div className="space-y-3">
-              {group.items.map((item, j) => (
-                <ChecklistItem key={j} status={item.status} label={item.label} />
-              ))}
+      {loading && (
+        <div className="flex items-center gap-2 text-sm text-gray-400 py-8 justify-center">
+          <Loader2 className="w-4 h-4 animate-spin" /> Loading checklist…
+        </div>
+      )}
+      {error && (
+        <div className="bg-red-500/5 border border-red-500/30 rounded-lg p-4 text-sm text-red-300">
+          Failed to load checklist: {error}
+        </div>
+      )}
+      {!loading && !error && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {groups.map((group) => (
+            <div key={group.title} className="bg-[#0a0a12] border border-gray-800/60 rounded-lg p-5">
+              <h4 className="text-sm font-semibold text-white mb-4">{group.title}</h4>
+              <div className="space-y-3">
+                {group.items.map((item) => (
+                  <ChecklistItem
+                    key={item.itemId}
+                    status={item.status}
+                    label={item.label}
+                    note={item.note}
+                  />
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

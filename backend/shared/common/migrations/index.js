@@ -15,6 +15,7 @@ import agentFeedback from './009-agent-feedback.js';
 import agentEvents from './010-agent-events.js';
 import platformUpgrade from './011-platform-upgrade.js';
 import lifecycleTables from './012-lifecycle-tables.js';
+import safetyChecklist from './013-safety-checklist.js';
 
 const migrations = [
   { version: '001', name: 'initial-schema', migration: initialSchema },
@@ -28,7 +29,8 @@ const migrations = [
   { version: '009', name: 'agent-feedback', migration: agentFeedback },
   { version: '010', name: 'agent-events', migration: agentEvents },
   { version: '011', name: 'platform-upgrade', migration: platformUpgrade },
-  { version: '012', name: 'lifecycle-tables', migration: lifecycleTables }
+  { version: '012', name: 'lifecycle-tables', migration: lifecycleTables },
+  { version: '013', name: 'safety-checklist', migration: safetyChecklist }
 ];
 
 /**

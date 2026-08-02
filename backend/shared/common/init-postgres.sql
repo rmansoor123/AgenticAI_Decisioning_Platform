@@ -391,6 +391,14 @@ CREATE TABLE IF NOT EXISTS metrics_history (
     updated_at TIMESTAMPTZ
 );
 
+CREATE TABLE IF NOT EXISTS safety_checklist (
+    item_id TEXT PRIMARY KEY,
+    data JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_safety_checklist_group ON safety_checklist ((data->>'groupOrder'));
+
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version TEXT PRIMARY KEY,
     applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

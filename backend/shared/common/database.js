@@ -211,7 +211,8 @@ function getIdField(table) {
     experiment_events: 'event_id',
     data_profiles: 'profile_id',
     model_training_runs: 'run_id',
-    dead_letter_queue: 'id'
+    dead_letter_queue: 'id',
+    safety_checklist: 'item_id'
   };
   return idFields[table] || 'id';
 }
